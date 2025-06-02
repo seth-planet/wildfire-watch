@@ -9,14 +9,16 @@ The GPIO Trigger Service controls your water pump and sprinkler system. It's the
 - ⏱️ **Manages timing** - Runs pump for appropriate duration
 - 🔄 **Handles refill** - Automatically refills water reservoir
 - 🛡️ **Prevents damage** - Protects pump from running dry
+- 📊 **Monitors safety** - Checks reservoir level and line pressure
 
 ## Why This Matters
 
 This service ensures your sprinkler system activates reliably when fire is detected, while preventing costly damage from:
 - Running pumps without water
 - Engine damage from improper shutdown
-- Reservoir depletion
-- False activations
+- Reservoir depletion or overflow
+- Dry pump operation from leaks
+- False activations during refill
 
 ## Safety First! ⚠️
 
@@ -36,24 +38,27 @@ When fire is detected, the system:
 1. Opens main water valve
 2. Opens priming valve (bleeds air)
 3. Starts pump engine
-4. Monitors for continued fire
-5. Shuts down safely when fire is gone
-6. Refills reservoir from well/source
+4. Runs with priming valve open for 3 minutes
+5. Closes priming valve for full pressure
+6. Monitors for continued fire
+7. Checks line pressure (if sensor installed)
+8. Shuts down safely when fire is gone
+9. Refills reservoir from well/source
+10. Monitors reservoir level (if sensor installed)
 
 ### What You'll See
 
 Normal operation logs:
 ```
+[INFO] Event: pump_sequence_start
 [INFO] Event: valve_opened, State: {'MAIN_VALVE': True}
 [INFO] Event: priming_started, State: {'PRIMING_VALVE': True}
 [INFO] Event: engine_start_sequence
-[INFO] Event: ignition_on, State: {'IGN_ON': True}
 [INFO] Event: engine_running
-[INFO] Engine running with priming valve open for air removal
-[INFO] Priming duration complete - closing bleed valve
 [INFO] Event: priming_complete, State: {'PRIMING_VALVE': False}
-[INFO] Event: rpm_reduced
 [INFO] Event: shutdown_initiated
+[INFO] Event: refill_started
+[INFO] Event: refill_complete_float_switch (or refill_complete_timer)
 ```
 
 ## Hardware Connections
@@ -62,6 +67,7 @@ Normal operation logs:
 
 | Function | Default Pin | Wire Color (Suggested) | Description |
 |----------|------------|------------------------|-------------|
+| **Control Outputs** |
 | Main Valve | GPIO 18 | Blue | Opens main water valve to sprinklers |
 | Ignition Start | GPIO 23 | Yellow | Pulse to start engine (like turning key) |
 | Ignition On | GPIO 24 | Green | Stays on while engine runs |
@@ -69,6 +75,23 @@ Normal operation logs:
 | Refill Valve | GPIO 22 | Purple | Opens valve to refill reservoir |
 | Priming Valve | GPIO 26 | Orange | Bleeds air from pump |
 | RPM Reduce | GPIO 27 | Brown | Reduces engine speed before shutdown |
+| **Monitoring Inputs** |
+| Reservoir Float | GPIO 16 | White | Tank level sensor (optional) |
+| Line Pressure | GPIO 20 | Gray | Pressure switch (optional) |
+
+### Safety Sensor Wiring
+
+**Reservoir Float Switch**:
+- Normally Open (NO) switch recommended
+- Connect between GPIO 16 and Ground
+- Closes when tank is full
+- Set `RESERVOIR_FLOAT_ACTIVE_LOW=true` for NO switches
+
+**Line Pressure Switch**:
+- Normally Closed (NC) switch recommended
+- Connect between GPIO 20 and 3.3V
+- Opens when pressure is low
+- Set `LINE_PRESSURE_ACTIVE_LOW=true` for NC switches
 
 ### Wiring Diagram Example
 
@@ -78,7 +101,12 @@ GPIO 18 -----------------> Relay 1 -> Main Valve Solenoid
 GPIO 23 -----------------> Relay 2 -> Ignition Start Circuit
 GPIO 24 -----------------> Relay 3 -> Ignition Run Circuit
 GPIO 25 -----------------> Relay 4 -> Ignition Stop Circuit
-GND ---------------------> Relay Board Ground
+GPIO 22 -----------------> Relay 5 -> Refill Valve
+GPIO 26 -----------------> Relay 6 -> Priming Valve
+GPIO 27 -----------------> Relay 7 -> RPM Reduce Circuit
+
+GPIO 16 <-- Float Switch <-- GND (when full)
+GPIO 20 <-- Pressure Switch <-- 3.3V (when OK)
 ```
 
 **💡 Tip**: Use a relay board rated for your valve/ignition voltage (typically 12V or 24V)
@@ -91,7 +119,7 @@ GND ---------------------> Relay Board Ground
 # Valve and startup timings
 VALVE_PRE_OPEN_DELAY=2      # Open valve 2 seconds before starting
 IGNITION_START_DURATION=5   # Hold start for 5 seconds
-PRIMING_DURATION=180        # Run engine with bleed valve open for 3 minutes
+PRIMING_DURATION=180        # Run with bleed valve open for 3 minutes
 
 # Shutdown timings  
 FIRE_OFF_DELAY=1800         # Run 30 minutes after fire gone
@@ -100,14 +128,20 @@ IGNITION_OFF_DURATION=5     # Pulse stop for 5 seconds
 RPM_REDUCTION_LEAD=15       # Reduce RPM 15 seconds before stop
 
 # Safety limits
-MAX_ENGINE_RUNTIME=600      # Maximum 10 minute run time
+MAX_ENGINE_RUNTIME=1800     # Maximum 30 minute run time (adjust for your tank!)
 REFILL_MULTIPLIER=40        # Refill 40x longer than runtime
+PRESSURE_CHECK_DELAY=60     # Check pressure 1 minute after priming
 ```
+
+**⚠️ IMPORTANT**: The `MAX_ENGINE_RUNTIME` default of 30 minutes is intentionally conservative. Calculate your actual limit:
+- Tank capacity (gallons) ÷ Pump flow rate (gpm) = Maximum runtime (minutes)
+- Example: 10,000 gallons ÷ 100 gpm = 100 minutes maximum
+- Set this value LOWER than your calculation to prevent pump damage!
 
 ### Pin Customization
 
 ```bash
-# Change pin assignments if needed
+# Control pins (required)
 MAIN_VALVE_PIN=18
 IGNITION_START_PIN=23
 IGNITION_ON_PIN=24
@@ -115,6 +149,14 @@ IGNITION_OFF_PIN=25
 REFILL_VALVE_PIN=22
 PRIMING_VALVE_PIN=26
 RPM_REDUCE_PIN=27
+
+# Monitoring pins (optional - leave blank if not used)
+RESERVOIR_FLOAT_PIN=16      # Tank level sensor
+LINE_PRESSURE_PIN=20        # Pressure switch
+
+# Sensor configuration
+RESERVOIR_FLOAT_ACTIVE_LOW=true   # true = NO switch, false = NC switch
+LINE_PRESSURE_ACTIVE_LOW=true     # true = NC switch, false = NO switch
 ```
 
 ### System Settings
@@ -136,23 +178,28 @@ LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
    - Main valve opens before engine start
    - Prevents pressure damage
 
-2. **Priming Valve Opens** (before start)
+2. **Priming Valve Opens** (immediate)
    - Opens air bleed valve
    - Prepares to remove air from pump
 
-3. **Engine Start** (5 sec)
+3. **Engine Start** (5 sec pulse)
    - Ignition start pulse
    - Like turning a key
 
-4. **Running State**
+4. **Running with Priming** (3 min)
    - Engine runs with priming valve OPEN
-   - Air bleeds out while pump runs
-   - Refill valve opens
+   - Air bleeds out continuously
+   - Pump fills with water
    
-5. **Priming Complete** (after 3 min)
-   - Priming valve closes
+5. **Priming Complete**
+   - Priming valve closes after 3 minutes
    - Pump now at full pressure/flow
-   - No air in pump housing
+   - Line pressure check starts (if sensor installed)
+
+6. **Pressure Monitoring** (optional)
+   - 1 minute after priming complete
+   - Shuts down if low pressure detected
+   - Prevents damage from leaks or dry pump
 
 ### Shutdown Sequence
 
@@ -166,30 +213,52 @@ LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
 
 3. **Valve Timing**
    - Main valve stays open 10 min
-   - Refill continues based on runtime
-   - All valves eventually close
+   - Allows pressure relief
+
+4. **Refill Process**
+   - Refill valve opens immediately
+   - Runs for runtime × multiplier
+   - Stops early if float switch triggers
+   - Pump cannot restart during refill
+
+### Safety Features
+
+1. **Refill Lockout**
+   - Pump will NOT start during refill
+   - Prevents dry running
+   - Must complete refill first
+
+2. **Reservoir Monitoring**
+   - Optional float switch input
+   - Stops refill when tank full
+   - Prevents overflow
+
+3. **Line Pressure Monitoring**
+   - Optional pressure switch input
+   - Detects pump problems
+   - Shuts down if pressure low
 
 ### Priming Sequence Timeline
 
 ```
-Time    Main Valve    Priming Valve    Engine    Action
-----    ----------    -------------    ------    ------
-0s      CLOSED        CLOSED           OFF       Fire detected
-2s      OPEN          CLOSED           OFF       Main valve opens
-2s      OPEN          OPEN             OFF       Priming valve opens
-4s      OPEN          OPEN             START     Engine cranking
-9s      OPEN          OPEN             RUN       Engine running (air bleeding)
-...     OPEN          OPEN             RUN       Air continues bleeding out
-180s    OPEN          OPEN             RUN       3 minutes elapsed
-180s    OPEN          CLOSED           RUN       Priming complete, full pressure
-...     OPEN          CLOSED           RUN       Normal pumping operation
+Time    Main    Priming    Engine    Pressure    Action
+----    ----    -------    ------    --------    ------
+0s      CLOSED  CLOSED     OFF       N/A         Fire detected
+2s      OPEN    CLOSED     OFF       N/A         Main valve opens
+2s      OPEN    OPEN       OFF       N/A         Priming valve opens
+4s      OPEN    OPEN       START     N/A         Engine cranking
+9s      OPEN    OPEN       RUN       N/A         Engine running (air bleeding)
+...     OPEN    OPEN       RUN       N/A         Air continues bleeding
+180s    OPEN    CLOSED     RUN       N/A         Priming complete
+240s    OPEN    CLOSED     RUN       CHECK       Pressure check (if sensor)
+...     OPEN    CLOSED     RUN       OK          Normal pumping
 ```
 
 **Critical Points**:
-- Engine MUST run with priming valve open
-- Air removal takes ~3 minutes of operation
-- Closing priming valve too early = poor performance
-- Opening priming valve during operation = pressure loss
+- Engine runs WITH priming valve open for full 3 minutes
+- Air removal is continuous during priming period
+- Closing priming valve too early = air in pump = poor performance
+- Pressure check occurs AFTER priming complete
 
 ## Common Issues and Solutions
 
@@ -218,7 +287,8 @@ Time    Main Valve    Priming Valve    Engine    Action
    REFILL_MULTIPLIER=60
    ```
 3. **Check refill valve**: May be clogged or stuck
-4. **Add float switch**: Wire to GPIO for water level sensing
+4. **Add float switch**: Wire to GPIO 16 for automatic detection
+5. **Verify runtime limit**: Ensure MAX_ENGINE_RUNTIME matches your tank
 
 ### Problem: Engine Won't Stop
 
@@ -233,7 +303,7 @@ Time    Main Valve    Priming Valve    Engine    Action
    ```
 4. **Check max runtime**:
    ```bash
-   MAX_ENGINE_RUNTIME=300  # 5 minutes max
+   MAX_ENGINE_RUNTIME=1800  # 30 minutes max
    ```
 
 ### Problem: Valves Not Operating
@@ -252,6 +322,34 @@ Time    Main Valve    Priming Valve    Engine    Action
 3. **Check power**: Solenoids need 12V/24V supply
 4. **Verify wiring**: Common ground between Pi and relays
 
+### Problem: Tank Overflows During Refill
+
+**Symptoms**: Water spills from reservoir
+
+**Solutions**:
+1. **Install float switch**: Connect to GPIO 16
+2. **Reduce refill multiplier**:
+   ```bash
+   REFILL_MULTIPLIER=30
+   ```
+3. **Calculate proper timing**: 
+   - Measure actual pump runtime
+   - Calculate refill rate
+   - Set multiplier accordingly
+
+### Problem: Low Pressure Shutdown
+
+**Symptoms**: Pump shuts down after priming
+
+**Solutions**:
+1. **Check for leaks**: Inspect all connections
+2. **Verify pump prime**: May need longer priming
+3. **Adjust pressure switch**: May be too sensitive
+4. **Increase check delay**:
+   ```bash
+   PRESSURE_CHECK_DELAY=120  # 2 minutes
+   ```
+
 ## Testing and Validation
 
 ### Safe Testing Procedure
@@ -264,7 +362,10 @@ Time    Main Valve    Priming Valve    Engine    Action
    ```
 3. **Verify timing** - Watch LED indicators
 4. **Check logs** - Ensure proper sequence
-5. **Reconnect gradually** - Test each component
+5. **Test safety sensors**:
+   - Trigger float switch during refill
+   - Trigger pressure switch during run
+6. **Reconnect gradually** - Test each component
 
 ### GPIO Testing Script
 
@@ -281,20 +382,32 @@ pins = {
     25: "Ignition Off",
     22: "Refill Valve",
     26: "Priming Valve",
-    27: "RPM Reduce"
+    27: "RPM Reduce",
+    16: "Float Switch (input)",
+    20: "Pressure Switch (input)"
 }
 
 GPIO.setmode(GPIO.BCM)
-for pin in pins:
+
+# Setup outputs
+for pin in [18, 23, 24, 25, 22, 26, 27]:
     GPIO.setup(pin, GPIO.OUT)
 
+# Setup inputs
+GPIO.setup(16, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(20, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
 # Test each output
-for pin, name in pins.items():
-    print(f"Testing {name} on GPIO {pin}")
+for pin in [18, 23, 24, 25, 22, 26, 27]:
+    print(f"Testing {pins[pin]} on GPIO {pin}")
     GPIO.output(pin, GPIO.HIGH)
     time.sleep(2)
     GPIO.output(pin, GPIO.LOW)
     time.sleep(1)
+
+# Read inputs
+print(f"\nFloat Switch (GPIO 16): {'FULL' if GPIO.input(16) else 'NOT FULL'}")
+print(f"Pressure Switch (GPIO 20): {'OK' if GPIO.input(20) else 'LOW'}")
 
 GPIO.cleanup()
 ```
@@ -304,36 +417,43 @@ GPIO.cleanup()
 The controller uses a state machine for safety:
 
 ```
-IDLE → PRIMING → STARTING → RUNNING → REDUCING_RPM → STOPPING → COOLDOWN → IDLE
-         ↓                      ↓           ↓            ↓
-        ERROR ←────────────────┴───────────┴────────────┘
+IDLE → PRIMING → STARTING → RUNNING → REDUCING_RPM → STOPPING → REFILLING → COOLDOWN → IDLE
+         ↓          ↓          ↓           ↓            ↓           ↓
+        ERROR ←────┴──────────┴───────────┴────────────┴───────────┘
+                               ↓
+                         LOW_PRESSURE
 ```
 
 **States**:
 - **IDLE**: Ready, waiting for fire
 - **PRIMING**: Valves open, preparing to start engine
 - **STARTING**: Engine cranking/starting up
-- **RUNNING**: Engine running, initially with bleed valve open for air removal, then closed for full pressure
+- **RUNNING**: Engine running, pump operating
 - **REDUCING_RPM**: Slowing engine before stop
 - **STOPPING**: Shutting down engine
+- **REFILLING**: Refilling reservoir (pump cannot start)
 - **COOLDOWN**: Post-shutdown wait period
+- **LOW_PRESSURE**: Low pressure detected, shutting down
 - **ERROR**: Manual intervention needed
 
-**Key Timing**:
-- Priming valve opens BEFORE engine starts
-- Engine runs WITH priming valve open for 3 minutes
-- Only after air is bled does priming valve close
-- This ensures maximum pump performance
+**Key Safety Features**:
+- Cannot start during refill
+- Priming valve stays open during engine start
+- Pressure monitoring after priming
+- Float switch stops refill early
 
 ## Safety Features
 
 ### Automatic Protections
 
 1. **Valve-First Start**: Valve must be open before engine
-2. **Maximum Runtime**: Prevents endless running
-3. **RPM Reduction**: Gentle shutdown sequence
-4. **Cooldown Period**: Prevents rapid cycling
-5. **State Validation**: Can't start from invalid state
+2. **Maximum Runtime**: Prevents tank depletion
+3. **Refill Lockout**: No starts during refill
+4. **Overflow Prevention**: Float switch stops refill
+5. **Dry Pump Protection**: Pressure monitoring
+6. **RPM Reduction**: Gentle shutdown sequence
+7. **Cooldown Period**: Prevents rapid cycling
+8. **State Validation**: Can't start from invalid state
 
 ### Manual Overrides
 
@@ -342,6 +462,7 @@ Always install these physical controls:
 2. **Manual Valve Control** - Bypass GPIO control
 3. **Fuel Shutoff** - Stops engine without electrical
 4. **Main Power Switch** - Disconnects all systems
+5. **Refill Bypass** - Manual refill control
 
 ## Monitoring and Debugging
 
@@ -365,34 +486,46 @@ LOG_LEVEL=DEBUG
 **Normal Operation**:
 ```
 [INFO] MQTT connected successfully
-[INFO] Event: valve_opened
+[INFO] Event: pump_sequence_start
+[INFO] Event: priming_started
 [INFO] Event: engine_running
+[INFO] Event: priming_complete
 [INFO] Event: shutdown_complete, runtime: 300
+[INFO] Event: refill_started
+[INFO] Event: refill_complete_float_switch
+```
+
+**Safety Events**:
+```
+[WARNING] Fire trigger received but refill in progress
+[INFO] Reservoir full detected, stopping refill
+[ERROR] Low line pressure detected!
+[INFO] Event: low_pressure_detected
 ```
 
 **Issues**:
 ```
 [ERROR] Main valve not open - aborting engine start
-[WARNING] Cannot reduce RPM from IDLE state
+[WARNING] Cannot start pump from REFILLING state
 [ERROR] Failed to set MAIN_VALVE: [Errno 13] Permission denied
 ```
 
 ## Advanced Customization
 
-### Adding Water Level Sensor
+### Tank Size Calculation
 
 ```python
-# Add to trigger.py
-WATER_LEVEL_PIN = 17
-GPIO.setup(WATER_LEVEL_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
+# Calculate your settings
+tank_gallons = 10000
+pump_gpm = 100
+refill_gpm = 25
 
-def check_water_level(self):
-    return GPIO.input(WATER_LEVEL_PIN) == GPIO.LOW
+max_runtime_minutes = tank_gallons / pump_gpm  # 100 minutes
+safe_runtime = max_runtime_minutes * 0.8       # 80 minutes (20% safety margin)
+refill_multiplier = pump_gpm / refill_gpm      # 4x
 
-# In start sequence
-if not self.check_water_level():
-    self._enter_error_state("Low water level")
-    return
+print(f"Set MAX_ENGINE_RUNTIME={int(safe_runtime * 60)}")  # 4800 seconds
+print(f"Set REFILL_MULTIPLIER={refill_multiplier}")        # 4
 ```
 
 ### Multiple Pump Support
@@ -408,15 +541,30 @@ def _start_all_pumps(self):
     self._start_pump_2()  # Pump 2
 ```
 
+### Advanced Sensor Integration
+
+```python
+# Add pressure transducer instead of switch
+import spidev
+
+def read_pressure_psi(self):
+    spi = spidev.SpiDev()
+    spi.open(0, 0)
+    raw = spi.readbytes(2)
+    voltage = (raw[0] << 8 | raw[1]) * 3.3 / 1024
+    psi = (voltage - 0.5) * 100 / 4.0  # 0.5-4.5V = 0-100 PSI
+    return psi
+```
+
 ### SMS/Email Alerts
 
 ```python
-# Add notification on trigger
-def _notify_trigger(self):
-    message = f"Fire detected! Pump activated at {datetime.now()}"
-    # Send via your preferred method
-    send_sms(message)
-    send_email(message)
+# Add notification on events
+def _notify_event(self, event_type):
+    if event_type in ['low_pressure_detected', 'error_state_entered']:
+        message = f"ALERT: {event_type} at {datetime.now()}"
+        send_sms(message)
+        send_email(message)
 ```
 
 ## Integration Examples
@@ -424,14 +572,25 @@ def _notify_trigger(self):
 ### Home Assistant
 
 ```yaml
+sensor:
+  - platform: mqtt
+    name: "Pump State"
+    state_topic: "system/trigger_telemetry"
+    value_template: "{{ value_json.system_state.state }}"
+    
+  - platform: mqtt
+    name: "Reservoir Level"
+    state_topic: "system/trigger_telemetry"
+    value_template: "{{ 'Full' if value_json.system_state.reservoir_full else 'Not Full' }}"
+
 switch:
   - platform: mqtt
-    name: "Fire Pump"
+    name: "Fire Pump Trigger"
     command_topic: "fire/trigger"
-    state_topic: "system/trigger_telemetry"
-    value_template: "{{ value_json.system_state.engine_on }}"
     payload_on: "{}"
     payload_off: "stop"
+    state_topic: "system/trigger_telemetry"
+    value_template: "{{ value_json.system_state.engine_on }}"
 ```
 
 ### Node-RED Flow
@@ -443,12 +602,11 @@ switch:
   "name": "Pump Status"
 },{
   "type": "function",
-  "func": "msg.payload = JSON.parse(msg.payload);\nreturn msg;",
-  "name": "Parse JSON"
+  "func": "msg.payload = JSON.parse(msg.payload);\nif(msg.payload.action === 'low_pressure_detected'){\n  msg.alert = true;\n}\nreturn msg;",
+  "name": "Check Alerts"
 },{
-  "type": "ui_text",
-  "label": "Pump State",
-  "name": "Display State"
+  "type": "notification",
+  "name": "Send Alert"
 }]
 ```
 
@@ -461,7 +619,7 @@ switch:
 
 ### Valves
 - **Rain Bird**: Reliable irrigation valves
-- **Orbit**: Budget-friendly option
+- **Orbit**: Budget-friendly option  
 - **Industrial Solenoids**: For high pressure
 
 ### Engine Control
@@ -469,17 +627,36 @@ switch:
 - **Diesel Controller**: For diesel generators
 - **Remote Start Kit**: Automotive option
 
+### Safety Sensors
+- **Float Switches**: Madison M8000 series
+- **Pressure Switches**: Honeywell or Square D
+- **Pressure Transducers**: For precise monitoring
+
 ## Maintenance
 
 ### Regular Checks
 
-1. **Monthly**: Test full sequence (dry run)
-2. **Quarterly**: Clean valve filters
-3. **Annually**: 
-   - Replace engine oil
+1. **Weekly**: 
+   - Check water levels
+   - Verify float switch operation
+   - Monitor pressure readings
+
+2. **Monthly**: 
+   - Test full sequence (dry run)
+   - Check valve operations
+   - Inspect wiring connections
+
+3. **Quarterly**: 
+   - Clean valve filters
    - Test emergency stops
-   - Verify water flow rates
+   - Calibrate sensors
+
+4. **Annually**: 
+   - Replace engine oil
+   - Test with water flow
+   - Verify flow rates
    - Update software
+   - Replace valve diaphragms
 
 ### Troubleshooting Checklist
 
@@ -490,7 +667,10 @@ switch:
 - [ ] Engine battery charged?
 - [ ] Fuel in tank?
 - [ ] Water in reservoir?
+- [ ] Float switch working?
+- [ ] Pressure switch calibrated?
 - [ ] MQTT broker running?
+- [ ] Refill complete?
 
 ## Learn More
 
@@ -507,6 +687,7 @@ switch:
 ### Safety Standards
 - [NFPA Fire Pump Standards](https://www.nfpa.org/codes-and-standards)
 - [Electrical Safety](https://www.osha.gov/electrical)
+- [Water System Design](https://www.epa.gov/watersense)
 
 ## Getting Help
 
@@ -515,6 +696,7 @@ If the pump system isn't working:
 2. Verify physical connections with multimeter
 3. Test each component separately
 4. Review logs for error states
-5. Use manual overrides to verify hardware
+5. Check refill status and safety sensors
+6. Use manual overrides to verify hardware
 
-Remember: Safety first! When in doubt, use manual controls and consult a professional for installation of high-voltage or engine control systems.
+Remember: Safety first! The system includes multiple protections, but always have manual override controls. When in doubt, use manual controls and consult a professional for installation of high-voltage or engine control systems.

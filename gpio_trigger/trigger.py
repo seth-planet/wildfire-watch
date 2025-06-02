@@ -5,6 +5,7 @@ PumpController for wildfire-watch:
 - State machine approach for consistent operation
 - Comprehensive error recovery and safety checks
 - Idempotent operations resilient to concurrent events
+- Reservoir level and line pressure monitoring
 """
 import os
 import time
@@ -32,27 +33,36 @@ CONFIG = {
     'TRIGGER_TOPIC': os.getenv('TRIGGER_TOPIC', 'fire/trigger'),
     'TELEMETRY_TOPIC': os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry'),
     
-    # GPIO Pins
-    'MAIN_VALVE_PIN': int(os.getenv('MAIN_VALVE_PIN', '18')), # Turns main water valve on
-    'IGN_START_PIN': int(os.getenv('IGNITION_START_PIN', '23')), # Pulsed for engine start
-    'IGN_ON_PIN': int(os.getenv('IGNITION_ON_PIN', '24')), # On for entire time engine is on
-    'IGN_OFF_PIN': int(os.getenv('IGNITION_OFF_PIN', '25')), # Pulsed before engine off
-    'REFILL_VALVE_PIN': int(os.getenv('REFILL_VALVE_PIN', '22')), # Open refill valve / run refill pump
-    'PRIMING_VALVE_PIN': int(os.getenv('PRIMING_VALVE_PIN', '26')), # Opens priming valve to bleed any air in the pump
-    'RPM_REDUCE_PIN': int(os.getenv('RPM_REDUCE_PIN', '27')), # Reduce engine RPM
+    # GPIO Pins - Control
+    'MAIN_VALVE_PIN': int(os.getenv('MAIN_VALVE_PIN', '18')),
+    'IGN_START_PIN': int(os.getenv('IGNITION_START_PIN', '23')),
+    'IGN_ON_PIN': int(os.getenv('IGNITION_ON_PIN', '24')),
+    'IGN_OFF_PIN': int(os.getenv('IGNITION_OFF_PIN', '25')),
+    'REFILL_VALVE_PIN': int(os.getenv('REFILL_VALVE_PIN', '22')),
+    'PRIMING_VALVE_PIN': int(os.getenv('PRIMING_VALVE_PIN', '26')),
+    'RPM_REDUCE_PIN': int(os.getenv('RPM_REDUCE_PIN', '27')),
+    
+    # GPIO Pins - Monitoring (Optional)
+    'RESERVOIR_FLOAT_PIN': int(os.getenv('RESERVOIR_FLOAT_PIN', '16')) if os.getenv('RESERVOIR_FLOAT_PIN') else None,
+    'LINE_PRESSURE_PIN': int(os.getenv('LINE_PRESSURE_PIN', '20')) if os.getenv('LINE_PRESSURE_PIN') else None,
     
     # Timing Configuration
-    'PRE_OPEN_DELAY': float(os.getenv('VALVE_PRE_OPEN_DELAY', '2')), # Open main valve X seconds before ignition start
-    'IGNITION_START_DURATION': float(os.getenv('IGNITION_START_DURATION', '5')), # Hold ignition start for X seconds
-    'FIRE_OFF_DELAY': float(os.getenv('FIRE_OFF_DELAY', '1800')), # Keep pump running X seconds past last message
-    'VALVE_CLOSE_DELAY': float(os.getenv('VALVE_CLOSE_DELAY', '600')), # Close main valve X seconds after engine stop
-    'IGNITION_OFF_DURATION': float(os.getenv('IGNITION_OFF_DURATION', '5')), # Pulse X seconds before engine off
-    'MAX_ENGINE_RUNTIME': float(os.getenv('MAX_ENGINE_RUNTIME', '600')), # Maximum runtime of fire pump in seconds (initially set low for testing and pump safety)
-    'REFILL_MULTIPLIER': float(os.getenv('REFILL_MULTIPLIER', '40')), # Refill water tank for a multiple of run-time
-    'PRIMING_DURATION': float(os.getenv('PRIMING_DURATION', '180')), # Bleed off any air in the pump for this long
-    'RPM_REDUCTION_LEAD': float(os.getenv('RPM_REDUCTION_LEAD', '15')), # Pulse RPM reduction pin X seconds before shutdown
+    'PRE_OPEN_DELAY': float(os.getenv('VALVE_PRE_OPEN_DELAY', '2')),
+    'IGNITION_START_DURATION': float(os.getenv('IGNITION_START_DURATION', '5')),
+    'FIRE_OFF_DELAY': float(os.getenv('FIRE_OFF_DELAY', '1800')),
+    'VALVE_CLOSE_DELAY': float(os.getenv('VALVE_CLOSE_DELAY', '600')),
+    'IGNITION_OFF_DURATION': float(os.getenv('IGNITION_OFF_DURATION', '5')),
+    'MAX_ENGINE_RUNTIME': float(os.getenv('MAX_ENGINE_RUNTIME', '1800')),  # 30 minutes default
+    'REFILL_MULTIPLIER': float(os.getenv('REFILL_MULTIPLIER', '40')),
+    'PRIMING_DURATION': float(os.getenv('PRIMING_DURATION', '180')),
+    'RPM_REDUCTION_LEAD': float(os.getenv('RPM_REDUCTION_LEAD', '15')),
+    'PRESSURE_CHECK_DELAY': float(os.getenv('PRESSURE_CHECK_DELAY', '60')),  # 1 minute after priming
     'HEALTH_INTERVAL': float(os.getenv('TELEMETRY_INTERVAL', '60')),
     'ACTION_RETRY_INTERVAL': float(os.getenv('ACTION_RETRY_INTERVAL', '60')),
+    
+    # Safety Configuration
+    'RESERVOIR_FLOAT_ACTIVE_LOW': os.getenv('RESERVOIR_FLOAT_ACTIVE_LOW', 'true').lower() == 'true',
+    'LINE_PRESSURE_ACTIVE_LOW': os.getenv('LINE_PRESSURE_ACTIVE_LOW', 'true').lower() == 'true',
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -80,6 +90,9 @@ except (ImportError, RuntimeError):
     class GPIO:
         BCM = "BCM"
         OUT = "OUT"
+        IN = "IN"
+        PUD_UP = "PUD_UP"
+        PUD_DOWN = "PUD_DOWN"
         HIGH = True
         LOW = False
         _state = {}
@@ -93,8 +106,15 @@ except (ImportError, RuntimeError):
             pass
         
         @classmethod
-        def setup(cls, pin, mode, initial=None):
-            cls._state[pin] = initial if initial is not None else cls.LOW
+        def setup(cls, pin, mode, initial=None, pull_up_down=None):
+            if mode == cls.OUT:
+                cls._state[pin] = initial if initial is not None else cls.LOW
+            else:
+                # Input pins default based on pull resistor
+                if pull_up_down == cls.PUD_UP:
+                    cls._state[pin] = cls.HIGH
+                else:
+                    cls._state[pin] = cls.LOW
         
         @classmethod
         def output(cls, pin, value):
@@ -120,7 +140,9 @@ class PumpState(Enum):
     REDUCING_RPM = auto()  # Reducing RPM before shutdown
     STOPPING = auto()      # Shutting down engine
     COOLDOWN = auto()      # Post-shutdown cooldown
+    REFILLING = auto()     # Refilling reservoir
     ERROR = auto()         # Error state requiring manual intervention
+    LOW_PRESSURE = auto()  # Low line pressure detected
 
 # ─────────────────────────────────────────────────────────────
 # PumpController Class
@@ -135,12 +157,17 @@ class PumpController:
         self._engine_start_time: Optional[float] = None
         self._total_runtime = 0
         self._shutting_down = False
+        self._refill_complete = True  # Start assuming tank is full
+        self._low_pressure_detected = False
         
         # Initialize GPIO
         self._init_gpio()
         
         # Setup MQTT
         self._setup_mqtt()
+        
+        # Start monitoring tasks
+        self._start_monitoring_tasks()
         
         # Start health monitoring
         self._schedule_timer('health', self._publish_health, self.cfg['HEALTH_INTERVAL'])
@@ -149,7 +176,8 @@ class PumpController:
     
     def _init_gpio(self):
         """Initialize all GPIO pins to safe state"""
-        pins = {
+        # Output pins
+        output_pins = {
             'MAIN_VALVE_PIN': GPIO.LOW,
             'IGN_START_PIN': GPIO.LOW,
             'IGN_ON_PIN': GPIO.LOW,
@@ -159,23 +187,30 @@ class PumpController:
             'RPM_REDUCE_PIN': GPIO.LOW,
         }
         
-        for pin_name, initial_state in pins.items():
+        for pin_name, initial_state in output_pins.items():
             pin = self.cfg[pin_name]
             GPIO.setup(pin, GPIO.OUT, initial=initial_state)
             logger.debug(f"Initialized {pin_name} (pin {pin}) to {initial_state}")
+        
+        # Input pins (optional monitoring)
+        if self.cfg['RESERVOIR_FLOAT_PIN']:
+            pull = GPIO.PUD_DOWN if self.cfg['RESERVOIR_FLOAT_ACTIVE_LOW'] else GPIO.PUD_UP
+            GPIO.setup(self.cfg['RESERVOIR_FLOAT_PIN'], GPIO.IN, pull_up_down=pull)
+            logger.info(f"Reservoir float switch on pin {self.cfg['RESERVOIR_FLOAT_PIN']}")
+        
+        if self.cfg['LINE_PRESSURE_PIN']:
+            pull = GPIO.PUD_DOWN if self.cfg['LINE_PRESSURE_ACTIVE_LOW'] else GPIO.PUD_UP
+            GPIO.setup(self.cfg['LINE_PRESSURE_PIN'], GPIO.IN, pull_up_down=pull)
+            logger.info(f"Line pressure switch on pin {self.cfg['LINE_PRESSURE_PIN']}")
     
     def _setup_mqtt(self):
         """Setup MQTT client with TLS if configured"""
         self.client = mqtt.Client(clean_session=True)
         
-        # Set LWT
-        lwt_topic = f"{self.cfg['TELEMETRY_TOPIC']}/{socket.gethostname()}/lwt"
-        lwt_payload = json.dumps({
-            'host': socket.gethostname(),
-            'status': 'offline',
-            'timestamp': self._now_iso()
-        })
-        self.client.will_set(lwt_topic, payload=lwt_payload, qos=1, retain=True)
+        # Set callbacks
+        self.client.on_connect = self._on_connect
+        self.client.on_message = self._on_message
+        self.client.on_disconnect = self._on_disconnect
         
         # Configure TLS if enabled
         if self.cfg['MQTT_TLS']:
@@ -187,20 +222,30 @@ class PumpController:
             )
             logger.info("MQTT TLS enabled")
         
-        # Set callbacks
-        self.client.on_connect = self._on_connect
-        self.client.on_message = self._on_message
-        self.client.on_disconnect = self._on_disconnect
+        # Set LWT
+        lwt_topic = f"{self.cfg['TELEMETRY_TOPIC']}/{socket.gethostname()}/lwt"
+        lwt_payload = json.dumps({
+            'host': socket.gethostname(),
+            'status': 'offline',
+            'timestamp': self._now_iso()
+        })
+        self.client.will_set(lwt_topic, payload=lwt_payload, qos=1, retain=True)
         
         # Connect
-        try:
-            port = 8883 if self.cfg['MQTT_TLS'] else 1883
-            self.client.connect(self.cfg['MQTT_BROKER'], port, keepalive=60)
-            self.client.loop_start()
-            logger.info(f"MQTT client connected to {self.cfg['MQTT_BROKER']}:{port}")
-        except Exception as e:
-            logger.error(f"MQTT connection failed: {e}")
-            self._state = PumpState.ERROR
+        self._mqtt_connect_with_retry()
+    
+    def _mqtt_connect_with_retry(self):
+        """Connect to MQTT with retry logic"""
+        while True:
+            try:
+                port = 8883 if self.cfg['MQTT_TLS'] else 1883
+                self.client.connect(self.cfg['MQTT_BROKER'], port, keepalive=60)
+                self.client.loop_start()
+                logger.info(f"MQTT client connected to {self.cfg['MQTT_BROKER']}:{port}")
+                break
+            except Exception as e:
+                logger.error(f"MQTT connection failed: {e}")
+                time.sleep(5)
     
     def _now_iso(self) -> str:
         """Get current UTC timestamp in ISO format"""
@@ -209,7 +254,7 @@ class PumpController:
     def _get_state_snapshot(self) -> Dict[str, Any]:
         """Get current state of all pins and system"""
         with self._lock:
-            return {
+            snapshot = {
                 'state': self._state.name,
                 'engine_on': GPIO.input(self.cfg['IGN_ON_PIN']),
                 'main_valve': GPIO.input(self.cfg['MAIN_VALVE_PIN']),
@@ -218,8 +263,18 @@ class PumpController:
                 'rpm_reduced': GPIO.input(self.cfg['RPM_REDUCE_PIN']),
                 'total_runtime': self._total_runtime,
                 'shutting_down': self._shutting_down,
+                'refill_complete': self._refill_complete,
                 'active_timers': list(self._timers.keys()),
             }
+            
+            # Add monitoring status if available
+            if self.cfg['RESERVOIR_FLOAT_PIN']:
+                snapshot['reservoir_full'] = self._is_reservoir_full()
+            
+            if self.cfg['LINE_PRESSURE_PIN']:
+                snapshot['line_pressure_ok'] = self._is_line_pressure_ok()
+            
+            return snapshot
     
     def _publish_event(self, action: str, extra_data: Optional[Dict] = None):
         """Publish telemetry event"""
@@ -257,6 +312,30 @@ class PumpController:
             self._publish_event('gpio_error', {'pin': pin_name, 'error': str(e)})
             return False
     
+    def _is_reservoir_full(self) -> bool:
+        """Check if reservoir is full (float switch)"""
+        if not self.cfg['RESERVOIR_FLOAT_PIN']:
+            return True  # Assume full if no sensor
+        
+        state = GPIO.input(self.cfg['RESERVOIR_FLOAT_PIN'])
+        # Active low means LOW = full, HIGH = not full
+        if self.cfg['RESERVOIR_FLOAT_ACTIVE_LOW']:
+            return not state
+        else:
+            return state
+    
+    def _is_line_pressure_ok(self) -> bool:
+        """Check if line pressure is adequate"""
+        if not self.cfg['LINE_PRESSURE_PIN']:
+            return True  # Assume OK if no sensor
+        
+        state = GPIO.input(self.cfg['LINE_PRESSURE_PIN'])
+        # Active low means LOW = pressure OK, HIGH = low pressure
+        if self.cfg['LINE_PRESSURE_ACTIVE_LOW']:
+            return not state
+        else:
+            return state
+    
     def _schedule_timer(self, name: str, func: Callable, delay: float):
         """Schedule a timer, canceling any existing timer with same name"""
         self._cancel_timer(name)
@@ -288,6 +367,31 @@ class PumpController:
         for name in list(self._timers.keys()):
             self._cancel_timer(name)
     
+    def _start_monitoring_tasks(self):
+        """Start background monitoring tasks"""
+        # Monitor reservoir level during refill
+        if self.cfg['RESERVOIR_FLOAT_PIN']:
+            threading.Thread(target=self._monitor_reservoir_level, daemon=True).start()
+    
+    def _monitor_reservoir_level(self):
+        """Monitor reservoir level during refill operations"""
+        while True:
+            try:
+                if self._state == PumpState.REFILLING:
+                    if self._is_reservoir_full():
+                        logger.info("Reservoir full detected, stopping refill")
+                        with self._lock:
+                            self._set_pin('REFILL_VALVE', False)
+                            self._refill_complete = True
+                            if self._state == PumpState.REFILLING:
+                                self._state = PumpState.IDLE
+                            self._publish_event('refill_complete_float_switch')
+                            self._cancel_timer('close_refill_valve')
+            except Exception as e:
+                logger.error(f"Reservoir monitoring error: {e}")
+            
+            time.sleep(1)  # Check every second
+    
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback"""
         if rc == 0:
@@ -318,6 +422,12 @@ class PumpController:
         with self._lock:
             self._last_trigger_time = time.time()
             
+            # Check if refill is complete
+            if not self._refill_complete:
+                logger.warning("Fire trigger received but refill in progress")
+                self._publish_event('trigger_blocked_refilling')
+                return
+            
             # Always ensure main valve is open when fire detected
             if not GPIO.input(self.cfg['MAIN_VALVE_PIN']):
                 self._set_pin('MAIN_VALVE', True)
@@ -340,6 +450,9 @@ class PumpController:
                     self._cancel_shutdown()
                 else:
                     logger.warning("Cannot cancel shutdown - already in progress")
+            elif self._state == PumpState.REFILLING:
+                logger.warning("Fire trigger received during refill - cannot start pump")
+                self._publish_event('trigger_blocked_refilling')
             elif self._state == PumpState.ERROR:
                 logger.error("System in ERROR state - manual intervention required")
                 self._publish_event('error_state_trigger_ignored')
@@ -406,16 +519,15 @@ class PumpController:
             # Engine is now running
             self._state = PumpState.RUNNING
             self._engine_start_time = time.time()
+            self._low_pressure_detected = False
             self._publish_event('engine_running')
             
-            # Start refill valve
-            if not self._set_pin('REFILL_VALVE', True):
-                logger.warning("Failed to open refill valve")
+            # Note: Refill valve NOT started yet - only after shutdown
             
-            # Schedule priming valve close
+            # Schedule priming valve close after priming duration
             self._schedule_timer(
                 'close_priming',
-                lambda: self._set_pin('PRIMING_VALVE', False),
+                lambda: self._close_priming_valve(),
                 self.cfg['PRIMING_DURATION']
             )
             
@@ -426,6 +538,33 @@ class PumpController:
             
             # Schedule max runtime shutdown
             self._schedule_timer('max_runtime', self._shutdown_engine, self.cfg['MAX_ENGINE_RUNTIME'])
+    
+    def _close_priming_valve(self):
+        """Close priming valve and start pressure monitoring"""
+        with self._lock:
+            self._set_pin('PRIMING_VALVE', False)
+            self._publish_event('priming_complete')
+            
+            # Schedule pressure check if monitoring is enabled
+            if self.cfg['LINE_PRESSURE_PIN']:
+                self._schedule_timer(
+                    'pressure_check',
+                    self._check_line_pressure,
+                    self.cfg['PRESSURE_CHECK_DELAY']
+                )
+    
+    def _check_line_pressure(self):
+        """Check line pressure after priming period"""
+        with self._lock:
+            if self._state != PumpState.RUNNING:
+                return
+            
+            if not self._is_line_pressure_ok():
+                logger.error("Low line pressure detected!")
+                self._low_pressure_detected = True
+                self._state = PumpState.LOW_PRESSURE
+                self._publish_event('low_pressure_detected')
+                self._shutdown_engine()
     
     def _reduce_rpm(self):
         """Reduce engine RPM before shutdown"""
@@ -454,7 +593,7 @@ class PumpController:
     def _shutdown_engine(self):
         """Shutdown engine with proper sequence"""
         with self._lock:
-            if self._state not in [PumpState.RUNNING, PumpState.REDUCING_RPM]:
+            if self._state not in [PumpState.RUNNING, PumpState.REDUCING_RPM, PumpState.LOW_PRESSURE]:
                 logger.warning(f"Cannot shutdown from {self._state.name} state")
                 return
             
@@ -463,11 +602,13 @@ class PumpController:
                 return
             
             self._shutting_down = True
+            previous_state = self._state
             self._state = PumpState.STOPPING
-            self._publish_event('shutdown_initiated')
+            self._publish_event('shutdown_initiated', {'reason': previous_state.name})
             
             # Cancel max runtime timer if still active
             self._cancel_timer('max_runtime')
+            self._cancel_timer('pressure_check')
             
             # Calculate total runtime
             if self._engine_start_time:
@@ -495,22 +636,35 @@ class PumpController:
                 self.cfg['VALVE_CLOSE_DELAY']
             )
             
-            # Calculate refill time based on runtime
-            refill_time = runtime * self.cfg['REFILL_MULTIPLIER']
-            self._schedule_timer(
-                'close_refill_valve',
-                lambda: self._set_pin('REFILL_VALVE', False),
-                refill_time
-            )
-            
-            # Enter cooldown state
-            self._schedule_timer(
-                'enter_cooldown',
-                self._enter_cooldown,
-                max(self.cfg['VALVE_CLOSE_DELAY'], refill_time) + 5
-            )
+            # Start refill process (unless low pressure detected)
+            if not self._low_pressure_detected:
+                self._refill_complete = False
+                self._state = PumpState.REFILLING
+                
+                # Open refill valve immediately
+                self._set_pin('REFILL_VALVE', True)
+                self._publish_event('refill_started')
+                
+                # Calculate refill time based on runtime
+                refill_time = runtime * self.cfg['REFILL_MULTIPLIER']
+                self._schedule_timer(
+                    'close_refill_valve',
+                    self._complete_refill,
+                    refill_time
+                )
+            else:
+                # Skip refill if low pressure (possible leak or dry pump)
+                self._enter_cooldown()
             
             self._publish_event('shutdown_complete', {'runtime': runtime})
+    
+    def _complete_refill(self):
+        """Complete the refill process"""
+        with self._lock:
+            self._set_pin('REFILL_VALVE', False)
+            self._refill_complete = True
+            self._publish_event('refill_complete_timer')
+            self._enter_cooldown()
     
     def _enter_cooldown(self):
         """Enter cooldown state after shutdown"""
@@ -534,7 +688,6 @@ class PumpController:
         with self._lock:
             if self._state not in [PumpState.REDUCING_RPM, PumpState.STOPPING]:
                 return
-            
             logger.info("Cancelling shutdown sequence")
             
             # Cancel shutdown timers
@@ -592,7 +745,16 @@ class PumpController:
                 'total_runtime': self._total_runtime,
                 'state': self._state.name,
                 'last_trigger': self._last_trigger_time,
+                'refill_complete': self._refill_complete,
+                'low_pressure_detected': self._low_pressure_detected,
             }
+            
+            # Add sensor states if available
+            if self.cfg['RESERVOIR_FLOAT_PIN']:
+                health_data['reservoir_full'] = self._is_reservoir_full()
+            
+            if self.cfg['LINE_PRESSURE_PIN']:
+                health_data['line_pressure_ok'] = self._is_line_pressure_ok()
             
             self._publish_event('health_report', health_data)
             

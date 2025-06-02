@@ -41,21 +41,24 @@ model:
 database:
   path: /media/frigate/frigate.db
 
-# Recording configuration
+# Recording configuration - ONLY RECORD WHEN OBJECTS DETECTED
 record:
   enabled: true
   retain:
     days: {RECORD_RETAIN_DAYS}
-    mode: all  # Store all recordings for security
+    mode: active_objects  # Only keep recordings with tracked objects
   events:
     pre_capture: 10
     post_capture: 20
     retain:
       default: 30
+      mode: active_objects  # Only retain events with objects
       objects:
         fire: 365     # Keep fire events for 1 year
         smoke: 365    # Keep smoke events for 1 year
         person: 90    # Keep person events for 3 months
+        car: 30       # Keep car events for 1 month
+        wildlife: 60  # Keep wildlife events for 2 months
   export:
     timelapse_args: "-vf setpts=0.04*PTS -r 30"  # 25x speed
 
@@ -65,12 +68,15 @@ snapshots:
   timestamp: true
   bounding_box: true
   crop: false
+  quality: 90  # Higher quality for important detections
   retain:
     default: 7
     objects:
       fire: 365
       smoke: 365
       person: 30
+      car: 14
+      wildlife: 30
 
 # Hardware acceleration - automatically configured
 ffmpeg:
@@ -116,6 +122,8 @@ objects:
     - fire
     - smoke
     - person
+    - car
+    - wildlife
   filters:
     fire:
       min_area: 300
@@ -132,12 +140,22 @@ objects:
       max_area: 50000
       min_score: 0.5
       threshold: 0.7
+    car:
+      min_area: 5000
+      max_area: 200000
+      min_score: 0.6
+      threshold: 0.7
+    wildlife:
+      min_area: 800
+      max_area: 50000
+      min_score: 0.5
+      threshold: 0.6
 
-# Motion detection settings
+# Motion detection settings - tuned for outdoor environment
 motion:
-  threshold: 20
+  threshold: 25  # Slightly higher to ignore swaying vegetation
   lightning_threshold: 0.8
-  contour_area: 10
+  contour_area: 15
   delta_alpha: 0.2
   frame_alpha: 0.05
   frame_height: 120
@@ -150,7 +168,7 @@ birdseye:
   width: 1280
   height: 720
   quality: 70
-  mode: continuous
+  mode: objects  # Only show when objects detected
   restream: true
 
 # UI configuration

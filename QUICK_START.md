@@ -21,15 +21,46 @@ docker-compose up -d
 The system will:
 - ✅ Start MQTT broker with default certificates
 - ✅ Begin scanning for cameras
-- ✅ Configure Frigate for fire detection
+- ✅ Configure Frigate NVR for fire detection
 - ✅ Monitor for consensus events
 - ✅ Control GPIO pins when fire detected
+- ✅ Record security footage to USB storage
 
 ### 3. Access the System
 
-- **MQTT Explorer**: Connect to `device-ip:1883` or `device-ip:8883`
 - **Frigate Web UI**: Browse to `http://device-ip:5000`
+- **MQTT Explorer**: Connect to `device-ip:1883` or `device-ip:8883`
 - **Logs**: `balena logs` or `docker-compose logs`
+
+## 📋 System Architecture
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  IP Cameras │────▶│   Camera    │────▶│  Security   │
+│   (RTSP)    │     │  Detector   │     │    NVR      │
+└─────────────┘     └─────────────┘     │  (Frigate)  │
+                            │            └─────────────┘
+                            │                    │
+                            ▼                    ▼
+                    ┌─────────────┐     ┌─────────────┐
+                    │    MQTT     │◀────│    Fire     │
+                    │   Broker    │     │  Consensus  │
+                    └─────────────┘     └─────────────┘
+                            │                    │
+                            ▼                    ▼
+                    ┌─────────────┐     ┌─────────────┐
+                    │    GPIO     │     │    Pump     │
+                    │  Trigger    │────▶│   System    │
+                    └─────────────┘     └─────────────┘
+```
+
+### Service Descriptions
+
+1. **Camera Detector**: Automatically discovers IP cameras on your network
+2. **Security NVR (Frigate)**: AI-powered object detection and recording
+3. **Fire Consensus**: Multi-camera validation to prevent false alarms
+4. **GPIO Trigger**: Controls pump, valves, and monitors system health
+5. **MQTT Broker**: Secure communication hub for all services
 
 ## ⚠️ CRITICAL SECURITY WARNING ⚠️
 
@@ -113,14 +144,25 @@ CONSENSUS_THRESHOLD: "2"      # How many cameras must agree
 MIN_CONFIDENCE: "0.7"         # AI confidence threshold
 
 # Pump Control
-MAX_ENGINE_RUNTIME: "600"     # 10-minute safety limit
+MAX_ENGINE_RUNTIME: "1800"    # 30-minute safety limit
 FIRE_OFF_DELAY: "1800"        # Run 30 min after fire gone
+REFILL_MULTIPLIER: "40"       # Refill time = runtime × 40
+
+# Optional Safety Sensors
+RESERVOIR_FLOAT_PIN: "16"     # GPIO pin for tank level sensor
+LINE_PRESSURE_PIN: "20"       # GPIO pin for pressure switch
+
+# Security NVR
+RECORD_RETAIN_DAYS: "180"     # Keep 6 months of recordings
+USB_MOUNT_PATH: "/media/frigate"  # USB storage location
 ```
 
 ### Network Architecture
 
 ```
-[IP Cameras] ←→ [Camera Detector] ←→ [MQTT Broker] ←→ [Fire Consensus]
+[IP Cameras] ←→ [Camera Detector] ←→ [Security NVR/Frigate]
+                                            ↓
+                                    [MQTT Broker] ←→ [Fire Consensus]
                                             ↓
                                     [GPIO Trigger/Pump]
 ```
@@ -151,7 +193,15 @@ docker logs camera_detector -f
 # [INFO] Updated Frigate config with 2 cameras
 ```
 
-### 3. Test Fire Detection
+### 3. Frigate NVR Status
+
+Access Frigate UI at `http://device-ip:5000` to:
+- View live camera feeds
+- Check object detection
+- Review recorded events
+- Monitor storage usage
+
+### 4. Test Fire Detection
 
 ```bash
 # Simulate a fire detection
@@ -179,9 +229,13 @@ docker logs fire_consensus -f
 **Why it's bad**: Cameras won't be discovered  
 **Fix**: Add your camera's username:password to CAMERA_CREDENTIALS
 
-### 4. Consensus Threshold Too High
-**Why it's bad**: System won't trigger with few cameras  
-**Fix**: Set CONSENSUS_THRESHOLD to match your camera count
+### 4. Insufficient Storage
+**Why it's bad**: Recordings will fail  
+**Fix**: Use large USB drive (1TB+ recommended for 6 months)
+
+### 5. Incorrect Runtime Settings
+**Why it's bad**: Pump may run dry or overflow tank  
+**Fix**: Calculate based on your tank size and flow rate
 
 ## 📚 Next Steps
 
@@ -193,16 +247,22 @@ docker logs fire_consensus -f
 2. **Configure Pump Timing**
    - Set `MAX_ENGINE_RUNTIME` for your pump capacity
    - Adjust `REFILL_MULTIPLIER` for reservoir size
+   - Add safety sensors if available
 
 3. **Add Camera Credentials**
    - Update `CAMERA_CREDENTIALS` with your cameras
    - Test with `docker logs camera_detector`
+
+4. **Configure Storage**
+   - Format USB drive as ext4
+   - Set retention period with `RECORD_RETAIN_DAYS`
 
 ### Advanced Features
 - [Enable MQTT Authentication](mqtt_broker/README.md#authentication-setup-optional)
 - [Configure Multi-Node Deployment](docs/multi-node.md)
 - [Integrate with Home Assistant](docs/integrations.md)
 - [Set Up Cloud Monitoring](mqtt_broker/README.md#bridge-configuration)
+- [Train Custom Models](security_nvr/README.md#custom-model-training)
 
 ## 🆘 Troubleshooting
 
@@ -218,11 +278,17 @@ docker logs fire_consensus -f
 3. Check firewall allows ports 80, 554
 4. Enable debug logging: `LOG_LEVEL=DEBUG`
 
-### Certificate Errors
-1. Ensure `/mnt/data/certs` contains all files
-2. Check file permissions: `ls -la /mnt/data/certs`
-3. Verify certificate validity: `openssl x509 -in /mnt/data/certs/server.crt -dates`
-4. Try with plain MQTT first: `MQTT_TLS=false`
+### Storage Not Working
+1. Check USB drive detected: `lsblk`
+2. Verify mount: `df -h | grep frigate`
+3. Check permissions: `ls -la /media/frigate`
+4. Review logs: `docker logs security-nvr`
+
+### Pump Won't Start
+1. Check refill status in telemetry
+2. Verify reservoir sensor if configured
+3. Test GPIO manually
+4. Check MQTT connection
 
 ## 📞 Getting Help
 
@@ -244,11 +310,12 @@ docker logs fire_consensus -f
 ## 🎉 Success Indicators
 
 You'll know your system is working when:
-- ✅ Cameras appear in logs within 5 minutes
+- ✅ Cameras appear in Frigate UI
 - ✅ Health reports show all services "online"
-- ✅ Frigate web UI shows camera feeds
+- ✅ Object detections appear in timeline
 - ✅ Test fire detection triggers consensus
 - ✅ GPIO pins activate in correct sequence
+- ✅ USB storage shows recordings
 
 ## ⏰ Time Estimates
 
