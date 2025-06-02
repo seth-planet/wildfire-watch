@@ -6,6 +6,7 @@ PumpController for wildfire-watch:
 - Comprehensive error recovery and safety checks
 - Idempotent operations resilient to concurrent events
 - Reservoir level and line pressure monitoring
+- Refill valve opens immediately on engine start
 """
 import os
 import time
@@ -159,6 +160,7 @@ class PumpController:
         self._shutting_down = False
         self._refill_complete = True  # Start assuming tank is full
         self._low_pressure_detected = False
+        self._current_runtime = 0  # Track current session runtime
         
         # Initialize GPIO
         self._init_gpio()
@@ -262,6 +264,7 @@ class PumpController:
                 'priming_valve': GPIO.input(self.cfg['PRIMING_VALVE_PIN']),
                 'rpm_reduced': GPIO.input(self.cfg['RPM_REDUCE_PIN']),
                 'total_runtime': self._total_runtime,
+                'current_runtime': self._current_runtime,
                 'shutting_down': self._shutting_down,
                 'refill_complete': self._refill_complete,
                 'active_timers': list(self._timers.keys()),
@@ -516,13 +519,18 @@ class PumpController:
                 self._enter_error_state("Failed to turn on ignition")
                 return
             
+            # Open refill valve immediately when engine starts
+            if not self._set_pin('REFILL_VALVE', True):
+                logger.error("Failed to open refill valve")
+            else:
+                self._publish_event('refill_valve_opened_on_start')
+            
             # Engine is now running
             self._state = PumpState.RUNNING
             self._engine_start_time = time.time()
+            self._current_runtime = 0
             self._low_pressure_detected = False
             self._publish_event('engine_running')
-            
-            # Note: Refill valve NOT started yet - only after shutdown
             
             # Schedule priming valve close after priming duration
             self._schedule_timer(
@@ -612,10 +620,10 @@ class PumpController:
             
             # Calculate total runtime
             if self._engine_start_time:
-                runtime = time.time() - self._engine_start_time
-                self._total_runtime += runtime
+                self._current_runtime = time.time() - self._engine_start_time
+                self._total_runtime += self._current_runtime
             else:
-                runtime = 0
+                self._current_runtime = 0
             
             # Pulse ignition off
             self._set_pin('IGN_OFF', True)
@@ -636,27 +644,29 @@ class PumpController:
                 self.cfg['VALVE_CLOSE_DELAY']
             )
             
+            # Calculate refill time based on runtime
+            refill_time = self._current_runtime * self.cfg['REFILL_MULTIPLIER']
+            
             # Start refill process (unless low pressure detected)
             if not self._low_pressure_detected:
                 self._refill_complete = False
                 self._state = PumpState.REFILLING
                 
-                # Open refill valve immediately
-                self._set_pin('REFILL_VALVE', True)
-                self._publish_event('refill_started')
+                # Refill valve is already open (opened at engine start)
+                self._publish_event('refill_continuing', {'duration': refill_time})
                 
-                # Calculate refill time based on runtime
-                refill_time = runtime * self.cfg['REFILL_MULTIPLIER']
+                # Schedule refill valve closure
                 self._schedule_timer(
                     'close_refill_valve',
                     self._complete_refill,
                     refill_time
                 )
             else:
-                # Skip refill if low pressure (possible leak or dry pump)
+                # Close refill valve if low pressure (possible leak)
+                self._set_pin('REFILL_VALVE', False)
                 self._enter_cooldown()
             
-            self._publish_event('shutdown_complete', {'runtime': runtime})
+            self._publish_event('shutdown_complete', {'runtime': self._current_runtime})
     
     def _complete_refill(self):
         """Complete the refill process"""
@@ -672,6 +682,7 @@ class PumpController:
             self._state = PumpState.COOLDOWN
             self._shutting_down = False
             self._engine_start_time = None
+            self._current_runtime = 0
             self._publish_event('cooldown_entered')
             
             # Schedule return to idle
@@ -743,6 +754,7 @@ class PumpController:
             health_data = {
                 'uptime': time.time(),
                 'total_runtime': self._total_runtime,
+                'current_runtime': self._current_runtime,
                 'state': self._state.name,
                 'last_trigger': self._last_trigger_time,
                 'refill_complete': self._refill_complete,

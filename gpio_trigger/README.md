@@ -38,13 +38,14 @@ When fire is detected, the system:
 1. Opens main water valve
 2. Opens priming valve (bleeds air)
 3. Starts pump engine
-4. Runs with priming valve open for 3 minutes
-5. Closes priming valve for full pressure
-6. Monitors for continued fire
-7. Checks line pressure (if sensor installed)
-8. Shuts down safely when fire is gone
-9. Refills reservoir from well/source
-10. Monitors reservoir level (if sensor installed)
+4. **Opens refill valve immediately** (ensures reservoir refilling)
+5. Runs with priming valve open for 3 minutes
+6. Closes priming valve for full pressure
+7. Monitors for continued fire
+8. Checks line pressure (if sensor installed)
+9. Shuts down safely when fire is gone
+10. Continues refilling for (runtime × multiplier)
+11. Monitors reservoir level (if sensor installed)
 
 ### What You'll See
 
@@ -55,9 +56,10 @@ Normal operation logs:
 [INFO] Event: priming_started, State: {'PRIMING_VALVE': True}
 [INFO] Event: engine_start_sequence
 [INFO] Event: engine_running
+[INFO] Event: refill_valve_opened_on_start, State: {'REFILL_VALVE': True}
 [INFO] Event: priming_complete, State: {'PRIMING_VALVE': False}
 [INFO] Event: shutdown_initiated
-[INFO] Event: refill_started
+[INFO] Event: refill_continuing, duration: 12000 seconds
 [INFO] Event: refill_complete_float_switch (or refill_complete_timer)
 ```
 
@@ -186,17 +188,24 @@ LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
    - Ignition start pulse
    - Like turning a key
 
-4. **Running with Priming** (3 min)
+4. **Engine Running**
+   - Engine starts and runs
+   - **Refill valve opens immediately**
+   - Ensures reservoir stays topped off
+
+5. **Running with Priming** (3 min)
    - Engine runs with priming valve OPEN
    - Air bleeds out continuously
    - Pump fills with water
+   - Refill valve remains open
    
-5. **Priming Complete**
+6. **Priming Complete**
    - Priming valve closes after 3 minutes
    - Pump now at full pressure/flow
    - Line pressure check starts (if sensor installed)
+   - Refill valve stays open
 
-6. **Pressure Monitoring** (optional)
+7. **Pressure Monitoring** (optional)
    - 1 minute after priming complete
    - Shuts down if low pressure detected
    - Prevents damage from leaks or dry pump
@@ -216,8 +225,8 @@ LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
    - Allows pressure relief
 
 4. **Refill Process**
-   - Refill valve opens immediately
-   - Runs for runtime × multiplier
+   - Refill valve remains open
+   - Continues for runtime × multiplier
    - Stops early if float switch triggers
    - Pump cannot restart during refill
 
@@ -238,27 +247,32 @@ LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
    - Detects pump problems
    - Shuts down if pressure low
 
-### Priming Sequence Timeline
+### Pump Operation Timeline
 
 ```
-Time    Main    Priming    Engine    Pressure    Action
-----    ----    -------    ------    --------    ------
-0s      CLOSED  CLOSED     OFF       N/A         Fire detected
-2s      OPEN    CLOSED     OFF       N/A         Main valve opens
-2s      OPEN    OPEN       OFF       N/A         Priming valve opens
-4s      OPEN    OPEN       START     N/A         Engine cranking
-9s      OPEN    OPEN       RUN       N/A         Engine running (air bleeding)
-...     OPEN    OPEN       RUN       N/A         Air continues bleeding
-180s    OPEN    CLOSED     RUN       N/A         Priming complete
-240s    OPEN    CLOSED     RUN       CHECK       Pressure check (if sensor)
-...     OPEN    CLOSED     RUN       OK          Normal pumping
+Time    Main    Priming    Engine    Refill    Pressure    Action
+----    ----    -------    ------    ------    --------    ------
+0s      CLOSED  CLOSED     OFF       CLOSED    N/A         Fire detected
+2s      OPEN    CLOSED     OFF       CLOSED    N/A         Main valve opens
+2s      OPEN    OPEN       OFF       CLOSED    N/A         Priming valve opens
+4s      OPEN    OPEN       START     CLOSED    N/A         Engine cranking
+9s      OPEN    OPEN       RUN       OPEN      N/A         Engine running, refill starts
+...     OPEN    OPEN       RUN       OPEN      N/A         Priming continues
+180s    OPEN    CLOSED     RUN       OPEN      N/A         Priming complete
+240s    OPEN    CLOSED     RUN       OPEN      CHECK       Pressure check
+...     OPEN    CLOSED     RUN       OPEN      OK          Normal pumping
+1800s   OPEN    CLOSED     STOP      OPEN      OK          Fire off, shutdown
+1810s   OPEN    CLOSED     OFF       OPEN      N/A         Engine stopped
+2410s   CLOSED  CLOSED     OFF       OPEN      N/A         Main valve closed
+...     CLOSED  CLOSED     OFF       OPEN      N/A         Refill continues
+73800s  CLOSED  CLOSED     OFF       CLOSED    N/A         Refill complete (or float triggered)
 ```
 
 **Critical Points**:
-- Engine runs WITH priming valve open for full 3 minutes
-- Air removal is continuous during priming period
-- Closing priming valve too early = air in pump = poor performance
-- Pressure check occurs AFTER priming complete
+- Refill valve opens immediately when engine starts
+- Refill continues throughout entire runtime
+- Refill extends well beyond engine shutdown
+- Float switch can terminate refill early
 
 ## Common Issues and Solutions
 
@@ -428,17 +442,17 @@ IDLE → PRIMING → STARTING → RUNNING → REDUCING_RPM → STOPPING → REFI
 - **IDLE**: Ready, waiting for fire
 - **PRIMING**: Valves open, preparing to start engine
 - **STARTING**: Engine cranking/starting up
-- **RUNNING**: Engine running, pump operating
+- **RUNNING**: Engine running, pump operating, refill active
 - **REDUCING_RPM**: Slowing engine before stop
 - **STOPPING**: Shutting down engine
-- **REFILLING**: Refilling reservoir (pump cannot start)
+- **REFILLING**: Continuing refill after shutdown (pump cannot start)
 - **COOLDOWN**: Post-shutdown wait period
 - **LOW_PRESSURE**: Low pressure detected, shutting down
 - **ERROR**: Manual intervention needed
 
 **Key Safety Features**:
 - Cannot start during refill
-- Priming valve stays open during engine start
+- Refill valve opens with engine start
 - Pressure monitoring after priming
 - Float switch stops refill early
 
@@ -489,9 +503,10 @@ LOG_LEVEL=DEBUG
 [INFO] Event: pump_sequence_start
 [INFO] Event: priming_started
 [INFO] Event: engine_running
+[INFO] Event: refill_valve_opened_on_start
 [INFO] Event: priming_complete
 [INFO] Event: shutdown_complete, runtime: 300
-[INFO] Event: refill_started
+[INFO] Event: refill_continuing, duration: 12000
 [INFO] Event: refill_complete_float_switch
 ```
 

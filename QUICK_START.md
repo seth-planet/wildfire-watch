@@ -37,7 +37,7 @@ The system will:
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │  IP Cameras │────▶│   Camera    │────▶│  Security   │
-│   (RTSP)    │     │  Detector   │     │    NVR      │
+│   (RTSP)    │     │  Detector   │     │ NVR Service │
 └─────────────┘     └─────────────┘     │  (Frigate)  │
                             │            └─────────────┘
                             │                    │
@@ -58,6 +58,9 @@ The system will:
 
 1. **Camera Detector**: Automatically discovers IP cameras on your network
 2. **Security NVR (Frigate)**: AI-powered object detection and recording
+   - Automatically detects available hardware acceleration (Hailo, Coral, GPU)
+   - Only records when objects are detected (fire, smoke, person, car, wildlife)
+   - Integrates with camera_detector for dynamic configuration
 3. **Fire Consensus**: Multi-camera validation to prevent false alarms
 4. **GPIO Trigger**: Controls pump, valves, and monitors system health
 5. **MQTT Broker**: Secure communication hub for all services
@@ -155,6 +158,7 @@ LINE_PRESSURE_PIN: "20"       # GPIO pin for pressure switch
 # Security NVR
 RECORD_RETAIN_DAYS: "180"     # Keep 6 months of recordings
 USB_MOUNT_PATH: "/media/frigate"  # USB storage location
+FRIGATE_HARDWARE: "auto"      # auto-detects Hailo, Coral, or GPU
 ```
 
 ### Network Architecture
