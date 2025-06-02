@@ -1,0 +1,8 @@
+# Load .env for config
+python-dotenv
+
+# MQTT client
+paho-mqtt
+
+# GPIO access on Raspberry Pi
+RPi.GPIO

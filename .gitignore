@@ -1,0 +1,23 @@
+# Python
+
+**pycache**/ \*.pyc
+
+# Docker
+
+\*.log
+
+# Environment variables
+
+.env
+
+# macOS
+
+.DS\_Store
+
+# Storage
+
+/data/\* /media/\*
+
+# IDE
+
+.vscode/ .idea/

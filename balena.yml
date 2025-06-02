@@ -1,0 +1,184 @@
+name: wildfire-watch
+type: sw.block
+description: >
+  Edge-deployed Wildfire Watch:
+    • Frigate NVR (Pi 5/x86_64)
+    • Multi-camera consensus fire detection
+    • Automated pump control with safety features
+    • Default TLS certificates (replace for production)
+    • MAC-based camera tracking
+version: "0.2.0"
+assets:
+  repository:
+    type: blob.asset
+    data:
+      url: 'https://github.com/your-org/wildfire-watch'
+data:
+  defaultDeviceType: raspberrypi5-64
+  supportedDeviceTypes:
+    - raspberrypi5-64    # Frigate NVR
+    - raspberrypi3-64    # Other services
+    - generic-aarch64    # Generic ARM64
+    - genericx86-64-ext  # AMD/Intel systems
+  defaultEnvironmentVariables:
+    # MQTT Settings (TLS enabled by default with insecure certs)
+    MQTT_HOST: mqtt_broker
+    MQTT_PORT: "8883"
+    MQTT_TLS: "true"
+    TLS_CA_PATH: "/mnt/data/certs/ca.crt"
+    
+    # Certificate Warning
+    CERT_WARNING: "DEFAULT_INSECURE_CERTS_IN_USE"
+    
+    # Camera Discovery
+    DISCOVERY_INTERVAL: "300"
+    MAC_TRACKING_ENABLED: "true"
+    CAMERA_CREDENTIALS: "admin:,admin:admin,admin:12345,admin:password"
+    
+    # Frigate NVR
+    RTSP_STREAM_URL: "rtsp://admin:password@192.168.1.100:554/stream"
+    FRIGATE_DETECTOR: "cpu"   # cpu|coral|hailo
+    FRIGATE_UPDATE_ENABLED: "true"
+    RECORD_DAYS: "7"
+    
+    # Fire Consensus
+    CONSENSUS_THRESHOLD: "2"
+    CAMERA_WINDOW: "10"
+    MIN_CONFIDENCE: "0.7"
+    DETECTION_COOLDOWN: "30"
+    
+    # Pump Controller
+    MAIN_VALVE_PIN: "18"
+    IGNITION_START_PIN: "23"
+    IGNITION_ON_PIN: "24"
+    IGNITION_OFF_PIN: "25"
+    REFILL_VALVE_PIN: "22"
+    PRIMING_VALVE_PIN: "26"
+    RPM_REDUCE_PIN: "27"
+    
+    # Pump Timings
+    VALVE_PRE_OPEN_DELAY: "2"
+    IGNITION_START_DURATION: "5"
+    FIRE_OFF_DELAY: "1800"
+    VALVE_CLOSE_DELAY: "600"
+    IGNITION_OFF_DURATION: "5"
+    MAX_ENGINE_RUNTIME: "600"
+    REFILL_MULTIPLIER: "40"
+    PRIMING_DURATION: "180"
+    RPM_REDUCTION_LEAD: "15"
+    
+    # System Settings
+    TELEMETRY_INTERVAL: "60"
+    LOG_LEVEL: "info"
+    
+    # Service Discovery
+    AVAHI_ENABLED: "true"
+    AVAHI_SERVICE_ALIAS: "${BALENA_DEVICE_NAME_AT_INIT}-wildfire-watch"
+    
+  defaultServices:
+    # MQTT Broker - Communication Hub
+    mqtt_broker:
+      image: wildfire-watch/mqtt_broker
+      restart: unless-stopped
+      network_mode: host
+      ports:
+        - "1883:1883"
+        - "8883:8883"
+        - "9001:9001"
+      volumes:
+        - mqtt_data:/mosquitto/data
+        - mqtt_config:/mosquitto/config
+        - mqtt_logs:/mosquitto/log
+        - certs:/mnt/data/certs:ro
+      labels:
+        io.balena.features.dbus: '1'
+        io.balena.features.supervisor-api: '1'
+    
+    # Camera Detector - Auto-discovers IP cameras
+    camera_detector:
+      image: wildfire-watch/camera_detector
+      restart: unless-stopped
+      network_mode: host
+      privileged: true
+      volumes:
+        - camera_data:/data
+        - frigate_config:/config/frigate
+        - certs:/mnt/data/certs:ro
+      labels:
+        io.balena.features.supervisor-api: '1'
+      depends_on:
+        - mqtt_broker
+    
+    # Fire Consensus - Multi-camera validation
+    fire_consensus:
+      image: wildfire-watch/fire_consensus
+      restart: unless-stopped
+      network_mode: host
+      volumes:
+        - certs:/mnt/data/certs:ro
+      depends_on:
+        - mqtt_broker
+    
+    # GPIO Trigger - Pump control (only on devices with GPIO)
+    gpio_trigger:
+      image: wildfire-watch/gpio_trigger
+      restart: unless-stopped
+      network_mode: host
+      privileged: true
+      volumes:
+        - certs:/mnt/data/certs:ro
+      devices:
+        - /dev/gpiomem:/dev/gpiomem
+      cap_add:
+        - SYS_RAWIO
+      depends_on:
+        - mqtt_broker
+    
+    # Camera Telemetry - Health monitoring
+    cam_telemetry:
+      image: wildfire-watch/cam_telemetry
+      restart: unless-stopped
+      network_mode: host
+      volumes:
+        - certs:/mnt/data/certs:ro
+      depends_on:
+        - mqtt_broker
+    
+    # Frigate NVR - AI object detection
+    frigate:
+      image: ghcr.io/blakeblackshear/frigate:stable
+      restart: unless-stopped
+      network_mode: host
+      privileged: true
+      shm_size: '256mb'
+      volumes:
+        - frigate_data:/media/frigate
+        - frigate_config:/config:ro
+        - /etc/localtime:/etc/localtime:ro
+        - certs:/mnt/data/certs:ro
+      environment:
+        FRIGATE_RTSP_PASSWORD: "${RTSP_PASSWORD}"
+      devices:
+        - /dev/bus/usb:/dev/bus/usb  # For Coral USB
+        - /dev/apex_0:/dev/apex_0    # For Coral PCIe
+        - /dev/dri/renderD128        # For GPU acceleration
+      depends_on:
+        - mqtt_broker
+        - camera_detector
+
+volumes:
+  # Persistent data volumes
+  mqtt_data:
+  mqtt_config:
+  mqtt_logs:
+  camera_data:
+  frigate_data:
+  frigate_config:
+  certs:
+    # Pre-populate with default insecure certificates
+    # These MUST be replaced for production use!
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./certs/default

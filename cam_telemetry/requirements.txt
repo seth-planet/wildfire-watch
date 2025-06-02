@@ -1,0 +1,7 @@
+# Load .env for local dev
+python-dotenv
+
+# MQTT client
+paho-mqtt
+
+psutil

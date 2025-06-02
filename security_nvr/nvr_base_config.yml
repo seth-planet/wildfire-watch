@@ -1,0 +1,185 @@
+# Base Frigate configuration for Wildfire Watch
+# This is automatically customized based on detected hardware
+
+mqtt:
+  enabled: true
+  host: "{FRIGATE_MQTT_HOST}"
+  port: {FRIGATE_MQTT_PORT}
+  topic_prefix: frigate
+  client_id: "{FRIGATE_CLIENT_ID}"
+  stats_interval: 60
+  tls_ca_certs: /mnt/data/certs/ca.crt
+  tls_client_cert: /mnt/data/certs/frigate.crt
+  tls_client_key: /mnt/data/certs/frigate.key
+  tls_insecure: false
+
+# Detector configuration - automatically configured based on hardware
+detectors:
+  default:
+    type: "{DETECTOR_TYPE}"
+    device: "{DETECTOR_DEVICE}"
+    model:
+      path: "{MODEL_PATH}"
+      input_tensor: nhwc
+      input_pixel_format: rgb
+      width: 320
+      height: 320
+    labels: /models/wildfire/labels.txt
+
+# Model customization for wildfire detection
+model:
+  width: 320
+  height: 320
+  labels:
+    - fire
+    - smoke
+    - person
+    - car
+    - wildlife
+
+# Database for event storage
+database:
+  path: /media/frigate/frigate.db
+
+# Recording configuration
+record:
+  enabled: true
+  retain:
+    days: {RECORD_RETAIN_DAYS}
+    mode: all  # Store all recordings for security
+  events:
+    pre_capture: 10
+    post_capture: 20
+    retain:
+      default: 30
+      objects:
+        fire: 365     # Keep fire events for 1 year
+        smoke: 365    # Keep smoke events for 1 year
+        person: 90    # Keep person events for 3 months
+  export:
+    timelapse_args: "-vf setpts=0.04*PTS -r 30"  # 25x speed
+
+# Snapshot configuration
+snapshots:
+  enabled: true
+  timestamp: true
+  bounding_box: true
+  crop: false
+  retain:
+    default: 7
+    objects:
+      fire: 365
+      smoke: 365
+      person: 30
+
+# Hardware acceleration - automatically configured
+ffmpeg:
+  hwaccel_args: {HWACCEL_ARGS}
+  input_args:
+    - -avoid_negative_ts
+    - make_zero
+    - -fflags
+    - +genpts+discardcorrupt
+    - -rtsp_transport
+    - tcp
+    - -timeout
+    - "5000000"
+    - -use_wallclock_as_timestamps
+    - "1"
+  output_args:
+    detect:
+      - -f
+      - rawvideo
+      - -pix_fmt
+      - yuv420p
+    record:
+      - -f
+      - segment
+      - -segment_time
+      - "3600"
+      - -segment_format
+      - mp4
+      - -reset_timestamps
+      - "1"
+      - -strftime
+      - "1"
+      - -c:v
+      - "{RECORD_CODEC}"
+      - -preset
+      - "{RECORD_PRESET}"
+      - -crf
+      - "{RECORD_QUALITY}"
+
+# Default object tracking
+objects:
+  track:
+    - fire
+    - smoke
+    - person
+  filters:
+    fire:
+      min_area: 300
+      max_area: 100000
+      min_score: {DETECTION_THRESHOLD}
+      threshold: 0.8
+    smoke:
+      min_area: 500
+      max_area: 200000
+      min_score: 0.6
+      threshold: 0.7
+    person:
+      min_area: 1000
+      max_area: 50000
+      min_score: 0.5
+      threshold: 0.7
+
+# Motion detection settings
+motion:
+  threshold: 20
+  lightning_threshold: 0.8
+  contour_area: 10
+  delta_alpha: 0.2
+  frame_alpha: 0.05
+  frame_height: 120
+  mask_rate: 5
+  improve_contrast: true
+
+# Birdseye view
+birdseye:
+  enabled: true
+  width: 1280
+  height: 720
+  quality: 70
+  mode: continuous
+  restream: true
+
+# UI configuration
+ui:
+  use_experimental: false
+  live_mode: mse
+  strftime_fmt: "%Y-%m-%d %H:%M"
+
+# Logging
+logger:
+  default: "{LOG_LEVEL}"
+  logs:
+    frigate.record: info
+    frigate.events: info
+    detector.{DETECTOR_TYPE}: info
+    frigate.object_processing: info
+    frigate.motion: warning
+    frigate.http: warning
+
+# Environment info for debugging
+environment_vars:
+  FRIGATE_VERSION: true
+  DETECTOR_TYPE: true
+  HARDWARE_ACCEL: true
+
+# Telemetry for monitoring
+telemetry:
+  version_check: false
+  stats: true
+
+# Camera configuration will be added by camera_manager.py
+cameras: {}

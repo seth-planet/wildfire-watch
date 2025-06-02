@@ -1,0 +1,25 @@
+# Core dependencies
+paho-mqtt==1.6.1
+python-dotenv==1.0.0
+pyyaml==6.0.1
+
+# Camera discovery and control
+onvif-zeep==0.2.12
+wsdiscovery==2.0.0
+zeep==4.2.1
+
+# RTSP validation
+opencv-python==4.8.1.78
+av==10.0.0
+
+# Network utilities
+python-arp==0.0.2
+netifaces==0.11.0
+requests==2.31.0
+
+# Async support
+aiohttp==3.9.1
+asyncio==3.4.3
+
+# Data handling
+numpy==1.24.3
