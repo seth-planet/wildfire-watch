@@ -480,6 +480,12 @@ class PumpController:
                 self._enter_error_state("Failed to open priming valve")
                 return
             
+            # Open refill valve immediately (ensures reservoir refilling)
+            if not self._set_pin('REFILL_VALVE', True):
+                logger.error("Failed to open refill valve - continuing pump sequence")
+            else:
+                self._publish_event('refill_valve_opened_immediately')
+            
             self._publish_event('priming_started')
             
             # Schedule engine start after pre-open delay
@@ -518,12 +524,6 @@ class PumpController:
             if not self._set_pin('IGN_ON', True):
                 self._enter_error_state("Failed to turn on ignition")
                 return
-            
-            # Open refill valve immediately when engine starts
-            if not self._set_pin('REFILL_VALVE', True):
-                logger.error("Failed to open refill valve")
-            else:
-                self._publish_event('refill_valve_opened_on_start')
             
             # Engine is now running
             self._state = PumpState.RUNNING
