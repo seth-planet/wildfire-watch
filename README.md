@@ -36,7 +36,7 @@ docker-compose up -d
 http://your-device:5000
 ```
 
-⚠️ **Security Warning**: Default certificates are INSECURE. See [Security Setup](#security-setup).
+⚠️ **Security Warning**: Default certificates are INSECURE. See [Security Setup](../docs/security.md).
 
 ## Documentation
 
@@ -77,14 +77,6 @@ http://your-device:5000
                     │  Trigger    │     │   System    │
                     └─────────────┘     └─────────────┘
 ```
-
-## Security Setup
-
-### ⚠️ Default Certificates Warning
-
-**The system includes default TLS certificates for instant deployment. These are INSECURE!**
-
-See [Security Best Practices](../docs/security.md) for complete hardening guide.
 
 ## Configuration
 

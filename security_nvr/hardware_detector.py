@@ -190,4 +190,38 @@ class HardwareDetector:
             platform['container'] = 'balena'
             platform['device_uuid'] = os.environ.get('BALENA_DEVICE_UUID')
             
-        return
+        return platform
+    
+    def get_recommended_config(self) -> Dict:
+        """Get recommended configuration based on detected hardware"""
+        config = {
+            'detector_type': 'cpu',
+            'detector_device': '0',
+            'model_path': '/models/wildfire/wildfire_cpu.tflite',
+            'hwaccel_args': [],
+            'record_codec': 'copy',
+            'record_preset': 'fast',
+            'record_quality': '23'
+        }
+        
+        # Select best detector
+        if self.detected_hardware['gpu']['vendor'] == 'nvidia':
+            config['detector_type'] = 'tensorrt'
+        elif self.detected_hardware['hailo']['devices']:
+            config['detector_type'] = 'hailo'
+            config['model_path'] = '/models/wildfire/wildfire_hailo8.hef'
+        elif self.detected_hardware['coral']['usb'] or self.detected_hardware['coral']['pcie']:
+            config['detector_type'] = 'edgetpu'
+            config['model_path'] = '/models/wildfire/wildfire_coral_lite.tflite'
+
+        return config
+
+if __name__ == '__main__':
+    detector = HardwareDetector()
+    config = detector.get_recommended_config()
+    
+    if '--export' in sys.argv:
+        with open('/tmp/hardware_config.json', 'w') as f:
+            json.dump({'detected': detector.detected_hardware, 'recommended': config}, f)
+    else:
+        print(json.dumps(config, indent=2))

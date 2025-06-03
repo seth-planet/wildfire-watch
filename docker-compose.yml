@@ -1,104 +1,313 @@
 version: '3.8'
 
-# Single file with profiles for different deployments
-# Usage: docker-compose --profile production up
+# Common environment variables
+x-common-variables: &common-variables
+  MQTT_BROKER: ${MQTT_BROKER:-mqtt_broker}
+  MQTT_PORT: ${MQTT_PORT:-1883}
+  MQTT_TLS: ${MQTT_TLS:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  NODE_ID: ${HOSTNAME:-${BALENA_DEVICE_UUID:-unknown}}
+
+# Common healthcheck for MQTT connectivity
+x-healthcheck-mqtt: &healthcheck-mqtt
+  test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${MQTT_BROKER:-mqtt_broker}', ${MQTT_PORT:-1883})); s.close()"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+# Platform-specific device mappings
+x-device-mappings: &device-mappings
+  devices:
+    # Coral USB (all platforms)
+    - /dev/bus/usb:/dev/bus/usb
+    # Coral PCIe (x86)
+    - /dev/apex_0:/dev/apex_0
+    # Hailo (Pi 5 and x86)
+    - /dev/hailo0:/dev/hailo0
+    # GPU acceleration
+    - /dev/dri:/dev/dri
+    # Video devices
+    - /dev/video0:/dev/video0
+    - /dev/video1:/dev/video1
 
 services:
+  # Core MQTT Broker - starts first
   mqtt_broker:
-    build: ./mqtt_broker
+    build:
+      context: ./mqtt_broker
+      dockerfile: Dockerfile
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wildfire-watch/mqtt_broker:${VERSION:-latest}
     container_name: mqtt-broker
     hostname: mqtt-broker
     restart: unless-stopped
     ports:
       - "${MQTT_PORT:-1883}:1883"
       - "${MQTT_TLS_PORT:-8883}:8883"
+      - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
       - certs:/mnt/data/certs:ro
     networks:
       wildfire_net:
         ipv4_address: ${MQTT_STATIC_IP:-192.168.100.10}
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck", "-W", "5"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      MOSQUITTO_USERNAME: ${MOSQUITTO_USERNAME:-}
+      MOSQUITTO_PASSWORD: ${MOSQUITTO_PASSWORD:-}
+    labels:
+      io.balena.features.dbus: '1'
+      io.balena.features.supervisor-api: '1'
 
+  # Camera Discovery Service - needs MQTT
   camera_detector:
-    build: ./camera_detector
+    build:
+      context: ./camera_detector
+      dockerfile: Dockerfile
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wildfire-watch/camera_detector:${VERSION:-latest}
     container_name: camera-detector
     hostname: camera-detector
     restart: unless-stopped
     depends_on:
-      - mqtt_broker
+      mqtt_broker:
+        condition: service_healthy
     environment:
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker}
-      - CAMERA_CREDENTIALS=${CAMERA_CREDENTIALS:-admin:,admin:admin}
+      <<: *common-variables
+      CAMERA_CREDENTIALS: ${CAMERA_CREDENTIALS:-admin:,admin:admin}
+      DISCOVERY_INTERVAL: ${DISCOVERY_INTERVAL:-300}
+      MAC_TRACKING_ENABLED: ${MAC_TRACKING_ENABLED:-true}
+      FRIGATE_UPDATE_ENABLED: ${FRIGATE_UPDATE_ENABLED:-true}
+      FRIGATE_CONFIG_PATH: /config/frigate/config.yml
+      STARTUP_DELAY: 5  # Wait 5s after MQTT connection
+    volumes:
+      - camera_data:/data
+      - frigate_config:/config/frigate
+      - certs:/mnt/data/certs:ro
     networks:
       - wildfire_net
-    profiles:
-      - production
-      - development
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; r=requests.get('http://localhost:8080/health', timeout=5); exit(0 if r.status_code==200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      io.balena.features.dbus: '1'
 
+  # Frigate NVR - needs camera config
   security_nvr:
-    build: ./security_nvr
+    image: ghcr.io/blakeblackshear/frigate:${FRIGATE_VERSION:-stable}
     container_name: security-nvr
     hostname: security-nvr
     restart: unless-stopped
     privileged: true
     depends_on:
-      - mqtt_broker
-      - camera_detector
+      mqtt_broker:
+        condition: service_healthy
+      camera_detector:
+        condition: service_healthy
     ports:
-      - "5000:5000"
-      - "8554:8554"
+      - "5000:5000"   # Web UI
+      - "8554:8554"   # RTSP
+      - "8555:8555/tcp"  # WebRTC
+      - "8555:8555/udp"  # WebRTC
     volumes:
       - frigate_data:/media/frigate
+      - frigate_config:/config:ro
+      - frigate_models:/models
+      - /etc/localtime:/etc/localtime:ro
       - certs:/mnt/data/certs:ro
-    devices:
-      - /dev/dri:/dev/dri
-      - /dev/bus/usb:/dev/bus/usb
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    shm_size: ${FRIGATE_SHM_SIZE:-512mb}
+    <<: *device-mappings
     environment:
-      - FRIGATE_DETECTOR=${FRIGATE_DETECTOR:-auto}
+      <<: *common-variables
+      FRIGATE_MQTT_HOST: ${MQTT_BROKER:-mqtt_broker}
+      FRIGATE_MQTT_PORT: ${MQTT_PORT:-1883}
+      FRIGATE_DETECTOR: ${FRIGATE_DETECTOR:-auto}
+      FRIGATE_HARDWARE: ${FRIGATE_HARDWARE:-auto}
+      PLUS_API_KEY: ${FRIGATE_PLUS_KEY:-}
+      STARTUP_DELAY: 10  # Wait for camera config
     networks:
       - wildfire_net
-    profiles:
-      - production
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/stats"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    labels:
+      io.balena.features.kernel-modules: '1'
+      io.balena.features.firmware: '1'
 
+  # Fire Consensus - needs MQTT and waits for cameras
   fire_consensus:
-    build: ./fire_consensus
+    build:
+      context: ./fire_consensus
+      dockerfile: Dockerfile
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wildfire-watch/fire_consensus:${VERSION:-latest}
     container_name: fire-consensus
     hostname: fire-consensus
     restart: unless-stopped
     depends_on:
-      - mqtt_broker
+      mqtt_broker:
+        condition: service_healthy
+      camera_detector:
+        condition: service_started
+      security_nvr:
+        condition: service_started
     environment:
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker}
-      - CONSENSUS_THRESHOLD=${CONSENSUS_THRESHOLD:-2}
+      <<: *common-variables
+      CONSENSUS_THRESHOLD: ${CONSENSUS_THRESHOLD:-2}
+      DETECTION_WINDOW: ${CAMERA_WINDOW:-10}
+      MIN_CONFIDENCE: ${MIN_CONFIDENCE:-0.7}
+      DETECTION_COOLDOWN: ${DETECTION_COOLDOWN:-30}
+      STARTUP_DELAY: 15  # Wait for all cameras to be discovered
+    volumes:
+      - consensus_data:/data
+      - certs:/mnt/data/certs:ro
     networks:
       - wildfire_net
-    profiles:
-      - production
-      - development
+    healthcheck:
+      <<: *healthcheck-mqtt
+    labels:
+      io.balena.features.dbus: '1'
 
+  # GPIO Controller - needs MQTT only
   gpio_trigger:
-    build: ./gpio_trigger
+    build:
+      context: ./gpio_trigger
+      dockerfile: Dockerfile
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wildfire-watch/gpio_trigger:${VERSION:-latest}
     container_name: gpio-trigger
     hostname: gpio-trigger
     restart: unless-stopped
     privileged: true
     depends_on:
-      - mqtt_broker
+      mqtt_broker:
+        condition: service_healthy
     devices:
       - /dev/gpiomem:/dev/gpiomem
+      - /dev/mem:/dev/mem
+      - /dev/gpiochip0:/dev/gpiochip0
+      - /dev/gpiochip1:/dev/gpiochip1
     environment:
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker}
-      - MAX_ENGINE_RUNTIME=${MAX_ENGINE_RUNTIME:-1800}
+      <<: *common-variables
+      MAIN_VALVE_PIN: ${MAIN_VALVE_PIN:-18}
+      IGNITION_START_PIN: ${IGNITION_START_PIN:-23}
+      IGNITION_ON_PIN: ${IGNITION_ON_PIN:-24}
+      IGNITION_OFF_PIN: ${IGNITION_OFF_PIN:-25}
+      REFILL_VALVE_PIN: ${REFILL_VALVE_PIN:-22}
+      PRIMING_VALVE_PIN: ${PRIMING_VALVE_PIN:-26}
+      RPM_REDUCE_PIN: ${RPM_REDUCE_PIN:-27}
+      MAX_ENGINE_RUNTIME: ${MAX_ENGINE_RUNTIME:-1800}
+      REFILL_MULTIPLIER: ${REFILL_MULTIPLIER:-40}
+      GPIO_SIMULATION: ${GPIO_SIMULATION:-false}  # Auto-detect on non-Pi
+    volumes:
+      - gpio_data:/data
+      - certs:/mnt/data/certs:ro
     networks:
       - wildfire_net
+    cap_add:
+      - SYS_RAWIO
+    healthcheck:
+      <<: *healthcheck-mqtt
+    labels:
+      io.balena.features.kernel-modules: '1'
+
+  # Telemetry Service - can start anytime after MQTT
+  cam_telemetry:
+    build:
+      context: ./cam_telemetry
+      dockerfile: Dockerfile
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wildfire-watch/cam_telemetry:${VERSION:-latest}
+    container_name: cam-telemetry
+    hostname: cam-telemetry
+    restart: unless-stopped
+    depends_on:
+      mqtt_broker:
+        condition: service_healthy
+    environment:
+      <<: *common-variables
+      CAMERA_ID: ${HOSTNAME:-${BALENA_DEVICE_UUID:-unknown}}
+      TELEMETRY_INTERVAL: ${TELEMETRY_INTERVAL:-60}
+      RTSP_STREAM_URL: ${RTSP_STREAM_URL:-}
+      MODEL_PATH: ${MODEL_PATH:-}
+      DETECTOR: ${DETECTOR:-}
+    volumes:
+      - certs:/mnt/data/certs:ro
+    networks:
+      - wildfire_net
+    healthcheck:
+      <<: *healthcheck-mqtt
+
+  # Optional: Model preparation service (for initial setup)
+  model_prep:
+    build:
+      context: ./converted_models
+      dockerfile: Dockerfile
+    image: wildfire-watch/model_prep:${VERSION:-latest}
+    container_name: model-prep
+    hostname: model-prep
     profiles:
-      - production
-      - raspberry-pi
+      - setup
+    volumes:
+      - frigate_models:/models
+      - ./models:/input:ro
+    environment:
+      TARGET_FORMATS: ${MODEL_FORMATS:-tflite,hailo,onnx}
+      TARGET_DEVICE: ${TARGET_DEVICE:-auto}
+    command: ["python", "convert_model.py", "/input/yolov8n.pt", "--output-dir", "/models"]
 
 volumes:
   mqtt_data:
+  mqtt_logs:
+  camera_data:
   frigate_data:
+    driver: local
+    driver_opts:
+      type: ${STORAGE_TYPE:-none}
+      o: ${STORAGE_OPTS:-bind}
+      device: ${STORAGE_DEVICE:-/media/frigate}
+  frigate_config:
+  frigate_models:
+  consensus_data:
+  gpio_data:
   certs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${CERT_PATH:-./certs}
 
 networks:
   wildfire_net:
@@ -106,3 +315,5 @@ networks:
     ipam:
       config:
         - subnet: ${NETWORK_SUBNET:-192.168.100.0/24}
+    driver_opts:
+      com.docker.network.bridge.name: br-wildfire
