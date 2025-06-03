@@ -80,6 +80,12 @@ Normal operation logs:
 | **Monitoring Inputs** |
 | Reservoir Float | GPIO 16 | White | Tank level sensor (optional) |
 | Line Pressure | GPIO 20 | Gray | Pressure switch (optional) |
+| **Enhanced Safety (Optional)** |
+| Water Flow Sensor | Configurable | Blue/White | Detects water flow for dry run protection |
+| Emergency Button | Configurable | Red | Manual fire trigger button |
+| Relay Feedback 1 | Configurable | Black | Main valve relay feedback |
+| Relay Feedback 2 | Configurable | Black | Ignition relay feedback |
+| Relay Feedback 3 | Configurable | Black | Additional relay feedback |
 
 ### Safety Sensor Wiring
 
@@ -94,6 +100,24 @@ Normal operation logs:
 - Connect between GPIO 20 and 3.3V
 - Opens when pressure is low
 - Set `LINE_PRESSURE_ACTIVE_LOW=true` for NC switches
+
+**Water Flow Sensor (Optional)**:
+- Use hall effect or paddle wheel sensor
+- Connect signal wire to configured GPIO pin
+- Connect power to 3.3V or 5V as required
+- Add pull-up resistor if sensor has open-drain output
+
+**Emergency Button (Optional)**:
+- Use normally open momentary switch
+- Connect between configured GPIO pin and Ground
+- Built-in debouncing prevents multiple triggers
+- Set `EMERGENCY_BUTTON_ACTIVE_LOW=true` for this wiring
+
+**Relay Feedback (Optional)**:
+- Connect to relay auxiliary contacts
+- Provides confirmation that relay actually operated
+- Wire auxiliary NO contact between feedback pin and 3.3V
+- Use when hardware validation is critical
 
 ### Wiring Diagram Example
 
@@ -170,6 +194,32 @@ ACTION_RETRY_INTERVAL=60    # Retry failed actions
 
 # Logging
 LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
+```
+
+### Hardware Validation (Optional)
+
+```bash
+# Enable hardware feedback monitoring
+HARDWARE_VALIDATION_ENABLED=false          # Enable relay feedback checking
+RELAY_FEEDBACK_PINS=12,13,14               # Feedback pins for relays (comma-separated)
+HARDWARE_CHECK_INTERVAL=30                 # Check hardware every 30 seconds
+
+# Enhanced status reporting
+ENHANCED_STATUS_ENABLED=true               # Include detailed hardware status
+SIMULATION_MODE_WARNINGS=true              # Warn when in simulation mode
+```
+
+### Dry Run Protection
+
+```bash
+# Pump dry run protection
+DRY_RUN_PROTECTION_ENABLED=true            # Enable dry run monitoring
+MAX_DRY_RUN_TIME=300                       # Max pump runtime without water (5 minutes)
+FLOW_SENSOR_PIN=                           # Optional water flow sensor pin
+
+# Emergency features
+EMERGENCY_BUTTON_PIN=                      # Optional manual emergency trigger pin
+EMERGENCY_BUTTON_ACTIVE_LOW=true           # Button wiring (true = pull-up, false = pull-down)
 ```
 
 ## Understanding the Pump Sequence
@@ -469,6 +519,31 @@ IDLE → PRIMING → STARTING → RUNNING → REDUCING_RPM → STOPPING → REFI
 6. **RPM Reduction**: Gentle shutdown sequence
 7. **Cooldown Period**: Prevents rapid cycling
 8. **State Validation**: Can't start from invalid state
+9. **Dry Run Protection**: Automatic shutdown if pump runs without water for >5 minutes
+10. **Hardware Validation**: Optional relay feedback monitoring to detect hardware failures
+11. **Simulation Mode Warnings**: Critical alerts when GPIO hardware is unavailable
+
+### Error State Strategy
+
+The system uses **intelligent error recovery** to minimize manual intervention while maintaining safety:
+
+#### When ERROR State is Required (Manual Intervention)
+1. **Main Valve Safety Failure** - Valve won't open AND emergency procedures fail
+2. **Dry Run Protection** - Pump runs >5 minutes without water flow
+3. **Complete Engine Failure** - Ignition fails AND emergency start procedures fail
+
+#### Automatic Recovery (No ERROR State)
+1. **GPIO Pin Failures** - 3 retry attempts with progressive delays
+2. **MQTT Connection Issues** - Built-in retry mechanism handles failures  
+3. **Non-Critical Valve Failures** - Continues with degraded operation
+4. **Transient Hardware Issues** - Emergency procedures attempt recovery
+
+#### Emergency Recovery Procedures
+- **Emergency Valve Opening** - Rapid pulses and extended activation for sticky valves
+- **Emergency Ignition Start** - Extended cranking with multiple attempts
+- **Graceful Degradation** - Core fire suppression maintained during minor failures
+
+**Key Principle**: Only enter ERROR state when fire suppression capability is truly compromised.
 
 ### Manual Overrides
 
@@ -478,6 +553,88 @@ Always install these physical controls:
 3. **Fuel Shutoff** - Stops engine without electrical
 4. **Main Power Switch** - Disconnects all systems
 5. **Refill Bypass** - Manual refill control
+
+## Enhanced Safety Features
+
+### Dry Run Protection (Enabled by Default)
+
+Protects pumps from damage by monitoring for water flow during operation:
+
+- **5-minute timeout**: Automatically shuts down pump if no water flow detected
+- **Multi-sensor support**: Uses flow sensor, pressure sensor, or timing-based detection
+- **Progressive warnings**: Alerts at 80% of timeout limit
+- **Graceful degradation**: Works without sensors by assuming flow after priming
+
+**Configuration**:
+```bash
+DRY_RUN_PROTECTION_ENABLED=true    # Enable monitoring
+MAX_DRY_RUN_TIME=300               # 5 minutes default
+FLOW_SENSOR_PIN=19                 # Optional flow sensor
+```
+
+### Hardware Validation (Optional)
+
+Monitors relay feedback to detect hardware failures:
+
+- **Relay feedback monitoring**: Compares expected vs actual relay states
+- **Failure detection**: Alerts when relays don't respond correctly
+- **Hardware status tracking**: Reports health of each relay
+- **Simulation mode detection**: Clearly identifies when no hardware control is available
+
+**Configuration**:
+```bash
+HARDWARE_VALIDATION_ENABLED=true   # Enable validation
+RELAY_FEEDBACK_PINS=12,13,14       # Feedback pins for each relay
+HARDWARE_CHECK_INTERVAL=30         # Check every 30 seconds
+```
+
+### Emergency Button (Optional)
+
+Physical emergency trigger for manual fire response:
+
+- **Manual fire trigger**: Bypasses all network dependencies
+- **Debounced input**: Prevents multiple triggers
+- **Works during failures**: Operates even if MQTT/network is down
+
+**Configuration**:
+```bash
+EMERGENCY_BUTTON_PIN=21             # GPIO pin for button
+EMERGENCY_BUTTON_ACTIVE_LOW=true    # Button pulls to ground
+```
+
+### Enhanced Status Reporting
+
+Comprehensive system health monitoring:
+
+- **Hardware status**: GPIO availability, simulation mode, relay health
+- **Safety system status**: Dry run protection, sensor availability
+- **Critical warnings**: Clear alerts for simulation mode
+- **Detailed diagnostics**: Pin states, timing information, failure counts
+
+**MQTT Health Topic**: `system/trigger_telemetry`
+
+**Example Enhanced Health Report**:
+```json
+{
+  "state": "RUNNING",
+  "hardware": {
+    "gpio_available": true,
+    "simulation_mode": false,
+    "hardware_failures": 0
+  },
+  "dry_run_protection": {
+    "enabled": true,
+    "pump_running": true,
+    "water_flow_detected": true,
+    "current_runtime": 45.2
+  },
+  "safety_features": {
+    "emergency_button_available": true,
+    "flow_sensor_available": true
+  },
+  "critical_warnings": []
+}
+```
 
 ## Monitoring and Debugging
 
