@@ -153,8 +153,10 @@ class TestBasicOperation:
         """Test fire trigger starts pump sequence"""
         controller.handle_fire_trigger()
         
-        # Should open valve immediately
+        # Should open valves immediately
         assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) is True
+        assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) is True
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) is True
         
         # Should transition to priming
         assert controller._state == PumpState.PRIMING
@@ -165,7 +167,7 @@ class TestBasicOperation:
         # Wait for engine start
         assert wait_for_state(controller, PumpState.RUNNING, timeout=1)
         
-        # Check engine is on
+        # Check engine is on and refill valve still open
         assert GPIO.input(CONFIG['IGN_ON_PIN']) is True
         assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) is True
     
@@ -454,6 +456,7 @@ class TestMQTT:
         actions = get_published_actions(mock_mqtt)
         assert 'pump_sequence_start' in actions
         assert 'valve_opened' in actions or 'emergency_valve_open' in actions
+        assert 'refill_valve_opened_immediately' in actions
         assert 'engine_running' in actions
     
     def test_health_reports_published(self, controller, mock_mqtt):

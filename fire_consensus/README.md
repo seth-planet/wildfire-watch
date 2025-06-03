@@ -79,7 +79,7 @@ AREA_INCREASE_RATIO=1.2     # Fire must grow 20% between frames
 
 ```bash
 # System health
-HEALTH_INTERVAL=60          # Report health every minute
+TELEMETRY_INTERVAL=60       # Report health every minute
 CLEANUP_INTERVAL=300        # Clean old data every 5 minutes
 CAMERA_TIMEOUT=120          # Mark camera offline after 2 minutes
 
