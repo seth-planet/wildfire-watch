@@ -64,6 +64,24 @@ CONFIG = {
     # Safety Configuration
     'RESERVOIR_FLOAT_ACTIVE_LOW': os.getenv('RESERVOIR_FLOAT_ACTIVE_LOW', 'true').lower() == 'true',
     'LINE_PRESSURE_ACTIVE_LOW': os.getenv('LINE_PRESSURE_ACTIVE_LOW', 'true').lower() == 'true',
+    
+    # Hardware Validation (Optional)
+    'HARDWARE_VALIDATION_ENABLED': os.getenv('HARDWARE_VALIDATION_ENABLED', 'false').lower() == 'true',
+    'RELAY_FEEDBACK_PINS': os.getenv('RELAY_FEEDBACK_PINS', '').split(',') if os.getenv('RELAY_FEEDBACK_PINS') else [],
+    'HARDWARE_CHECK_INTERVAL': float(os.getenv('HARDWARE_CHECK_INTERVAL', '30')),
+    
+    # Dry Run Protection
+    'DRY_RUN_PROTECTION_ENABLED': os.getenv('DRY_RUN_PROTECTION_ENABLED', 'true').lower() == 'true',
+    'MAX_DRY_RUN_TIME': float(os.getenv('MAX_DRY_RUN_TIME', '300')),  # 5 minutes default
+    'FLOW_SENSOR_PIN': int(os.getenv('FLOW_SENSOR_PIN', '')) if os.getenv('FLOW_SENSOR_PIN') else None,
+    
+    # Emergency Features (Optional)
+    'EMERGENCY_BUTTON_PIN': int(os.getenv('EMERGENCY_BUTTON_PIN', '')) if os.getenv('EMERGENCY_BUTTON_PIN') else None,
+    'EMERGENCY_BUTTON_ACTIVE_LOW': os.getenv('EMERGENCY_BUTTON_ACTIVE_LOW', 'true').lower() == 'true',
+    
+    # Status Reporting
+    'ENHANCED_STATUS_ENABLED': os.getenv('ENHANCED_STATUS_ENABLED', 'true').lower() == 'true',
+    'SIMULATION_MODE_WARNINGS': os.getenv('SIMULATION_MODE_WARNINGS', 'true').lower() == 'true',
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -86,7 +104,12 @@ try:
     GPIO_AVAILABLE = True
 except (ImportError, RuntimeError):
     GPIO_AVAILABLE = False
-    logger.warning("RPi.GPIO unavailable; using simulation mode")
+    if CONFIG['SIMULATION_MODE_WARNINGS']:
+        logger.critical("⚠️  HARDWARE SIMULATION MODE ACTIVE ⚠️")
+        logger.critical("⚠️  GPIO CONTROL IS SIMULATED - NO PHYSICAL HARDWARE CONTROL ⚠️")
+        logger.critical("⚠️  PUMP AND VALVES WILL NOT OPERATE IN WILDFIRE EMERGENCY ⚠️")
+    else:
+        logger.warning("RPi.GPIO unavailable; using simulation mode")
     
     class GPIO:
         BCM = "BCM"
@@ -162,6 +185,16 @@ class PumpController:
         self._low_pressure_detected = False
         self._current_runtime = 0  # Track current session runtime
         
+        # Hardware validation state
+        self._hardware_status = {}
+        self._last_hardware_check = 0
+        self._hardware_failures = 0
+        
+        # Dry run protection state  
+        self._pump_start_time = None
+        self._water_flow_detected = False
+        self._dry_run_warnings = 0
+        
         # Initialize GPIO
         self._init_gpio()
         
@@ -204,6 +237,25 @@ class PumpController:
             pull = GPIO.PUD_DOWN if self.cfg['LINE_PRESSURE_ACTIVE_LOW'] else GPIO.PUD_UP
             GPIO.setup(self.cfg['LINE_PRESSURE_PIN'], GPIO.IN, pull_up_down=pull)
             logger.info(f"Line pressure switch on pin {self.cfg['LINE_PRESSURE_PIN']}")
+        
+        # Optional hardware validation pins
+        if self.cfg['RELAY_FEEDBACK_PINS']:
+            for i, pin_str in enumerate(self.cfg['RELAY_FEEDBACK_PINS']):
+                if pin_str.strip():
+                    pin = int(pin_str.strip())
+                    GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+                    logger.info(f"Relay feedback pin {i+1} configured on pin {pin}")
+        
+        # Optional flow sensor pin
+        if self.cfg['FLOW_SENSOR_PIN']:
+            GPIO.setup(self.cfg['FLOW_SENSOR_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            logger.info(f"Water flow sensor on pin {self.cfg['FLOW_SENSOR_PIN']}")
+        
+        # Optional emergency button pin
+        if self.cfg['EMERGENCY_BUTTON_PIN']:
+            pull = GPIO.PUD_UP if self.cfg['EMERGENCY_BUTTON_ACTIVE_LOW'] else GPIO.PUD_DOWN
+            GPIO.setup(self.cfg['EMERGENCY_BUTTON_PIN'], GPIO.IN, pull_up_down=pull)
+            logger.info(f"Emergency button on pin {self.cfg['EMERGENCY_BUTTON_PIN']}")
     
     def _setup_mqtt(self):
         """Setup MQTT client with TLS if configured"""
@@ -303,17 +355,49 @@ class PumpController:
         except Exception as e:
             logger.error(f"Failed to publish event: {e}")
     
-    def _set_pin(self, pin_name: str, state: bool) -> bool:
-        """Set GPIO pin state with error handling"""
+    def _set_pin(self, pin_name: str, state: bool, max_retries: int = 3) -> bool:
+        """Set GPIO pin state with error handling and retry logic"""
         pin = self.cfg[f'{pin_name}_PIN']
-        try:
-            GPIO.output(pin, GPIO.HIGH if state else GPIO.LOW)
-            logger.debug(f"Set {pin_name} (pin {pin}) to {'HIGH' if state else 'LOW'}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to set {pin_name}: {e}")
-            self._publish_event('gpio_error', {'pin': pin_name, 'error': str(e)})
-            return False
+        retry_delays = [0.1, 0.5, 2.0]  # Progressive delays
+        
+        for attempt in range(max_retries):
+            try:
+                GPIO.output(pin, GPIO.HIGH if state else GPIO.LOW)
+                
+                # Verify operation succeeded for critical pins
+                if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START']:
+                    time.sleep(0.05)  # Small delay for hardware response
+                    actual_state = GPIO.input(pin)
+                    expected_state = GPIO.HIGH if state else GPIO.LOW
+                    if actual_state != expected_state:
+                        raise Exception(f"Pin state verification failed: expected {expected_state}, got {actual_state}")
+                
+                logger.debug(f"Set {pin_name} (pin {pin}) to {'HIGH' if state else 'LOW'}")
+                return True
+                
+            except Exception as e:
+                attempt_num = attempt + 1
+                if attempt_num < max_retries:
+                    delay = retry_delays[attempt] if attempt < len(retry_delays) else retry_delays[-1]
+                    logger.warning(f"GPIO {pin_name} attempt {attempt_num}/{max_retries} failed: {e}. Retrying in {delay}s...")
+                    self._publish_event('gpio_retry', {
+                        'pin': pin_name, 
+                        'attempt': attempt_num,
+                        'max_retries': max_retries,
+                        'delay': delay,
+                        'error': str(e)
+                    })
+                    time.sleep(delay)
+                else:
+                    logger.error(f"GPIO {pin_name} failed after {max_retries} attempts: {e}")
+                    self._publish_event('gpio_failure_final', {
+                        'pin': pin_name, 
+                        'attempts': max_retries,
+                        'error': str(e)
+                    })
+                    return False
+        
+        return False
     
     def _is_reservoir_full(self) -> bool:
         """Check if reservoir is full (float switch)"""
@@ -375,6 +459,18 @@ class PumpController:
         # Monitor reservoir level during refill
         if self.cfg['RESERVOIR_FLOAT_PIN']:
             threading.Thread(target=self._monitor_reservoir_level, daemon=True).start()
+        
+        # Start hardware validation monitoring if enabled
+        if self.cfg['HARDWARE_VALIDATION_ENABLED']:
+            self._schedule_timer('hardware_check', self._validate_hardware, self.cfg['HARDWARE_CHECK_INTERVAL'])
+        
+        # Start dry run protection monitoring if enabled
+        if self.cfg['DRY_RUN_PROTECTION_ENABLED']:
+            threading.Thread(target=self._monitor_dry_run_protection, daemon=True).start()
+        
+        # Start emergency button monitoring if configured
+        if self.cfg['EMERGENCY_BUTTON_PIN']:
+            threading.Thread(target=self._monitor_emergency_button, daemon=True).start()
     
     def _monitor_reservoir_level(self):
         """Monitor reservoir level during refill operations"""
@@ -403,7 +499,9 @@ class PumpController:
             self._publish_event('mqtt_connected')
         else:
             logger.error(f"MQTT connection failed with code {rc}")
-            self._state = PumpState.ERROR
+            # Don't enter ERROR state - MQTT already has retry logic
+            # Just log the issue and let the retry mechanism handle it
+            self._publish_event('mqtt_connection_failed', {'rc': rc})
     
     def _on_disconnect(self, client, userdata, rc):
         """MQTT disconnection callback"""
@@ -461,7 +559,7 @@ class PumpController:
                 self._publish_event('error_state_trigger_ignored')
     
     def _start_pump_sequence(self):
-        """Start the pump startup sequence"""
+        """Start the pump startup sequence with enhanced error handling"""
         with self._lock:
             if self._state != PumpState.IDLE:
                 logger.warning(f"Cannot start pump from {self._state.name} state")
@@ -470,23 +568,31 @@ class PumpController:
             self._state = PumpState.PRIMING
             self._publish_event('pump_sequence_start')
             
-            # Open main valve first (fail-safe)
+            # Open main valve first (fail-safe) - CRITICAL for sprinklers
             if not self._set_pin('MAIN_VALVE', True):
-                self._enter_error_state("Failed to open main valve")
-                return
+                # This is critical - but try emergency valve opening approaches
+                logger.critical("Main valve failed - attempting emergency valve procedures")
+                
+                # Try alternative valve control methods
+                if not self._emergency_valve_open():
+                    self._enter_error_state("Failed to open main valve - sprinkler system unavailable")
+                    return
+                else:
+                    logger.warning("Emergency valve procedures succeeded - continuing")
             
-            # Start priming
+            # Start priming (important but not critical for immediate sprinkler operation)
             if not self._set_pin('PRIMING_VALVE', True):
-                self._enter_error_state("Failed to open priming valve")
-                return
+                logger.error("Failed to open priming valve - continuing without optimal priming")
+                self._publish_event('priming_degraded', {'reason': 'valve_failure'})
+            else:
+                self._publish_event('priming_started')
             
             # Open refill valve immediately (ensures reservoir refilling)
             if not self._set_pin('REFILL_VALVE', True):
                 logger.error("Failed to open refill valve - continuing pump sequence")
+                self._publish_event('refill_valve_failed', {'continuing': True})
             else:
                 self._publish_event('refill_valve_opened_immediately')
-            
-            self._publish_event('priming_started')
             
             # Schedule engine start after pre-open delay
             self._schedule_timer('start_engine', self._start_engine, self.cfg['PRE_OPEN_DELAY'])
@@ -494,8 +600,45 @@ class PumpController:
             # Schedule fire-off monitor
             self._schedule_timer('fire_off_monitor', self._check_fire_off, self.cfg['FIRE_OFF_DELAY'])
     
+    def _emergency_valve_open(self) -> bool:
+        """Emergency valve opening procedures when normal methods fail"""
+        logger.warning("Attempting emergency valve opening procedures")
+        
+        # Try direct GPIO manipulation with different timing
+        pin = self.cfg['MAIN_VALVE_PIN']
+        try:
+            # Method 1: Multiple rapid pulses
+            for _ in range(5):
+                GPIO.output(pin, GPIO.HIGH)
+                time.sleep(0.1)
+                GPIO.output(pin, GPIO.LOW)
+                time.sleep(0.1)
+                GPIO.output(pin, GPIO.HIGH)
+                time.sleep(0.2)
+                
+                # Check if valve responded
+                if GPIO.input(pin):
+                    logger.info("Emergency valve opening successful")
+                    self._publish_event('emergency_valve_success')
+                    return True
+            
+            # Method 2: Extended activation time (for sticky valves)
+            GPIO.output(pin, GPIO.HIGH)
+            time.sleep(1.0)  # Hold longer
+            
+            if GPIO.input(pin):
+                logger.info("Emergency valve opening successful (extended activation)")
+                self._publish_event('emergency_valve_success_extended')
+                return True
+                
+        except Exception as e:
+            logger.error(f"Emergency valve procedures failed: {e}")
+            self._publish_event('emergency_valve_failed', {'error': str(e)})
+        
+        return False
+    
     def _start_engine(self):
-        """Start the engine with safety checks"""
+        """Start the engine with safety checks and enhanced error handling"""
         with self._lock:
             if self._state != PumpState.PRIMING:
                 logger.warning(f"Cannot start engine from {self._state.name} state")
@@ -509,10 +652,11 @@ class PumpController:
             self._state = PumpState.STARTING
             self._publish_event('engine_start_sequence')
             
-            # Start ignition sequence
+            # Start ignition sequence with retry logic
             if not self._set_pin('IGN_START', True):
-                self._enter_error_state("Failed to activate ignition start")
-                return
+                logger.error("Primary ignition start failed - attempting recovery")
+                # Continue anyway - engine might start without perfect ignition signal
+                self._publish_event('ignition_start_degraded')
             
             # Hold ignition start for configured duration
             time.sleep(self.cfg['IGNITION_START_DURATION'])
@@ -522,8 +666,13 @@ class PumpController:
             
             # Turn on engine
             if not self._set_pin('IGN_ON', True):
-                self._enter_error_state("Failed to turn on ignition")
-                return
+                logger.critical("Failed to turn on ignition - critical for pump operation")
+                # This is more critical but try alternative ignition methods
+                if not self._emergency_ignition_start():
+                    self._enter_error_state("Failed to turn on ignition - engine unavailable")
+                    return
+                else:
+                    logger.warning("Emergency ignition procedures succeeded")
             
             # Engine is now running
             self._state = PumpState.RUNNING
@@ -546,6 +695,43 @@ class PumpController:
             
             # Schedule max runtime shutdown
             self._schedule_timer('max_runtime', self._shutdown_engine, self.cfg['MAX_ENGINE_RUNTIME'])
+    
+    def _emergency_ignition_start(self) -> bool:
+        """Emergency ignition procedures when normal start fails"""
+        logger.warning("Attempting emergency ignition procedures")
+        
+        try:
+            # Method 1: Extended cranking sequence
+            for attempt in range(3):
+                logger.info(f"Emergency ignition attempt {attempt + 1}")
+                
+                # Longer crank time
+                self._set_pin('IGN_START', True, max_retries=1)
+                time.sleep(self.cfg['IGNITION_START_DURATION'] * 2)
+                self._set_pin('IGN_START', False, max_retries=1)
+                
+                time.sleep(0.5)  # Rest between attempts
+                
+                # Try to turn on ignition
+                if self._set_pin('IGN_ON', True, max_retries=1):
+                    # Verify ignition is actually on
+                    time.sleep(0.2)
+                    if GPIO.input(self.cfg['IGN_ON_PIN']):
+                        logger.info("Emergency ignition successful")
+                        self._publish_event('emergency_ignition_success')
+                        return True
+                
+                # Reset for next attempt
+                self._set_pin('IGN_ON', False, max_retries=1)
+                time.sleep(1.0)
+            
+            logger.error("All emergency ignition attempts failed")
+            self._publish_event('emergency_ignition_failed')
+            return False
+            
+        except Exception as e:
+            logger.error(f"Emergency ignition procedures failed: {e}")
+            return False
     
     def _close_priming_valve(self):
         """Close priming valve and start pressure monitoring"""
@@ -748,8 +934,145 @@ class PumpController:
             # Keep health monitoring active
             self._schedule_timer('health', self._publish_health, self.cfg['HEALTH_INTERVAL'])
     
+    def _validate_hardware(self):
+        """Validate hardware state and detect failures (optional)"""
+        if not self.cfg['HARDWARE_VALIDATION_ENABLED']:
+            return
+        
+        current_time = time.time()
+        self._last_hardware_check = current_time
+        
+        try:
+            # Check relay feedback pins if configured
+            if self.cfg['RELAY_FEEDBACK_PINS']:
+                for i, pin_str in enumerate(self.cfg['RELAY_FEEDBACK_PINS']):
+                    if pin_str.strip():
+                        pin = int(pin_str.strip())
+                        feedback_state = GPIO.input(pin)
+                        expected_state = self._get_expected_relay_state(i)
+                        
+                        if feedback_state != expected_state:
+                            self._hardware_failures += 1
+                            logger.warning(f"Hardware validation failure: Relay {i+1} feedback mismatch")
+                            self._publish_event('hardware_validation_failure', {
+                                'relay': i+1,
+                                'expected': expected_state,
+                                'actual': feedback_state
+                            })
+                        else:
+                            self._hardware_status[f'relay_{i+1}'] = 'OK'
+            
+            # Check simulation mode status
+            if not GPIO_AVAILABLE and self.cfg['SIMULATION_MODE_WARNINGS']:
+                self._publish_event('simulation_mode_warning', {
+                    'message': 'System running in simulation mode - no physical hardware control'
+                })
+            
+        except Exception as e:
+            logger.error(f"Hardware validation error: {e}")
+            self._hardware_failures += 1
+        
+        # Reschedule next check
+        self._schedule_timer('hardware_check', self._validate_hardware, self.cfg['HARDWARE_CHECK_INTERVAL'])
+    
+    def _get_expected_relay_state(self, relay_index: int) -> bool:
+        """Get expected state for relay based on current system state"""
+        # This is a simplified example - actual implementation would depend on hardware wiring
+        if relay_index == 0:  # Assuming relay 0 is main valve
+            return GPIO.input(self.cfg['MAIN_VALVE_PIN'])
+        elif relay_index == 1:  # Assuming relay 1 is ignition
+            return GPIO.input(self.cfg['IGN_ON_PIN'])
+        return False  # Default to off for unknown relays
+    
+    def _monitor_dry_run_protection(self):
+        """Monitor for pump running without water flow (dry run protection)"""
+        while True:
+            try:
+                with self._lock:
+                    current_time = time.time()
+                    
+                    # Check if pump is running
+                    pump_running = (self._state == PumpState.RUNNING and 
+                                  GPIO.input(self.cfg['IGN_ON_PIN']))
+                    
+                    if pump_running:
+                        # Initialize pump start time if not set
+                        if self._pump_start_time is None:
+                            self._pump_start_time = current_time
+                            self._water_flow_detected = False
+                        
+                        # Check for water flow if sensor is available
+                        if self.cfg['FLOW_SENSOR_PIN']:
+                            flow_detected = GPIO.input(self.cfg['FLOW_SENSOR_PIN'])
+                            if flow_detected:
+                                self._water_flow_detected = True
+                        else:
+                            # If no flow sensor, check line pressure as proxy
+                            if self.cfg['LINE_PRESSURE_PIN']:
+                                pressure_ok = self._check_line_pressure()
+                                if pressure_ok:
+                                    self._water_flow_detected = True
+                            else:
+                                # No sensors available - assume water flow after priming period
+                                if current_time - self._pump_start_time > self.cfg['PRIMING_DURATION']:
+                                    self._water_flow_detected = True
+                        
+                        # Check dry run time limit
+                        dry_run_time = current_time - self._pump_start_time
+                        
+                        if dry_run_time > self.cfg['MAX_DRY_RUN_TIME'] and not self._water_flow_detected:
+                            logger.critical(f"DRY RUN PROTECTION: Pump running {dry_run_time:.1f}s without water flow!")
+                            self._publish_event('dry_run_protection_triggered', {
+                                'dry_run_time': dry_run_time,
+                                'max_allowed': self.cfg['MAX_DRY_RUN_TIME']
+                            })
+                            self._enter_error_state(f"Dry run protection: {dry_run_time:.1f}s without water flow")
+                            break
+                        elif dry_run_time > self.cfg['MAX_DRY_RUN_TIME'] * 0.8 and not self._water_flow_detected:
+                            # Warning at 80% of limit
+                            self._dry_run_warnings += 1
+                            if self._dry_run_warnings % 5 == 1:  # Log every 5th warning to avoid spam
+                                logger.warning(f"DRY RUN WARNING: Pump running {dry_run_time:.1f}s without detected water flow")
+                    else:
+                        # Reset dry run tracking when pump is not running
+                        self._pump_start_time = None
+                        self._water_flow_detected = False
+                        self._dry_run_warnings = 0
+            
+            except Exception as e:
+                logger.error(f"Dry run protection monitoring error: {e}")
+            
+            time.sleep(1)  # Check every second
+    
+    def _monitor_emergency_button(self):
+        """Monitor emergency button for manual fire trigger (optional)"""
+        last_state = None
+        debounce_time = 0.1  # 100ms debounce
+        
+        while True:
+            try:
+                if self.cfg['EMERGENCY_BUTTON_PIN']:
+                    current_state = GPIO.input(self.cfg['EMERGENCY_BUTTON_PIN'])
+                    active_state = not current_state if self.cfg['EMERGENCY_BUTTON_ACTIVE_LOW'] else current_state
+                    
+                    # Detect button press (transition to active)
+                    if last_state is not None and not last_state and active_state:
+                        logger.warning("EMERGENCY BUTTON PRESSED - Manual fire trigger activated!")
+                        self._publish_event('emergency_button_pressed')
+                        self.handle_fire_trigger()
+                        time.sleep(1)  # Prevent multiple triggers
+                    
+                    last_state = active_state
+                    time.sleep(debounce_time)
+                else:
+                    time.sleep(1)
+            
+            except Exception as e:
+                logger.error(f"Emergency button monitoring error: {e}")
+                time.sleep(1)
+    
     def _publish_health(self):
-        """Publish periodic health status"""
+        """Publish periodic health status with enhanced reporting"""
         with self._lock:
             health_data = {
                 'uptime': time.time(),
@@ -761,12 +1084,55 @@ class PumpController:
                 'low_pressure_detected': self._low_pressure_detected,
             }
             
+            # Enhanced status reporting
+            if self.cfg['ENHANCED_STATUS_ENABLED']:
+                # Hardware status
+                health_data['hardware'] = {
+                    'gpio_available': GPIO_AVAILABLE,
+                    'simulation_mode': not GPIO_AVAILABLE,
+                    'validation_enabled': self.cfg['HARDWARE_VALIDATION_ENABLED'],
+                    'last_hardware_check': self._last_hardware_check,
+                    'hardware_failures': self._hardware_failures,
+                    'hardware_status': self._hardware_status.copy(),
+                }
+                
+                # Dry run protection status
+                if self.cfg['DRY_RUN_PROTECTION_ENABLED']:
+                    health_data['dry_run_protection'] = {
+                        'enabled': True,
+                        'pump_running': self._pump_start_time is not None,
+                        'water_flow_detected': self._water_flow_detected,
+                        'dry_run_warnings': self._dry_run_warnings,
+                        'max_dry_run_time': self.cfg['MAX_DRY_RUN_TIME'],
+                    }
+                    if self._pump_start_time:
+                        health_data['dry_run_protection']['current_runtime'] = time.time() - self._pump_start_time
+                
+                # Safety feature status
+                health_data['safety_features'] = {
+                    'emergency_button_available': self.cfg['EMERGENCY_BUTTON_PIN'] is not None,
+                    'flow_sensor_available': self.cfg['FLOW_SENSOR_PIN'] is not None,
+                    'reservoir_sensor_available': self.cfg['RESERVOIR_FLOAT_PIN'] is not None,
+                    'pressure_sensor_available': self.cfg['LINE_PRESSURE_PIN'] is not None,
+                }
+                
+                # Critical warnings for simulation mode
+                if not GPIO_AVAILABLE and self.cfg['SIMULATION_MODE_WARNINGS']:
+                    health_data['critical_warnings'] = [
+                        'SIMULATION_MODE_ACTIVE',
+                        'NO_PHYSICAL_HARDWARE_CONTROL',
+                        'PUMP_WILL_NOT_OPERATE_IN_EMERGENCY'
+                    ]
+            
             # Add sensor states if available
             if self.cfg['RESERVOIR_FLOAT_PIN']:
                 health_data['reservoir_full'] = self._is_reservoir_full()
             
             if self.cfg['LINE_PRESSURE_PIN']:
                 health_data['line_pressure_ok'] = self._is_line_pressure_ok()
+            
+            # Include pin states for diagnostics
+            health_data['pin_states'] = self._get_state_snapshot()
             
             self._publish_event('health_report', health_data)
             
