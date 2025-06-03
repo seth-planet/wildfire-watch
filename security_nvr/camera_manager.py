@@ -74,10 +74,16 @@ class CameraManager:
                 camera = data.get('camera', {})
                 if camera and camera.get('online'):
                     self._add_detected_camera(camera)
+                    # Regenerate config when new camera found
+                    self.generate_frigate_config()
             elif msg.topic == "frigate/config/cameras":
                 # Camera detector service published bulk update
                 data = json.loads(msg.payload)
-                self._update_detected_cameras(data.get('cameras', {}))
+                cameras = data.get('cameras', {})
+                if cameras:
+                    self._update_detected_cameras(cameras)
+                    # Regenerate config with all cameras
+                    self.generate_frigate_config()
         except Exception as e:
             logger.error(f"Error processing MQTT message: {e}")
             

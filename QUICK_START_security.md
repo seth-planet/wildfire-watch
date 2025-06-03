@@ -39,7 +39,7 @@ The system will:
 │  IP Cameras │────▶│   Camera    │────▶│  Security   │
 │   (RTSP)    │     │  Detector   │     │ NVR Service │
 └─────────────┘     └─────────────┘     │  (Frigate)  │
-                            │            └─────────────┘
+                            │           └─────────────┘
                             │                    │
                             ▼                    ▼
                     ┌─────────────┐     ┌─────────────┐

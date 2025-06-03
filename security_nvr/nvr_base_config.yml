@@ -56,12 +56,10 @@ record:
       objects:
         fire: 365     # Keep fire events for 1 year
         smoke: 365    # Keep smoke events for 1 year
-        person: 90    # Keep person events for 3 months
-        car: 30       # Keep car events for 1 month
-        wildlife: 60  # Keep wildlife events for 2 months
-  export:
-    timelapse_args: "-vf setpts=0.04*PTS -r 30"  # 25x speed
-
+        person: 180   # Keep person events for 6 months
+        car: 60       # Keep car events for 2 months
+        wildlife: 120 # Keep wildlife events for 4 months
+        
 # Snapshot configuration
 snapshots:
   enabled: true

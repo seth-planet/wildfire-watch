@@ -7,8 +7,8 @@ set -euo pipefail
 
 # Configuration
 OUTDIR="${CERT_DIR:-certs}"
-CA_DAYS="${CA_DAYS:-3650}"  # 10 years
-CERT_DAYS="${CERT_DAYS:-1825}"  # 5 years
+CA_DAYS="${CA_DAYS:-14600}"  # 40 years
+CERT_DAYS="${CERT_DAYS:-14600}"  # 40 years
 RSA_BITS="${RSA_BITS:-2048}"
 
 # Colors for output
