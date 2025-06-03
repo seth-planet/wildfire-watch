@@ -433,7 +433,7 @@ The controller uses a state machine for safety:
 ```
 IDLE → PRIMING → STARTING → RUNNING → REDUCING_RPM → STOPPING → REFILLING → COOLDOWN → IDLE
          ↓          ↓          ↓           ↓            ↓           ↓
-        ERROR ←────┴──────────┴───────────┴────────────┴───────────┘
+        ERROR ←──-──┴──────────┴───────────┴────────────┴───────────┘
                                ↓
                          LOW_PRESSURE
 ```

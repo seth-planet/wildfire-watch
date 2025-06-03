@@ -1,140 +1,108 @@
 version: '3.8'
 
-# Load .env for overrides (e.g. MQTT_BROKER=mqtt-broker.local)
-env_file:
-  - .env
+# Single file with profiles for different deployments
+# Usage: docker-compose --profile production up
 
 services:
-  ###-------------------------------------------------------------------
   mqtt_broker:
-    # Build our custom Mosquitto (with conf.d/ for bridge, TLS, WS)
     build: ./mqtt_broker
     container_name: mqtt-broker
-    hostname: mqtt-broker                    # Enables mqtt-broker.local via mDNS
+    hostname: mqtt-broker
     restart: unless-stopped
     ports:
-      - "1883:1883"     # MQTT
-      # - "9001:9001"   # WebSocket (uncomment + enable in conf.d/websockets.conf)
-      # - "8883:8883"   # TLS (uncomment + enable in conf.d/tls.conf)
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_TLS_PORT:-8883}:8883"
+    volumes:
+      - mqtt_data:/mosquitto/data
+      - certs:/mnt/data/certs:ro
     networks:
-      lan_net:
-        ipv4_address: 192.168.100.10         # static-IP fallback
-    # environment:
-    #   - MQTT_ALLOW_ANONYMOUS=false         # to disable anon access under TLS
+      wildfire_net:
+        ipv4_address: ${MQTT_STATIC_IP:-192.168.100.10}
 
   camera_detector:
-    build:
-      context: ./camera_detector
-      args:
-        - PLATFORM=linux/arm64
+    build: ./camera_detector
     container_name: camera-detector
-    hostname: camera-detector                # camera-detector.local
-    platform: linux/arm64
+    hostname: camera-detector
     restart: unless-stopped
-    devices:
-      - "/dev/hailo0:/dev/hailo0"
+    depends_on:
+      - mqtt_broker
     environment:
-      - RTSP_STREAM_URL=${RTSP_STREAM_URL}
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker.local}
-      - DETECTOR=${DETECTOR}
-      - MODEL_PATH=${MODEL_PATH}
-    volumes:
-      - ./camera_detector/model:/app/model
-      - shared:/app/shared
+      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker}
+      - CAMERA_CREDENTIALS=${CAMERA_CREDENTIALS:-admin:,admin:admin}
     networks:
-      - lan_net
+      - wildfire_net
+    profiles:
+      - production
+      - development
 
-  cam_telemetry:
-    build: ./cam_telemetry
-    container_name: cam-telemetry
-    hostname: cam-telemetry
-    platform: linux/arm64
+  security_nvr:
+    build: ./security_nvr
+    container_name: security-nvr
+    hostname: security-nvr
     restart: unless-stopped
-    environment:
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker.local}
-      - CAMERA_ID=${HOSTNAME}
-      - TELEMETRY_INTERVAL=${TELEMETRY_INTERVAL}
+    privileged: true
+    depends_on:
+      - mqtt_broker
+      - camera_detector
+    ports:
+      - "5000:5000"
+      - "8554:8554"
     volumes:
-      - shared:/app/shared
+      - frigate_data:/media/frigate
+      - certs:/mnt/data/certs:ro
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      - FRIGATE_DETECTOR=${FRIGATE_DETECTOR:-auto}
     networks:
-      - lan_net
+      - wildfire_net
+    profiles:
+      - production
 
   fire_consensus:
     build: ./fire_consensus
     container_name: fire-consensus
     hostname: fire-consensus
-    platform: linux/arm64
     restart: unless-stopped
+    depends_on:
+      - mqtt_broker
     environment:
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker.local}
-      - CAMERA_WINDOW=${CAMERA_WINDOW}
-      - CAMERA_THRESHOLD=${CAMERA_THRESHOLD}
-    volumes:
-      - shared:/app/shared
+      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker}
+      - CONSENSUS_THRESHOLD=${CONSENSUS_THRESHOLD:-2}
     networks:
-      - lan_net
+      - wildfire_net
+    profiles:
+      - production
+      - development
 
   gpio_trigger:
     build: ./gpio_trigger
     container_name: gpio-trigger
     hostname: gpio-trigger
-    platform: linux/arm64
     restart: unless-stopped
     privileged: true
+    depends_on:
+      - mqtt_broker
     devices:
-      - "/dev/gpiomem:/dev/gpiomem"
+      - /dev/gpiomem:/dev/gpiomem
     environment:
-      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker.local}
-      - RELAY_GPIO_PIN=${RELAY_GPIO_PIN}
-    volumes:
-      - shared:/app/shared
+      - MQTT_BROKER=${MQTT_BROKER:-mqtt-broker}
+      - MAX_ENGINE_RUNTIME=${MAX_ENGINE_RUNTIME:-1800}
     networks:
-      - lan_net
-
-  frigate:
-    image: ghcr.io/blakeblackshear/frigate:stable-arm64
-    container_name: frigate
-    hostname: frigate
-    platform: linux/arm64
-    restart: unless-stopped
-    privileged: true
-    devices:
-      - "/dev/media0:/dev/media0"
-      - "/dev/media1:/dev/media1"
-      - "/dev/media2:/dev/media2"
-      - "/dev/video19:/dev/video19"
-      - "/dev/dri:/dev/dri"
-      - "/dev/hailo0:/dev/hailo0"
-    volumes:
-      - type: bind
-        source: /usr/bin/ffmpeg
-        target: /custom-ffmpeg/bin/ffmpeg
-        read_only: true
-      - type: bind
-        source: /usr/bin/ffprobe
-        target: /custom-ffmpeg/bin/ffprobe
-        read_only: true
-      - /lib/aarch64-linux-gnu:/custom-ffmpeg/lib:ro
-      - frigate_recordings:/media/frigate
-      - ./security_nvr/config.yml:/config/config.yml:ro
-    environment:
-      - FRIGATE_DETECTOR=${DETECTOR}
-      - RTSP_AUTO=true
-      - MQTT_HOST=${MQTT_BROKER:-mqtt-broker.local}
-      - LD_LIBRARY_PATH=/custom-ffmpeg/lib:/custom-ffmpeg/lib/blas:/custom-ffmpeg/lib/lapack
-    ports:
-      - "5000:5000"
-      - "8554:8554"
-    networks:
-      - lan_net
+      - wildfire_net
+    profiles:
+      - production
+      - raspberry-pi
 
 volumes:
-  shared:
-  frigate_recordings:
+  mqtt_data:
+  frigate_data:
+  certs:
 
 networks:
-  lan_net:
+  wildfire_net:
     driver: bridge
     ipam:
       config:
-        - subnet: 192.168.100.0/24
+        - subnet: ${NETWORK_SUBNET:-192.168.100.0/24}
