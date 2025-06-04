@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.12
 """
 PumpController for wildfire-watch:
 - Fail-safe, thread-safe engine and valve control
@@ -14,7 +14,7 @@ import json
 import socket
 import threading
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum, auto
 from typing import Optional, Dict, Any, Callable
 
@@ -303,7 +303,7 @@ class PumpController:
     
     def _now_iso(self) -> str:
         """Get current UTC timestamp in ISO format"""
-        return datetime.utcnow().isoformat() + "Z"
+        return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     
     def _get_state_snapshot(self) -> Dict[str, Any]:
         """Get current state of all pins and system"""
@@ -368,7 +368,7 @@ class PumpController:
                 if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START']:
                     time.sleep(0.05)  # Small delay for hardware response
                     actual_state = GPIO.input(pin)
-                    expected_state = GPIO.HIGH if state else GPIO.LOW
+                    expected_state = state  # Use boolean directly since GPIO.input returns boolean
                     if actual_state != expected_state:
                         raise Exception(f"Pin state verification failed: expected {expected_state}, got {actual_state}")
                 

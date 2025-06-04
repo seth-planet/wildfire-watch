@@ -1,3 +1,4 @@
+#!/usr/bin/env python3.12
 #!/usr/bin/env python3
 """
 Tests for Model Converter

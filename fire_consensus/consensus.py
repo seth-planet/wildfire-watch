@@ -11,7 +11,8 @@ import socket
 import threading
 import logging
 import hashlib
-from datetime import datetime, timedelta
+import math
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 from typing import Dict, List, Tuple, Optional, Set
 import numpy as np
@@ -42,6 +43,7 @@ class Config:
     MIN_AREA_RATIO = float(os.getenv("MIN_AREA_RATIO", "0.001"))
     MAX_AREA_RATIO = float(os.getenv("MAX_AREA_RATIO", "0.5"))
     AREA_INCREASE_RATIO = float(os.getenv("AREA_INCREASE_RATIO", "1.2"))
+    MOVING_AVERAGE_WINDOW = int(os.getenv("MOVING_AVERAGE_WINDOW", "3"))
     
     # Timing and Health
     HEALTH_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "60"))
@@ -140,32 +142,69 @@ class CameraState:
             del self.fire_objects[obj_id]
     
     def get_growing_fires(self, current_time: float) -> List[str]:
-        """Get object IDs that show fire growth pattern"""
+        """Get object IDs that show fire growth pattern using moving averages"""
         growing_fires = []
         
         for obj_id, detections in self.fire_objects.items():
-            if len(detections) < Config.INCREASE_COUNT:
+            # Need enough detections for meaningful moving average comparison
+            min_detections = Config.MOVING_AVERAGE_WINDOW * 2
+            if len(detections) < min_detections:
                 continue
             
             # Get recent detections within window
             recent = [d for d in detections
                      if current_time - d.timestamp <= Config.DETECTION_WINDOW]
             
-            if len(recent) >= Config.INCREASE_COUNT:
-                # Check for area increase pattern
-                areas = [d.area for d in recent[-Config.INCREASE_COUNT:]]
+            if len(recent) >= min_detections:
+                # Calculate moving averages to reduce noise
+                areas = [d.area for d in recent]
+                moving_averages = self._calculate_moving_averages(areas, Config.MOVING_AVERAGE_WINDOW)
                 
-                # Use ratio-based growth detection
-                growing = True
-                for i in range(1, len(areas)):
-                    if areas[i] < areas[i-1] * Config.AREA_INCREASE_RATIO:
-                        growing = False
-                        break
-                
-                if growing:
+                # Check if moving averages show growth trend
+                if self._check_growth_trend(moving_averages, Config.AREA_INCREASE_RATIO):
                     growing_fires.append(obj_id)
         
         return growing_fires
+    
+    def _calculate_moving_averages(self, areas: List[float], window_size: int) -> List[float]:
+        """Calculate moving averages for area values"""
+        if len(areas) < window_size:
+            return []
+        
+        moving_averages = []
+        for i in range(window_size - 1, len(areas)):
+            # Calculate average of current window
+            window_values = areas[i - window_size + 1:i + 1]
+            avg = sum(window_values) / len(window_values)
+            moving_averages.append(avg)
+        
+        return moving_averages
+    
+    def _check_growth_trend(self, moving_averages: List[float], growth_ratio: float) -> bool:
+        """Check if moving averages show consistent growth pattern"""
+        if len(moving_averages) < 2:
+            return False
+        
+        # Check for overall growth trend between first and last averages
+        first_avg = moving_averages[0]
+        last_avg = moving_averages[-1]
+        
+        # Require significant overall growth
+        if last_avg < first_avg * growth_ratio:
+            return False
+        
+        # Check that trend is generally upward (allow some fluctuation)
+        # Count how many moving average transitions show growth
+        growth_transitions = 0
+        total_transitions = len(moving_averages) - 1
+        
+        for i in range(1, len(moving_averages)):
+            if moving_averages[i] >= moving_averages[i-1] * 0.95:  # Allow 5% tolerance for noise
+                growth_transitions += 1
+        
+        # Require at least 70% of transitions to show growth (or minimal shrinkage)
+        growth_percentage = growth_transitions / total_transitions if total_transitions > 0 else 0
+        return growth_percentage >= 0.7
     
     def is_online(self, current_time: float) -> bool:
         """Check if camera is online based on telemetry"""
@@ -220,7 +259,7 @@ class FireConsensus:
             'node_id': self.config.NODE_ID,
             'service': 'fire_consensus',
             'status': 'offline',
-            'timestamp': datetime.utcnow().isoformat() + 'Z'
+            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         })
         self.mqtt_client.will_set(lwt_topic, lwt_payload, qos=1, retain=True)
         
@@ -304,6 +343,7 @@ class FireConsensus:
             confidence = float(data.get('confidence', 0))
             bbox = data.get('bounding_box', [])
             timestamp = data.get('timestamp', time.time())
+            object_id = data.get('object_id')  # Optional object ID for tracking
             
             if not camera_id or not bbox or len(bbox) != 4:
                 return
@@ -322,7 +362,8 @@ class FireConsensus:
                 timestamp=timestamp,
                 confidence=confidence,
                 area=area,
-                bbox=bbox
+                bbox=bbox,
+                object_id=object_id
             )
             
             # Process detection
@@ -393,14 +434,51 @@ class FireConsensus:
             logger.error(f"Error processing telemetry: {e}")
     
     def _calculate_area(self, bbox: List[float]) -> float:
-        """Calculate normalized area from bounding box"""
+        """Calculate normalized area from bounding box
+        
+        Handles two formats:
+        1. Direct detections: [x, y, width, height] where values are normalized (0-1)
+        2. Frigate events: [x1, y1, x2, y2] where values are pixel coordinates
+        """
         if len(bbox) != 4:
             return 0
         
-        # Bbox format: [x, y, width, height] normalized to [0,1]
-        width = bbox[2]
-        height = bbox[3]
-        return width * height
+        # Check for invalid values (NaN, inf, negative)
+        try:
+            if any(not isinstance(coord, (int, float)) or 
+                   math.isnan(coord) or math.isinf(coord) or coord < 0 
+                   for coord in bbox):
+                return 0
+        except (TypeError, ValueError):
+            return 0
+        
+        # Detect format by checking if values look like pixel coordinates (>1)
+        if any(coord > 1.0 for coord in bbox):
+            # Frigate format: [x1, y1, x2, y2] pixel coordinates
+            x1, y1, x2, y2 = bbox
+            width_pixels = abs(x2 - x1)
+            height_pixels = abs(y2 - y1)
+            
+            # Normalize by assuming reasonable image size (this is imperfect but necessary)
+            # Most IP cameras are at least 1920x1080, we'll use conservative estimate
+            estimated_image_area = 1920 * 1080
+            pixel_area = width_pixels * height_pixels
+            area = pixel_area / estimated_image_area
+            
+            # Check for invalid result
+            if math.isnan(area) or math.isinf(area):
+                return 0
+            return area
+        else:
+            # Direct detection format: [x, y, width, height] normalized coordinates
+            width = bbox[2]
+            height = bbox[3]
+            area = width * height
+            
+            # Check for invalid result
+            if math.isnan(area) or math.isinf(area):
+                return 0
+            return area
     
     def _validate_detection(self, confidence: float, area: float) -> bool:
         """Validate detection meets minimum criteria"""
@@ -472,7 +550,7 @@ class FireConsensus:
             # Create trigger payload
             payload = {
                 'node_id': self.config.NODE_ID,
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'trigger_number': self.trigger_count,
                 'consensus_cameras': cameras,
                 'camera_count': len(cameras),
@@ -576,7 +654,7 @@ class FireConsensus:
             payload = {
                 'node_id': self.config.NODE_ID,
                 'service': 'fire_consensus',
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'status': 'online' if self.mqtt_connected else 'degraded',
                 'config': {
                     'threshold': self.config.CONSENSUS_THRESHOLD,
@@ -632,7 +710,7 @@ class FireConsensus:
                 'node_id': self.config.NODE_ID,
                 'service': 'fire_consensus',
                 'status': 'offline',
-                'timestamp': datetime.utcnow().isoformat() + 'Z'
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
             })
             self.mqtt_client.publish(lwt_topic, lwt_payload, qos=1, retain=True)
         except:
