@@ -1,3 +1,4 @@
+#!/usr/bin/env python3.12
 #!/usr/bin/env python3
 """
 Hardware Integration Tests for Wildfire Watch

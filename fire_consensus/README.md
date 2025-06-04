@@ -71,8 +71,9 @@ MIN_AREA_RATIO=0.001        # Ignore tiny fires (0.1% of view)
 MAX_AREA_RATIO=0.5          # Ignore huge detections (probably errors)
 
 # Growth detection
-INCREASE_COUNT=3            # Need 3 frames of growth
-AREA_INCREASE_RATIO=1.2     # Fire must grow 20% between frames
+INCREASE_COUNT=3            # Minimum detections needed (legacy - now uses MOVING_AVERAGE_WINDOW)
+AREA_INCREASE_RATIO=1.2     # Fire must grow 20% overall from first to last average
+MOVING_AVERAGE_WINDOW=3     # Window size for moving average calculation
 ```
 
 ### Advanced Settings
@@ -83,11 +84,36 @@ TELEMETRY_INTERVAL=60       # Report health every minute
 CLEANUP_INTERVAL=300        # Clean old data every 5 minutes
 CAMERA_TIMEOUT=120          # Mark camera offline after 2 minutes
 
+# MQTT Connection
+MQTT_BROKER=mqtt_broker     # MQTT broker hostname
+MQTT_PORT=1883              # MQTT broker port
+MQTT_TLS=false              # Enable TLS encryption
+TLS_CA_PATH=/mnt/data/certs/ca.crt  # CA certificate path
+
+# Node Identity
+NODE_ID=${BALENA_DEVICE_UUID:-hostname}  # Unique node identifier
+
 # Logging
 LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
 ```
 
 ## Understanding Consensus
+
+### Moving Average Fire Growth Detection
+
+The system uses moving averages to detect fire growth, which provides several key benefits:
+
+**📊 Noise Reduction**: Object detection can be jittery, with fire areas fluctuating ±10% between frames. Moving averages smooth out these variations to reveal the true growth trend.
+
+**🎯 Robust Detection**: Unlike frame-by-frame comparison that can fail if any single detection is noisy, moving averages look at overall trends across multiple detections.
+
+**⚡ Flexible Sensitivity**: You can tune the moving average window size:
+- **Smaller window (2-3)**: More responsive but potentially noisier
+- **Larger window (4-6)**: More stable but slower to respond
+
+**🔍 Real vs False Fire Discrimination**: 
+- Real fires show consistent growth trends in their moving averages
+- False positives (reflections, shadows) show random fluctuations with no clear trend
 
 ### How It Works
 
@@ -108,12 +134,16 @@ LOG_LEVEL=INFO              # Set to DEBUG for troubleshooting
 ### Example Scenario
 
 ```
-Time 0s: Camera-1 sees small fire (0.01 area)
-Time 1s: Camera-1 sees larger fire (0.012 area) ✓ Growing
-Time 2s: Camera-2 sees small fire (0.008 area)
-Time 3s: Camera-1 sees larger fire (0.015 area) ✓ Growing
-Time 4s: Camera-2 sees larger fire (0.010 area) ✓ Growing
-Time 5s: CONSENSUS! Both cameras see growing fires → Trigger sprinklers
+Time 0s: Camera-1 sees fire (0.010 area)
+Time 1s: Camera-1 sees fire (0.009 area) - temporary dip
+Time 2s: Camera-1 sees fire (0.012 area)
+Time 3s: Camera-1 sees fire (0.011 area) - slight dip  
+Time 4s: Camera-1 sees fire (0.014 area)
+Time 5s: Camera-1 sees fire (0.016 area)
+        Moving averages: [0.0103, 0.0107, 0.0123, 0.0137] → Growing trend ✓
+
+Time 6s: Camera-2 also shows growing trend ✓
+Time 7s: CONSENSUS! Both cameras show growing fires → Trigger sprinklers
 ```
 
 ## Common Issues and Solutions
@@ -133,8 +163,12 @@ Time 5s: CONSENSUS! Both cameras see growing fires → Trigger sprinklers
    ```
 3. **Require more growth**: Make fires prove they're real
    ```bash
-   INCREASE_COUNT=5
    AREA_INCREASE_RATIO=1.3
+   MOVING_AVERAGE_WINDOW=5  # Larger window for more smoothing
+   ```
+4. **Require more detections**: Need more data points
+   ```bash
+   CAMERA_WINDOW=15  # Longer time window for more detections
    ```
 
 ### Problem: Slow Response to Real Fires
@@ -153,6 +187,10 @@ Time 5s: CONSENSUS! Both cameras see growing fires → Trigger sprinklers
 3. **Lower confidence**: Accept lower certainty
    ```bash
    MIN_CONFIDENCE=0.6
+   ```
+4. **Use smaller moving average window**: Faster detection
+   ```bash
+   MOVING_AVERAGE_WINDOW=2  # Smaller window for quicker response
    ```
 
 ### Problem: System Not Triggering at All
@@ -183,6 +221,8 @@ The service publishes health reports showing:
 Topic: system/consensus_telemetry
 ```
 
+**Note**: The service also publishes Last Will Testament (LWT) messages to `system/consensus_telemetry/{NODE_ID}/lwt` for automatic offline detection.
+
 Example health report:
 ```json
 {
@@ -202,38 +242,55 @@ Example health report:
 ### Detection Algorithm
 
 1. **Object Tracking**
-   - Each fire gets unique ID
-   - Tracks movement and growth
-   - Handles multiple fires per camera
+   - Each fire gets unique ID for growth analysis
+   - Tracks movement and growth across detections
+   - Handles multiple fires per camera simultaneously
+   - Supports both direct detections and Frigate NVR events
+   - Automatically converts pixel coordinates to normalized areas
 
 2. **Growth Calculation**
-   - Compares fire size over time
-   - Uses exponential growth detection
-   - Filters out shrinking/static objects
+   - Uses moving averages to reduce detection noise
+   - Compares smoothed fire size trends over time
+   - Requires overall growth from first to last average (default 20%)
+   - Tolerates up to 30% of transitions showing temporary shrinkage
+   - Validates growth across multiple detection frames
+   - Filters out shrinking/static objects automatically
 
 3. **Consensus Logic**
    - Time-windowed voting system
    - Cameras must agree within window
    - Prevents split-second false positives
+   - Handles mixed detection sources (direct + Frigate)
+
+4. **Coordinate Handling**
+   - **Direct detections**: `[x, y, width, height]` normalized (0-1)
+   - **Frigate events**: `[x1, y1, x2, y2]` pixel coordinates
+   - Automatic format detection and area calculation
+   - Robust validation for invalid/extreme values
 
 ### MQTT Topics
 
 **Subscribes to:**
 - `fire/detection` - Individual camera detections
+- `fire/detection/+` - Camera-specific detection topics (wildcard)
 - `frigate/events` - Frigate NVR events
 - `system/camera_telemetry` - Camera health status
 
 **Publishes to:**
 - `fire/trigger` - Sprinkler activation command
 - `system/consensus_telemetry` - Service health
+- `system/consensus_telemetry/{NODE_ID}/lwt` - Last Will Testament for offline detection
 
 ### State Management
 
 The service maintains:
-- Camera states (online/offline)
-- Recent detections per camera
-- Fire object tracking
-- Consensus event history
+- **Camera states** (online/offline based on telemetry)
+- **Recent detections** per camera (up to 100 per camera)
+- **Fire object tracking** by unique object ID across detections
+- **Growing fire detection** using area increase ratios
+- **Consensus event history** (last 1000 events)
+- **Thread-safe operation** with comprehensive locking
+- **Automatic cleanup** of stale cameras and objects
 
 ## Fine-Tuning for Your Environment
 
@@ -272,16 +329,21 @@ CAMERA_WINDOW=5             # Tighter time window
 ### Fail-Safe Design
 
 - **No single point of failure**: Works with some cameras offline
-- **Network resilient**: Handles intermittent connections
+- **Network resilient**: Handles intermittent connections with exponential backoff
 - **Stateless operation**: Can restart without losing protection
 - **Tamper evident**: Logs all configuration changes
+- **Thread-safe**: Concurrent detection processing with proper locking
+- **Input validation**: Rejects malformed data (NaN, infinity, negative values)
+- **Automatic cleanup**: Removes stale cameras and old object tracks
 
 ### Security Features
 
 - **Encrypted MQTT**: TLS encryption for all messages
-- **Input validation**: Rejects malformed detections
-- **Rate limiting**: Prevents trigger spam
+- **Input validation**: Rejects malformed detections and extreme values
+- **Rate limiting**: Cooldown periods prevent trigger spam
 - **Authenticated cameras**: Only trusted sources accepted
+- **Last Will Testament**: Automatic offline detection via MQTT LWT
+- **Error isolation**: Processing errors don't crash the service
 
 ## Advanced Customization
 

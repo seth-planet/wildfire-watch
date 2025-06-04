@@ -1,3 +1,4 @@
+#!/usr/bin/env python3.12
 #!/usr/bin/env python3
 """
 End-to-end integration tests for Wildfire Watch
