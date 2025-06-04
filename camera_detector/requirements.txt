@@ -5,7 +5,7 @@ pyyaml==6.0.1
 
 # Camera discovery and control
 onvif-zeep==0.2.12
-wsdiscovery==2.0.0
+wsdiscovery==2.1.2
 zeep==4.2.1
 
 # RTSP validation
