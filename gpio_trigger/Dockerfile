@@ -4,7 +4,7 @@
 
 # Support both amd64 (local dev) and arm64 (Pi)
 ARG PLATFORM
-FROM --platform=${PLATFORM} python:3.11-slim
+FROM --platform=${PLATFORM} python:3.13-slim
 
 # Install Avahi & mDNS resolver
 RUN apt-get update && \
