@@ -83,7 +83,7 @@ updates:
     directory: "/mqtt_broker"
     schedule:
       interval: "monthly"
-      day: "first-monday"
+      day: "monday"
       time: "06:00"
     reviewers:
       - "seth-planet"
