@@ -10,7 +10,7 @@ zeep==4.2.1
 
 # RTSP validation
 opencv-python==4.8.1.78
-av==10.0.0
+av==14.4.0
 
 # Network utilities
 python-arp==0.0.2
