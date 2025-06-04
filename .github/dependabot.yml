@@ -1,0 +1,156 @@
+version: 2
+updates:
+  # Python dependencies for each service
+  - package-ecosystem: "pip"
+    directory: "/camera_detector"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    assignees:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(camera-detector)"
+      include: "scope"
+    open-pull-requests-limit: 3
+    target-branch: "main"
+    ignore:
+      # Ignore major version updates that could break edge deployments
+      - dependency-name: "ultralytics"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "opencv-python"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "pip"
+    directory: "/fire_consensus"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(consensus)"
+
+  - package-ecosystem: "pip"
+    directory: "/gpio_trigger"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(gpio)"
+
+  - package-ecosystem: "pip"
+    directory: "/cam_telemetry"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(telemetry)"
+
+  - package-ecosystem: "pip"
+    directory: "/security_nvr"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(nvr)"
+
+  - package-ecosystem: "pip"
+    directory: "/converted_models"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(models)"
+
+  # Docker base images
+  - package-ecosystem: "docker"
+    directory: "/mqtt_broker"
+    schedule:
+      interval: "monthly"
+      day: "first-monday"
+      time: "06:00"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(docker/mqtt)"
+
+  - package-ecosystem: "docker"
+    directory: "/camera_detector"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(docker/camera)"
+
+  - package-ecosystem: "docker"
+    directory: "/fire_consensus"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(docker/consensus)"
+
+  - package-ecosystem: "docker"
+    directory: "/gpio_trigger"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(docker/gpio)"
+
+  - package-ecosystem: "docker"
+    directory: "/cam_telemetry"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(docker/telemetry)"
+
+  - package-ecosystem: "docker"
+    directory: "/security_nvr"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(docker/nvr)"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(ci)"
+
+  # Docker Compose
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    reviewers:
+      - "seth-planet"
+    commit-message:
+      prefix: "deps(compose)"
