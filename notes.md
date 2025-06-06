@@ -1023,3 +1023,122 @@ Here’s a detailed and specific list of **best practices** to follow when devel
 * ✅ Use Avahi/mDNS for local discovery
 * ✅ Don’t depend on NTP — use hardware clock if available, otherwise tolerate skew
 
+Here is a **detailed licensing and distribution summary** tailored for an engineer implementing the wildfire detection system using Hailo HEF models. This summary ensures legal compliance while supporting optional download and runtime use of proprietary artifacts.
+
+---
+
+## 🔐 Hailo Licensing & Distribution Requirements for HEF Models
+
+### 🎯 **Goal**
+
+Allow users to optionally use precompiled `.hef` model files (for Hailo-8/Hailo-8L), without violating Hailo’s proprietary SDK license, while keeping your open source project MIT-licensed and easy to deploy.
+
+---
+
+## ✅ What You Can Do
+
+| Action                                            | Status                          | Notes                                                                |
+| ------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------- |
+| **Include ONNX/TFLite model**                     | ✅ **Allowed**                   | Your own model. Open format. Include in repo.                        |
+| **Provide script to compile ONNX → HEF**          | ✅ **Allowed**                   | Requires user to have Hailo SDK locally.                             |
+| **Offer download script for `.hef`**              | ✅ **Allowed with confirmation** | Must prompt user to confirm they have the Hailo SDK (i.e. licensee). |
+| **Mention `.hef` availability in README**         | ✅                               | Link to download helper.                                             |
+| **Distribute `.hef` inside Docker image or repo** | ❌ **Disallowed**                | Violates Hailo SDK license.                                          |
+
+---
+
+## 📂 File Layout (Recommended)
+
+```bash
+wildfire-watch/
+├── models/
+│   ├── wildfire.onnx             # ✅ Included
+│   ├── README.md                 # ✅ Explain HEF usage
+│   └── download_hef.sh           # ✅ Manual download with EULA acknowledgment
+├── docker/
+│   └── Dockerfile                # Optional: supports mounted HEF or runtime compile
+```
+
+---
+
+## 🛠️ Implementation Checklist
+
+### 1. **Include Model in Open Format**
+
+* Format: `wildfire.onnx`
+* Location: `/models/`
+* License: MIT or custom as appropriate (your own model)
+
+### 2. **Provide Download Script for `.hef`**
+
+**`models/download_hef.sh`**
+
+```bash
+#!/bin/bash
+echo "This model is compiled for Hailo-8 using the proprietary Hailo SDK."
+echo "You must have a valid license and installation of the SDK to use this HEF file."
+read -p "Do you confirm that you have accepted the Hailo SDK license? (y/n): " yn
+case $yn in
+    [Yy]* )
+        curl -LO https://yourserver.com/models/wildfire_8.hef
+        echo "Download complete: wildfire_8.hef"
+        ;;
+    * )
+        echo "Aborted."
+        exit 1
+        ;;
+esac
+```
+
+### 3. **Document in README**
+
+```markdown
+### 🔥 Wildfire Detection with Hailo
+
+This project supports Hailo-8 acceleration using a precompiled `.hef` model.
+
+#### Options:
+1. Use our included `wildfire.onnx` and compile it with your Hailo SDK.
+2. OR run `models/download_hef.sh` if you have already agreed to the Hailo SDK license.
+
+**Note:** We cannot distribute `.hef` files directly due to licensing restrictions.
+```
+
+### 4. **Dockerfile Conditional Logic (Optional)**
+
+Support loading from a mounted `.hef` or compile at build/runtime:
+
+```Dockerfile
+COPY models/wildfire.onnx /app/model/
+COPY models/download_hef.sh /app/model/
+
+# Optional: Compile at build time if SDK is available
+# RUN hailortcli compile --model /app/model/wildfire.onnx --hef /app/model/wildfire.hef
+```
+
+---
+
+## 🧾 Legal Summary
+
+### ✅ You May:
+
+* Distribute your **ONNX/TFLite** models freely.
+* Provide scripts that call **Hailo SDK locally** (e.g. `hailortcli`).
+* Offer `.hef` files **conditionally** behind user confirmation of license acceptance.
+
+### ❌ You May Not:
+
+* Bundle `.hef` inside your public GitHub repo, Balena image, or Docker Hub container.
+* Auto-download `.hef` files without a license gate or user prompt.
+
+---
+
+## 🛡️ Compliance Notes
+
+* Hailo’s SDK license typically restricts redistribution of any **SDK-derived artifacts**, including `.hef` files.
+* By requiring user confirmation, you shift license responsibility to the end user (a common practice).
+* Always retain a clear separation between:
+
+  * **Open-source project (MIT)**: Everything you wrote and can freely share.
+  * **Proprietary model binaries**: User must opt in or generate themselves.
+
