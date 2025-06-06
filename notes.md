@@ -888,3 +888,138 @@ To access debug tools:
 | Auditable                         | All messages shown are real MQTT payloads; helps with incident debugging |
 | Light footprint                   | Frugal CPU/memory use on Pi 3/5-class systems                            |
 
+
+
+Here’s a detailed and specific list of **best practices** to follow when developing and deploying your Wildfire Watch system, spanning **software architecture, edge deployment, security, resilience, debugging, and maintainability**.
+
+---
+
+## 🧱 System Design Best Practices
+
+### 1. **Modularity**
+
+* ✅ **Separate containers/services** for each logical function (`frigate`, `camera_detector`, `fire_consensus`, `gpio_trigger`, `status_panel`, `mqtt_broker`)
+* ✅ **Use MQTT as the spine** to decouple producer/consumer logic
+* ✅ Structure shared environment variables and config consistently using `.env` and `balena.yml`
+
+### 2. **Fail-Safe Engineering**
+
+* ✅ `gpio_trigger` must never activate the pump without confirming safe preconditions (e.g., valve open, refill available)
+* ✅ Any unexpected shutdown should result in a *safe-off* state
+* ✅ Timers (e.g. valve close, ignition off) should be cancelable and idempotent
+
+---
+
+## 📦 Deployment & Docker Best Practices
+
+### 3. **Balena-specific container hygiene**
+
+* ✅ Use **multi-stage Dockerfiles** to reduce image size (especially for services like `status_panel` and `camera_detector`)
+* ✅ Minimize external internet dependencies in runtime containers
+* ✅ Mount **read-only config and cert volumes** where applicable
+* ✅ Use `restart: unless-stopped` on all services
+* ✅ Explicitly declare `defaultDeviceType` and `supportedDeviceTypes`
+
+### 4. **Frigate & Hardware Utilization**
+
+* ✅ Let Frigate **auto-detect GPU, Hailo, CPU fallback** — but allow override
+* ✅ For Raspberry Pi 5, enable **hardware HEVC decoding** and mount `/dev/dri`
+* ✅ USB archival storage should be automatically detected and mounted (e.g., via udev or `/media` detection in entrypoint)
+
+---
+
+## 🔐 Security Best Practices
+
+### 5. **MQTT Security**
+
+* ✅ Use **TLS encryption** for all MQTT connections, even on LAN
+* ✅ Pre-generate CA + server + device certs for secure onboarding
+* ✅ Allow user to **replace certs** with their own via volume (`mqtt_certs`)
+
+### 6. **LAN-Only Access**
+
+* ✅ Web interface should bind to `0.0.0.0` but **never expose ports to WAN** unless explicitly allowed
+* ✅ Use Docker’s bridge network to isolate services
+* ✅ Avoid admin interfaces without strong authentication
+
+---
+
+## 🧪 Testing & Reliability
+
+### 7. **Automated Testing**
+
+* ✅ Use `pytest` with `FakeGPIO` and `DummyMQTTClient` to test all pump control logic
+* ✅ Simulate various edge cases: trigger flapping, ignition timeouts, partial failures
+* ✅ Include tests for watchdog behavior and telemetry correctness
+
+### 8. **Event Logging**
+
+* ✅ All GPIO changes, MQTT triggers, and state transitions should publish structured logs (JSON with timestamps)
+* ✅ Store recent logs in RAM, persistent logs on USB if possible
+* ✅ Status panel should expose recent logs in a view-only interface
+
+---
+
+## 🔍 Observability & Debugging
+
+### 9. **Status Panel Best Practices**
+
+* ✅ Read-only by default
+* ✅ Should show:
+
+  * 🔧 Last 50 MQTT events
+  * 🔥 Current fire state
+  * 🧲 Pin state (with GPIO labels)
+  * 🎥 Active cameras and Frigate config
+  * 💽 External USB drive status
+  * 🚥 Service health (MQTT, Frigate, GPIO, etc.)
+
+### 10. **Health Telemetry**
+
+* ✅ Periodic MQTT `system/telemetry` messages with state snapshot
+* ✅ Include: hostname, uptime, last fire timestamp, pin status, disk usage, model type
+
+---
+
+## 📁 Configuration & Models
+
+### 11. **Model Format Strategy**
+
+* ✅ Include **reference HEF and ONNX models** in the repo
+* ✅ Provide build-time option to compile TensorRT model on boot for target hardware
+* ✅ Respect license limitations (e.g., for Hailo-8/8L models) — never bundle generated HEF files unless user-licensed
+
+---
+
+## 📚 Documentation Best Practices
+
+### 12. **README & Deployment Guide**
+
+* ✅ Include:
+
+  * 🔧 How to build and deploy
+  * 📟 GPIO pin layout
+  * 🔐 Cert provisioning strategy
+  * 🧠 Custom model configuration
+  * 💻 Supported hardware
+  * 📊 Frigate config override
+
+### 13. **Security Disclosure and Contributions**
+
+* ✅ Make it clear that:
+
+  * Public certs are for *development only*
+  * Users should generate and deploy private certs before field usage
+  * Contributions should respect hardware licenses (e.g. for Hailo or Frigate)
+
+---
+
+## ⚙️ Resilience & Offline Support
+
+### 14. **Edge-First Assumptions**
+
+* ✅ No reliance on DNS or cloud services
+* ✅ All inference, detection, and logging should work **completely offline**
+* ✅ Use Avahi/mDNS for local discovery
+* ✅ Don’t depend on NTP — use hardware clock if available, otherwise tolerate skew
+
