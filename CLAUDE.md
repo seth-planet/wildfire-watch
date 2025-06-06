@@ -29,15 +29,18 @@ balena push wildfire-watch
 ### Testing
 ```bash
 # Run all tests
-python -m pytest tests/ -v
+python3.12 -m pytest tests/ -v
 
 # Specific test files
-python -m pytest tests/test_consensus.py
-python -m pytest tests/test_integration_e2e.py
+python3.12 -m pytest tests/test_consensus.py
+python3.12 -m pytest tests/test_integration_e2e.py
 
 # Hardware integration tests (requires actual hardware)
-python -m pytest tests/test_hardware_integration.py
+python3.12 -m pytest tests/test_hardware_integration.py
 ```
+
+### Python Version
+This project requires Python 3.12. All commands should use `python3.12` and `pip3.12`.
 
 ### Service Management
 ```bash
