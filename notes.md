@@ -645,3 +645,246 @@ class LANOnlyMiddleware(BaseHTTPMiddleware):
 | MQTT exposure         | 🔒 MQTT broker not exposed to WAN          |
 | CPU/memory load       | ✅ Minimal (HTMX, no React, capped buffers) |
 
+Here’s a detailed breakdown of how the **Wildfire Watch Web Interface (Status Panel)** is designed, how users interact with it, and how it serves their needs across debugging, visibility, and safety — all while respecting the limited resources of edge devices like Raspberry Pi.
+
+---
+
+## 🔍 PRIMARY GOALS
+
+* **At-a-glance health monitoring**
+* **Event and telemetry logging**
+* **Multi-device visibility** (LAN deployment)
+* **Optional debug & control actions**
+* **Secure and lightweight**
+
+---
+
+## 🖥️ HIGH-LEVEL UI STRUCTURE
+
+### 🧭 Top Navigation Bar
+
+| Element           | Purpose                                 |
+| ----------------- | --------------------------------------- |
+| 🌐 Wildfire Watch | Branding & title                        |
+| 🔁 Refresh Button | Manually re-pull telemetry (AJAX/HTMX)  |
+| 📟 Node Selector  | Dropdown to select device (by hostname) |
+| 🐞 Debug Mode     | Visible only if `DEBUG=true`            |
+
+---
+
+### 📊 Main Dashboard Panel
+
+#### 🔴 Real-Time Status Overview
+
+* Current **fire status** (`ACTIVE`, `IDLE`, `COOLDOWN`)
+* Valve, engine, refill, and RPM GPIO **pin states**
+* MQTT **connected/disconnected** state
+* Last fire **trigger timestamp**
+* Time since last heartbeat
+
+#### Example:
+
+```plaintext
+Device: rpi5-wildfire
+Status: 🔥 ACTIVE (since 13:04:25)
+Pump: ON   Valve: OPEN   Refill: ON   RPM Reduction: OFF
+MQTT: ✅ Connected   Last Heartbeat: 28s ago
+```
+
+---
+
+### 📋 Telemetry Log Table
+
+A scrollable table of recent messages published to the `system/trigger_telemetry` MQTT topic.
+
+| Time (UTC)       | Device      | Action         | Pins                          |
+| ---------------- | ----------- | -------------- | ----------------------------- |
+| 2025-06-06 13:04 | `rpi5-fire` | ignition\_on   | Valve=1, Ignition=1, Refill=1 |
+| 2025-06-06 13:00 | `rpi3-cons` | health\_report | GPIO=OK                       |
+
+* Auto-refreshes every 15–30s via AJAX or HTMX
+* Can be filtered by device, action, or time range
+
+---
+
+### 📦 Detection Summary Panel (from Frigate)
+
+If `frigate` publishes MQTT object detections, we render:
+
+* A count of **fires/smoke/unknowns** per camera
+* Link to corresponding **recorded video** (if available)
+* Timestamps of last detected object
+* \[Optional] camera thumbnails (if exposed)
+
+---
+
+## 🛠️ OPTIONAL DEBUG PANEL
+
+Visible only if:
+
+* `DEBUG=true` is set
+* OR user visits `/debug?token=<token>` with known debug token
+
+#### Debug Tools:
+
+| Tool                     | Description                                   |
+| ------------------------ | --------------------------------------------- |
+| 🔄 Trigger fire manually | Simulate fire trigger over MQTT               |
+| 📉 Force shutdown        | Publish stop/fire-off message                 |
+| 🧪 Pin override          | Force GPIO pin on/off                         |
+| 🪵 View raw logs         | View JSON MQTT payloads and event logs        |
+| 🧰 Service restarts      | Button to restart a Docker service (optional) |
+
+---
+
+## 💻 USER INTERACTION FLOW
+
+1. **User powers on system**
+
+   * Devices boot, begin publishing to MQTT
+   * UI detects active nodes and starts auto-refresh
+
+2. **User visits `http://rpi5.local:8080/`**
+
+   * Default page lists current status from all devices
+   * User can click on a device name to get focused view
+
+3. **In case of fire trigger**
+
+   * Panel shows:
+
+     * “🔥 Fire Triggered”
+     * Timer showing runtime
+     * Live GPIO states
+   * After event, logs show ignition off, valve closed, refill timed
+
+4. **User checks logs/debug if anomaly**
+
+   * Can view pin states, confirm MQTT connectivity
+   * Can manually trigger or shut down services if in debug mode
+
+---
+
+## 📱 MOBILE DESIGN (Responsive)
+
+* Navigation and dashboard stack vertically
+* Status panel shows simplified GPIO state grid
+* Logs shown in expandable accordion format
+* Designed to run well on phones/tablets for field use
+
+---
+
+## 📈 FUTURE ENHANCEMENTS
+
+* Timeline chart for fire events over days/weeks
+* Graph of runtime and refill durations
+* Storage summary (free/used on USB device)
+* Screenshot / heatmap from Frigate for visual confirmation
+* Downloadable CSV log export
+
+---
+
+## 🔒 SECURITY IN UI
+
+* Controls visible only with `DEBUG` enabled or token
+* Prevent XSS via auto-escaping (Jinja2)
+* No access to camera streams directly (unless explicitly configured)
+* No WAN exposure by default (binds to LAN)
+
+Absolutely — here's how we can **emphasize a secure, informative, and read-only design** for the web-based `status_panel` interface in the Wildfire Watch system.
+
+---
+
+## ✅ Key Design Principle: **Read-Only by Default**
+
+### 🔒 Purpose
+
+We want any person with LAN access (e.g. a responder or on-site technician) to **view the system’s health and telemetry in full detail** — but **not modify or trigger anything** unless they explicitly opt-in to debug or admin modes.
+
+---
+
+## 🧭 Interface Mode: Informative, Not Interactive (by Default)
+
+### 🌐 `/` (Root Status Page)
+
+This is the default dashboard. It:
+
+* **Does not expose any controls**
+* Shows system-wide status and telemetry
+* Displays last fire events, pin states, Frigate detections, and active nodes
+* Clearly labeled “🟢 Read-only monitoring dashboard”
+
+Example:
+
+```plaintext
+MODE: 🔒 Read-Only Monitoring
+
+To enable debug tools, connect via LAN and visit:
+  /debug?token=YOUR_SECRET_TOKEN
+```
+
+---
+
+## 📊 Data Display (All Read-Only)
+
+| Section                   | Description                                              |
+| ------------------------- | -------------------------------------------------------- |
+| 🔥 Fire status            | Active/inactive, time since last trigger                 |
+| 🧲 GPIO states            | Current pin states across all critical relays            |
+| 📡 MQTT connection        | Online/offline status for each node                      |
+| 🧾 Event logs             | JSON-decoded recent telemetry messages from all nodes    |
+| 📷 Camera detections      | Per-camera fire/smoke/person object counts               |
+| 💾 USB storage summary    | Space remaining, last video file, write health           |
+| 🛠 Frigate runtime status | Inference device, detection backend (Hailo/GPU/CPU)      |
+| 🧠 Wildfire model config  | Model type in use, compilation method (TensorRT/HEF/etc) |
+
+> ⚠️ All data above is **visual-only** and **never links to any action** (no triggers, buttons, or POST endpoints in this mode).
+
+---
+
+## 🔐 Security Reinforcement
+
+| Feature                            | Implementation                                      |
+| ---------------------------------- | --------------------------------------------------- |
+| LAN-only access                    | Bind server to `0.0.0.0`; no ingress outside LAN    |
+| No forms or control buttons        | Only Jinja-rendered info blocks and tables          |
+| Escaped templates (XSS safe)       | Jinja2 auto-escaping enabled                        |
+| Optional debug token               | Access `/debug?token=...` for advanced control      |
+| Docker-only internal IPs           | Status panel not exposed beyond Balena internal LAN |
+| TLS optional (future WAN/hardened) | Use with HSTS and basic auth if WAN is desired      |
+
+---
+
+## 📱 Mobile-Friendly & Lightweight
+
+* Minimal JS (HTMX or Alpine.js) for log refresh only
+* No heavy frameworks or real-time WebSockets unless opted-in
+* Telemetry log uses `<table>` or `<ul>` with class-based styling
+* Pin state visually represented with color/emoji indicators, not JavaScript toggles
+
+---
+
+## 🧪 Debug Mode is Opt-In and Logged
+
+To access debug tools:
+
+1. User must visit `/debug?token=XYZ`
+2. A visible warning is shown:
+
+   ```
+   WARNING: Debug mode is active. All actions are logged.
+   Do not trigger fire events unless authorized.
+   ```
+
+---
+
+## 🧠 Why This Approach Works for Edge Wildfire Deployment
+
+| Advantage                         | Explanation                                                              |
+| --------------------------------- | ------------------------------------------------------------------------ |
+| Safe for remote viewing           | Any LAN client (fire crew, tech, dev) can get status with no risk        |
+| Doesn’t interfere with operations | Read-only dashboard won’t trigger valves/pumps/alerts accidentally       |
+| Works offline                     | No external JavaScript/CDNs; served locally; works in isolation          |
+| Auditable                         | All messages shown are real MQTT payloads; helps with incident debugging |
+| Light footprint                   | Frugal CPU/memory use on Pi 3/5-class systems                            |
+
