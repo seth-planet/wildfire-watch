@@ -59,8 +59,8 @@ The system automatically detects and configures:
 | Hardware | Detection | Notes |
 |----------|-----------|-------|
 | **Raspberry Pi 5** | ✅ | Hardware H.265 decode, VideoCore VII |
-| **Coral USB** | ✅ | 4 TOPS, USB 3.0 required |
-| **Coral PCIe** | ✅ | M.2 or PCIe versions |
+| **Coral USB** | ✅ | 4 TOPS, USB 3.0 required, Python 3.8 |
+| **Coral PCIe** | ✅ | M.2 or PCIe versions, Python 3.8 |
 | **Hailo-8** | ✅ | 26 TOPS, PCIe |
 | **Hailo-8L** | ✅ | 13 TOPS, lower power |
 | **Intel QuickSync** | ✅ | Hardware decode/encode |

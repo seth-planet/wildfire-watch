@@ -49,6 +49,7 @@ Complete hardware guide for building a Wildfire Watch system.
 - **M.2 B+M:** $35 - For NVMe slots  
 - **USB:** $60 - Universal compatibility
 - **Performance:** 4 TOPS, ~15ms inference
+- **Important:** Requires Python 3.8 for tflite_runtime compatibility
 
 ### Hailo-8L
 **Best for:** Raspberry Pi 5 native support

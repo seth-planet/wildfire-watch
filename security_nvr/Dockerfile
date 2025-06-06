@@ -60,6 +60,7 @@ COPY scripts/event_search.py /scripts/
 COPY scripts/entrypoint.sh /scripts/
 
 # Copy wildfire detection models
+# Note: Coral TPU models (.tflite) require Python 3.8 runtime
 COPY models/wildfire_coral_lite.tflite /models/wildfire/
 COPY models/wildfire_coral_full.tflite /models/wildfire/
 COPY models/wildfire_hailo8.hef /models/wildfire/

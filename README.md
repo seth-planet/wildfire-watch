@@ -56,6 +56,7 @@ http://your-device:5000
 - [**Model Converter**](converted_models/README.md) - Custom AI models
 - [**Multi-Node Setup**](docs/multi-node.md) - Scale to large properties
 - [**Troubleshooting**](docs/troubleshooting.md) - Common issues
+- [**Coral TPU Python 3.8**](docs/coral_python38_requirements.md) - Important compatibility info
 
 ## System Architecture
 
@@ -121,11 +122,13 @@ kubectl apply -k k8s/
 
 | Accelerator | Performance | Power | Recommended For |
 |------------|-------------|--------|-----------------|
-| Coral TPU | 15-20ms | 2W | Low power, always-on |
+| Coral TPU* | 15-20ms | 2W | Low power, always-on |
 | Hailo-8L | 20-25ms | 2.5W | Raspberry Pi 5 |
 | Hailo-8 | 10-15ms | 5W | High accuracy |
 | NVIDIA GPU | 8-12ms | 15W+ | Multiple cameras |
 | CPU Only | 200-300ms | 5W | Testing only |
+
+*Note: Coral TPU requires Python 3.8 for tflite_runtime compatibility
 
 ## Contributing
 

@@ -6,7 +6,7 @@ Thank you for your interest in improving Wildfire Watch! This guide covers devel
 
 ### Prerequisites
 - Docker & Docker Compose
-- Python 3.11+
+- Python 3.11+ (Python 3.8 required for Coral TPU development)
 - Git
 - Hardware for testing (Coral/Hailo/GPIO optional)
 

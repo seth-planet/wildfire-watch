@@ -1,5 +1,4 @@
 #!/usr/bin/env python3.12
-#!/usr/bin/env python3
 """
 Hardware Integration Tests for Wildfire Watch
 Tests for Coral, Hailo, and NVIDIA GPU integration
@@ -12,6 +11,7 @@ import json
 import subprocess
 import unittest
 import tempfile
+import shutil
 import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -23,12 +23,27 @@ HAS_GPU = False
 HAS_INTEL_GPU = False
 
 # Check for Coral
+# First check for Coral hardware
+if os.path.exists('/dev/apex_0'):
+    HAS_CORAL = True
+    print("PCIe Coral detected at /dev/apex_0")
+elif subprocess.run(['lsusb'], capture_output=True).stdout.find(b'1a6e') != -1:
+    HAS_CORAL = True
+    print("USB Coral detected")
+
+# Also check if tflite_runtime is properly installed
+# Try with Python 3.8 for Coral compatibility
 try:
-    import tflite_runtime.interpreter as tflite
-    if os.path.exists('/dev/apex_0') or subprocess.run(['lsusb'], capture_output=True).stdout.find(b'1a6e') != -1:
-        HAS_CORAL = True
-except ImportError:
-    pass
+    result = subprocess.run(['python3.8', '-c', 'import tflite_runtime.interpreter'], 
+                          capture_output=True, text=True)
+    if result.returncode == 0:
+        print("tflite_runtime works with Python 3.8")
+    else:
+        if HAS_CORAL:
+            print(f"Warning: Coral hardware detected but tflite_runtime not working with Python 3.8")
+except Exception as e:
+    if HAS_CORAL:
+        print(f"Warning: Could not check Python 3.8 tflite_runtime: {e}")
 
 # Check for Hailo
 try:
@@ -90,39 +105,79 @@ class TestCoralIntegration(unittest.TestCase):
     @unittest.skipUnless(HAS_CORAL, "Coral TPU not available")
     def test_coral_inference(self):
         """Test inference on Coral TPU"""
-        import tflite_runtime.interpreter as tflite
+        # Create a Python script to run with Python 3.8
+        test_script = f'''
+import time
+import numpy as np
+import tflite_runtime.interpreter as tflite
+
+# Load model
+interpreter = tflite.Interpreter(
+    model_path="{self.test_model_path}",
+    experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')]
+)
+interpreter.allocate_tensors()
+
+# Get input/output details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Create dummy input
+input_shape = input_details[0]['shape']
+input_data = np.random.randint(0, 255, input_shape, dtype=np.uint8)
+
+# Run inference
+start_time = time.time()
+interpreter.set_tensor(input_details[0]['index'], input_data)
+interpreter.invoke()
+inference_time = (time.time() - start_time) * 1000
+
+# Get output
+output_data = interpreter.get_tensor(output_details[0]['index'])
+
+print(f"Coral inference time: {{inference_time:.2f}}ms")
+print(f"Output shape: {{output_data.shape}}")
+print("SUCCESS")
+'''
         
-        # Load model
-        interpreter = tflite.Interpreter(
-            model_path=self.test_model_path,
-            experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')]
-        )
-        interpreter.allocate_tensors()
+        # Run the script with Python 3.8
+        result = subprocess.run(['python3.8', '-c', test_script], 
+                              capture_output=True, text=True)
         
-        # Get input/output details
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
+        if result.returncode != 0:
+            self.fail(f"Coral inference failed: {result.stderr}")
         
-        # Create dummy input
-        input_shape = input_details[0]['shape']
-        input_data = np.random.randint(0, 255, input_shape, dtype=np.uint8)
+        # Check the output
+        self.assertIn("SUCCESS", result.stdout, "Coral inference did not complete successfully")
+        self.assertIn("Coral inference time:", result.stdout, "No inference time reported")
         
-        # Run inference
-        start_time = time.time()
-        interpreter.set_tensor(input_details[0]['index'], input_data)
-        interpreter.invoke()
-        inference_time = (time.time() - start_time) * 1000
-        
-        # Get output
-        output_data = interpreter.get_tensor(output_details[0]['index'])
-        
-        print(f"Coral inference time: {inference_time:.2f}ms")
-        self.assertLess(inference_time, 50, "Coral inference too slow")
-        self.assertIsNotNone(output_data)
+        # Extract and check inference time
+        for line in result.stdout.split('\n'):
+            if "Coral inference time:" in line:
+                time_ms = float(line.split(':')[1].strip().replace('ms', ''))
+                print(f"Coral inference time: {time_ms:.2f}ms")
+                self.assertLess(time_ms, 50, "Coral inference too slow")
     
     @unittest.skipUnless(HAS_CORAL, "Coral TPU not available")
     def test_coral_docker_access(self):
         """Test Coral access from Docker"""
+        # Check if we have Docker permissions
+        test_cmd = ['docker', 'ps']
+        permission_check = subprocess.run(test_cmd, capture_output=True, text=True)
+        if permission_check.returncode != 0:
+            if "permission denied" in permission_check.stderr:
+                # Check if user is in docker group but session not updated
+                user = os.environ.get('USER', 'current user')
+                group_check = subprocess.run(['id', user], capture_output=True, text=True)
+                if 'docker' in group_check.stdout:
+                    self.fail(f"User '{user}' is in docker group but current session needs refresh.\n"
+                             f"Please log out and back in, or start a new shell session.\n"
+                             f"Alternatively, run tests in a new shell: bash -c 'newgrp docker && python3.12 -m pytest {__file__}'")
+                else:
+                    self.fail(f"Docker permission denied. Fix with: sudo usermod -aG docker {user} && newgrp docker\n{permission_check.stderr}")
+            else:
+                self.fail(f"Docker error: {permission_check.stderr}")
+        
         # Check if Docker can see Coral device
         result = subprocess.run([
             'docker', 'run', '--rm',
@@ -152,6 +207,12 @@ class TestHailoIntegration(unittest.TestCase):
     @unittest.skipUnless(HAS_HAILO, "Hailo not available")
     def test_hailo_docker_access(self):
         """Test Hailo access from Docker"""
+        # Check if we have Docker permissions
+        test_cmd = ['docker', 'ps']
+        permission_check = subprocess.run(test_cmd, capture_output=True, text=True)
+        if permission_check.returncode != 0:
+            self.fail(f"Docker permission error: {permission_check.stderr}")
+        
         result = subprocess.run([
             'docker', 'run', '--rm',
             '--device', '/dev/hailo0:/dev/hailo0',
@@ -214,13 +275,35 @@ class TestNVIDIAGPUIntegration(unittest.TestCase):
     @unittest.skipUnless(HAS_GPU, "NVIDIA GPU not available")
     def test_docker_gpu_access(self):
         """Test GPU access from Docker"""
+        # Check if we have Docker permissions
+        test_cmd = ['docker', 'ps']
+        permission_check = subprocess.run(test_cmd, capture_output=True, text=True)
+        if permission_check.returncode != 0:
+            if "permission denied" in permission_check.stderr:
+                # Check if user is in docker group but session not updated
+                user = os.environ.get('USER', 'current user')
+                group_check = subprocess.run(['id', user], capture_output=True, text=True)
+                if 'docker' in group_check.stdout:
+                    self.fail(f"User '{user}' is in docker group but current session needs refresh.\n"
+                             f"Please log out and back in, or start a new shell session.\n"
+                             f"Alternatively, run tests in a new shell: bash -c 'newgrp docker && python3.12 -m pytest {__file__}'")
+                else:
+                    self.fail(f"Docker permission denied. Fix with: sudo usermod -aG docker {user} && newgrp docker\n{permission_check.stderr}")
+            else:
+                self.fail(f"Docker error: {permission_check.stderr}")
+        
+        # Check if nvidia-docker runtime is available
+        runtime_check = subprocess.run(['docker', 'info'], capture_output=True, text=True)
+        if 'nvidia' not in runtime_check.stdout:
+            self.fail("NVIDIA Docker runtime not installed. Please install nvidia-docker2 package.")
+        
         result = subprocess.run([
             'docker', 'run', '--rm', '--gpus', 'all',
             'nvidia/cuda:11.8.0-base-ubuntu20.04',
             'nvidia-smi'
-        ], capture_output=True)
+        ], capture_output=True, text=True)
         
-        self.assertEqual(result.returncode, 0, "Docker cannot access GPU")
+        self.assertEqual(result.returncode, 0, f"Docker cannot access GPU: {result.stderr}")
     
     @unittest.skipUnless(HAS_GPU, "NVIDIA GPU not available")
     def test_tensorrt_availability(self):
@@ -251,6 +334,12 @@ class TestIntelGPUIntegration(unittest.TestCase):
     @unittest.skipUnless(HAS_INTEL_GPU, "Intel GPU not available")
     def test_docker_vaapi_access(self):
         """Test VA-API access from Docker"""
+        # Check if we have Docker permissions
+        test_cmd = ['docker', 'ps']
+        permission_check = subprocess.run(test_cmd, capture_output=True, text=True)
+        if permission_check.returncode != 0:
+            self.fail(f"Docker permission error: {permission_check.stderr}")
+        
         result = subprocess.run([
             'docker', 'run', '--rm',
             '--device', '/dev/dri:/dev/dri',
@@ -258,7 +347,7 @@ class TestIntelGPUIntegration(unittest.TestCase):
             'ls', '-la', '/dev/dri/'
         ], capture_output=True, text=True)
         
-        self.assertEqual(result.returncode, 0, "Docker cannot access Intel GPU")
+        self.assertEqual(result.returncode, 0, f"Docker cannot access Intel GPU: {result.stderr}")
         self.assertIn('renderD128', result.stdout, "No render device found")
 
 class TestFrigateIntegration(unittest.TestCase):
@@ -266,7 +355,7 @@ class TestFrigateIntegration(unittest.TestCase):
     
     def setUp(self):
         """Set up test environment"""
-        self.compose_file = "docker-compose.local.yml"
+        self.compose_file = "docker-compose.yml"
         self.test_dir = tempfile.mkdtemp()
     
     def tearDown(self):
@@ -274,7 +363,7 @@ class TestFrigateIntegration(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
     
-    @unittest.skipIf(not os.path.exists("docker-compose.local.yml"), "Docker compose file not found")
+    @unittest.skipIf(not os.path.exists("docker-compose.yml"), "Docker compose file not found")
     def test_frigate_hardware_detection(self):
         """Test Frigate hardware detection"""
         # Create test config
@@ -353,36 +442,83 @@ class TestModelInference(unittest.TestCase):
     @unittest.skipUnless(HAS_CORAL, "Coral not available")
     def test_coral_inference_speed(self):
         """Benchmark Coral inference speed"""
-        import tflite_runtime.interpreter as tflite
-        import cv2
+        # First check if opencv is available for Python 3.8
+        cv_check = subprocess.run(['python3.8', '-c', 'import cv2'], 
+                                capture_output=True)
+        if cv_check.returncode != 0:
+            # Install opencv for Python 3.8
+            subprocess.run(['python3.8', '-m', 'pip', 'install', 'opencv-python'], 
+                         capture_output=True)
         
         # Load test model
         model_path = "/tmp/test_model_edgetpu.tflite"
         if not os.path.exists(model_path):
             self.skipTest("Test model not available")
         
-        # Create interpreter
-        interpreter = tflite.Interpreter(
-            model_path=model_path,
-            experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')]
-        )
-        interpreter.allocate_tensors()
+        # Create benchmark script for Python 3.8
+        benchmark_script = f'''
+import time
+import numpy as np
+import cv2
+import tflite_runtime.interpreter as tflite
+
+# Create interpreter
+interpreter = tflite.Interpreter(
+    model_path="{model_path}",
+    experimental_delegates=[tflite.load_delegate('libedgetpu.so.1')]
+)
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Load and preprocess image
+img = cv2.imread("{self.test_image_path}")
+# Get model input shape
+input_shape = input_details[0]['shape']
+height, width = input_shape[1], input_shape[2]
+img = cv2.resize(img, (width, height))
+img = np.expand_dims(img, axis=0).astype(np.uint8)
+
+# Warmup
+for _ in range(3):
+    interpreter.set_tensor(input_details[0]['index'], img)
+    interpreter.invoke()
+
+# Benchmark
+times = []
+for _ in range(10):
+    start = time.time()
+    interpreter.set_tensor(input_details[0]['index'], img)
+    interpreter.invoke()
+    output = interpreter.get_tensor(output_details[0]['index'])
+    times.append((time.time() - start) * 1000)
+
+avg_time = np.mean(times)
+std_time = np.std(times)
+
+print(f"Coral TPU Inference Benchmark:")
+print(f"  Average: {{avg_time:.2f}}ms")
+print(f"  Std Dev: {{std_time:.2f}}ms")
+print(f"  Min: {{min(times):.2f}}ms")
+print(f"  Max: {{max(times):.2f}}ms")
+print(f"AVG_TIME: {{avg_time}}")
+'''
         
-        # Load and preprocess image
-        img = cv2.imread(self.test_image_path)
-        img = cv2.resize(img, (320, 320))
-        img = np.expand_dims(img, axis=0).astype(np.uint8)
+        # Run benchmark with Python 3.8
+        result = subprocess.run(['python3.8', '-c', benchmark_script], 
+                              capture_output=True, text=True)
         
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
+        if result.returncode != 0:
+            self.fail(f"Coral benchmark failed: {result.stderr}")
         
-        def inference():
-            interpreter.set_tensor(input_details[0]['index'], img)
-            interpreter.invoke()
-            return interpreter.get_tensor(output_details[0]['index'])
+        print(result.stdout)
         
-        avg_time = self._benchmark_inference("Coral TPU", inference)
-        self.assertLess(avg_time, 50, "Coral inference slower than expected")
+        # Extract average time
+        for line in result.stdout.split('\n'):
+            if "AVG_TIME:" in line:
+                avg_time = float(line.split(':')[1].strip())
+                self.assertLess(avg_time, 50, "Coral inference slower than expected")
     
     @unittest.skipUnless(HAS_GPU, "GPU not available")
     def test_gpu_inference_speed(self):
@@ -417,6 +553,23 @@ class TestSystemIntegration(unittest.TestCase):
     @unittest.skipIf(not shutil.which('docker-compose'), "docker-compose not installed")
     def test_docker_compose_validation(self):
         """Validate docker-compose files"""
+        # Check if we have Docker permissions
+        test_cmd = ['docker', 'ps']
+        permission_check = subprocess.run(test_cmd, capture_output=True, text=True)
+        if permission_check.returncode != 0:
+            if "permission denied" in permission_check.stderr:
+                # Check if user is in docker group but session not updated
+                user = os.environ.get('USER', 'current user')
+                group_check = subprocess.run(['id', user], capture_output=True, text=True)
+                if 'docker' in group_check.stdout:
+                    self.fail(f"User '{user}' is in docker group but current session needs refresh.\n"
+                             f"Please log out and back in, or start a new shell session.\n"
+                             f"Alternatively, run tests in a new shell: bash -c 'newgrp docker && python3.12 -m pytest {__file__}'")
+                else:
+                    self.fail(f"Docker permission denied. Fix with: sudo usermod -aG docker {user} && newgrp docker\n{permission_check.stderr}")
+            else:
+                self.fail(f"Docker error: {permission_check.stderr}")
+        
         compose_files = [
             'docker-compose.yml',
             'docker-compose.local.yml'
@@ -426,10 +579,10 @@ class TestSystemIntegration(unittest.TestCase):
             if os.path.exists(compose_file):
                 result = subprocess.run([
                     'docker-compose', '-f', compose_file, 'config'
-                ], capture_output=True)
+                ], capture_output=True, text=True)
                 
                 self.assertEqual(result.returncode, 0,
-                               f"{compose_file} validation failed")
+                               f"{compose_file} validation failed: {result.stderr}")
                 print(f"✓ {compose_file} is valid")
     
     def test_mqtt_connectivity(self):

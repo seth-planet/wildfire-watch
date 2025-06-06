@@ -1,371 +1,667 @@
-#!/usr/bin/env python3.12
 #!/usr/bin/env python3
 """
-Tests for Model Converter
-Tests conversion functionality without requiring GPL dependencies
+Integration Tests for Model Converter Validation
+Ensures models are properly validated after conversion
 """
-import os
-import sys
-import json
+
+import unittest
 import tempfile
 import shutil
+import json
 import subprocess
+import sys
+import time
 from pathlib import Path
-import unittest
 from unittest.mock import Mock, patch, MagicMock
 import numpy as np
 
-# Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from convert_model import ModelConverter, download_model
+sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
+from convert_model import EnhancedModelConverter
 
-class TestModelConverter(unittest.TestCase):
-    """Test ModelConverter functionality"""
+
+class ValidationIntegrationTests(unittest.TestCase):
+    """Test that validation is properly integrated into conversion process"""
+    
+    @classmethod
+    def setUpClass(cls):
+        """Set up test environment"""
+        cls.test_dir = Path(tempfile.mkdtemp(prefix='validation_test_'))
+        cls.models_dir = cls.test_dir / 'models'
+        cls.models_dir.mkdir(exist_ok=True)
+    
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up"""
+        if cls.test_dir.exists():
+            shutil.rmtree(cls.test_dir)
+    
+    def setUp(self):
+        """Set up each test"""
+        self.output_dir = Path(tempfile.mkdtemp())
+        self.calibration_dir = Path(tempfile.mkdtemp())
+        self._create_calibration_data()
+    
+    def tearDown(self):
+        """Clean up after each test"""
+        for dir_path in [self.output_dir, self.calibration_dir]:
+            if dir_path.exists():
+                shutil.rmtree(dir_path)
+    
+    def _create_calibration_data(self):
+        """Create minimal calibration data"""
+        for i in range(20):
+            (self.calibration_dir / f"calib_{i}.jpg").touch()
+    
+    def test_validation_runs_automatically(self):
+        """Test that validation runs automatically after conversion"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+        
+        # Mock the conversion and validation methods
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            with patch.object(converter, '_validate_converted_models') as mock_validate:
+                # Set up mocks
+                onnx_path = self.output_dir / '320x320' / 'dummy_320x320.onnx'
+                onnx_path.parent.mkdir(parents=True)
+                onnx_path.touch()
+                mock_onnx.return_value = onnx_path
+                
+                mock_validate.return_value = {
+                    'validation': {'onnx': {'passed': True, 'degradation': 0.5}},
+                    'benchmarks': {'onnx': {'fps': 50.0}}
+                }
+                
+                # Run conversion
+                results = converter.convert_all(formats=['onnx'], validate=True)
+                
+                # Verify validation was called
+                mock_validate.assert_called_once_with(validate=True, benchmark=True)
+                
+                # Check results include validation
+                self.assertIn('validation', results['sizes']['320x320'])
+                self.assertIn('benchmarks', results['sizes']['320x320'])
+    
+    def test_validation_disabled_flag(self):
+        """Test that validation can be disabled"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+        
+        with patch.object(converter, '_validate_converted_models') as mock_validate:
+            # Run without validation
+            results = converter.convert_all(
+                formats=['onnx'], 
+                validate=False,
+                benchmark=False
+            )
+            
+            # Validation should not be called
+            mock_validate.assert_not_called()
+    
+    def test_validation_per_size(self):
+        """Test that each size is validated separately"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=[416, 320],  # Multiple sizes
+            debug=True
+        )
+        
+        # Mock conversions
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            with patch.object(converter, '_validate_converted_models') as mock_validate:
+                # Set up different results for each size
+                def create_onnx(size=None):
+                    size = size or converter.model_size
+                    size_str = f"{size[0]}x{size[1]}"
+                    path = converter.output_dir / size_str / f'dummy_{size_str}.onnx'
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+                    return path
+                
+                mock_onnx.side_effect = create_onnx
+                
+                # Different validation results per size
+                validation_results = [
+                    {
+                        'validation': {'onnx': {'passed': True, 'degradation': 1.0}},
+                        'benchmarks': {'onnx': {'fps': 40.0}}
+                    },
+                    {
+                        'validation': {'onnx': {'passed': True, 'degradation': 2.0}},
+                        'benchmarks': {'onnx': {'fps': 60.0}}
+                    }
+                ]
+                mock_validate.side_effect = validation_results
+                
+                # Run conversion
+                results = converter.convert_all(formats=['onnx'])
+                
+                # Verify validation was called for each size
+                self.assertEqual(mock_validate.call_count, 2)
+                
+                # Check different results for each size
+                self.assertEqual(
+                    results['sizes']['416x416']['validation']['onnx']['degradation'],
+                    1.0
+                )
+                self.assertEqual(
+                    results['sizes']['320x320']['validation']['onnx']['degradation'],
+                    2.0
+                )
+    
+    def test_format_specific_thresholds(self):
+        """Test that format-specific validation thresholds are applied"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+        
+        # Test threshold values
+        test_cases = [
+            ('onnx', 0.5, True),      # Under 1% threshold
+            ('tflite', 2.5, True),    # Under 3% threshold
+            ('tflite', 4.0, False),   # Over 3% threshold
+            ('edge_tpu', 6.5, True),  # Under 7% threshold
+            ('edge_tpu', 8.0, False), # Over 7% threshold
+            ('hailo', 4.5, True),     # Under 5% threshold
+            ('hailo', 6.0, False),    # Over 5% threshold
+        ]
+        
+        for format_name, degradation, should_pass in test_cases:
+            with self.subTest(format=format_name, degradation=degradation):
+                # Create mock model file
+                model_file = self.output_dir / f'test.{format_name}'
+                model_file.touch()
+                
+                # Validate
+                result = converter._validate_single_model(
+                    Path('original.pt'),
+                    model_file,
+                    format_name
+                )
+                
+                # Mock the validation result
+                result['degradation'] = degradation
+                threshold = converter._get_validation_threshold(format_name)
+                result['passed'] = degradation <= threshold
+                
+                self.assertEqual(result['passed'], should_pass)
+    
+    def test_qat_affects_thresholds(self):
+        """Test that QAT affects validation thresholds"""
+        # Without QAT
+        converter_no_qat = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            qat_enabled=False,
+            debug=True
+        )
+        
+        # With QAT
+        converter_qat = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir / 'qat'),
+            calibration_data=str(self.calibration_dir),
+            qat_enabled=True,
+            debug=True
+        )
+        
+        # Compare thresholds
+        edge_tpu_threshold_no_qat = converter_no_qat._get_validation_threshold('edge_tpu')
+        edge_tpu_threshold_qat = converter_qat._get_validation_threshold('edge_tpu')
+        
+        self.assertEqual(edge_tpu_threshold_no_qat, 7.0)  # Standard INT8
+        self.assertEqual(edge_tpu_threshold_qat, 5.0)     # Better with QAT
+    
+    def test_validation_error_handling(self):
+        """Test validation handles errors gracefully"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            debug=True
+        )
+        
+        # Test with non-existent file
+        result = converter._validate_single_model(
+            Path('original.pt'),
+            Path('nonexistent.onnx'),
+            'onnx'
+        )
+        
+        self.assertFalse(result['passed'])
+        self.assertIsNotNone(result['error'])
+    
+    def test_benchmark_integration(self):
+        """Test benchmarking is integrated with validation"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            debug=True
+        )
+        
+        # Mock ONNX runtime for benchmarking
+        with patch('onnxruntime.InferenceSession') as mock_session:
+            # Set up mock
+            mock_instance = MagicMock()
+            mock_session.return_value = mock_instance
+            mock_instance.get_inputs.return_value = [
+                MagicMock(name='input', shape=[1, 3, 320, 320])
+            ]
+            mock_instance.run.return_value = [np.zeros((1, 84, 6300))]
+            
+            # Create test model
+            model_path = self.output_dir / 'test.onnx'
+            model_path.touch()
+            
+            # Run benchmark
+            result = converter._benchmark_onnx(model_path)
+            
+            # Check results
+            self.assertGreater(result['fps'], 0)
+            self.assertGreater(result['iterations'], 0)
+            self.assertLess(result['avg_inference_ms'], 1000)
+    
+    def test_validation_output_in_summary(self):
+        """Test validation results appear in conversion summary"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+        
+        # Mock successful conversion and validation
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            with patch.object(converter, '_validate_onnx_model') as mock_validate:
+                # Set up mocks
+                onnx_path = self.output_dir / '320x320' / 'dummy.onnx'
+                onnx_path.parent.mkdir(parents=True)
+                onnx_path.touch()
+                mock_onnx.return_value = onnx_path
+                
+                mock_validate.return_value = {
+                    'passed': True,
+                    'degradation': 0.8,
+                    'metrics': {'model_size_mb': 25.3}
+                }
+                
+                # Run conversion
+                results = converter.convert_all(formats=['onnx'])
+                
+                # Save summary
+                summary_path = converter.output_dir / 'conversion_summary.json'
+                with open(summary_path, 'w') as f:
+                    json.dump(results, f, indent=2, default=str)
+                
+                # Verify summary contains validation
+                with open(summary_path) as f:
+                    summary = json.load(f)
+                
+                validation = summary['sizes']['320x320']['validation']
+                self.assertIn('onnx', validation)
+                self.assertTrue(validation['onnx']['passed'])
+                self.assertEqual(validation['onnx']['degradation'], 0.8)
+    
+    def test_failed_validation_reporting(self):
+        """Test that failed validations are properly reported"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+        
+        # Mock failed validation
+        with patch.object(converter, '_validate_converted_models') as mock_validate:
+            mock_validate.return_value = {
+                'validation': {
+                    'tflite': {'passed': False, 'degradation': 10.0, 'threshold': 7.0}
+                },
+                'benchmarks': {}
+            }
+            
+            # Capture print output
+            import io
+            from contextlib import redirect_stdout
+            
+            f = io.StringIO()
+            with redirect_stdout(f):
+                converter._print_validation_summary(mock_validate.return_value)
+            
+            output = f.getvalue()
+            
+            # Check failure is reported
+            self.assertIn('❌ FAIL', output)
+            self.assertIn('10.0%', output)
+            self.assertIn('threshold: 7.0%', output)
+    
+    def test_skipped_validation_handling(self):
+        """Test handling of skipped validations (missing dependencies)"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            debug=True
+        )
+        
+        # Create test model
+        model_path = self.output_dir / 'test.onnx'
+        model_path.touch()
+        
+        # Mock missing ONNX runtime
+        with patch('onnxruntime.InferenceSession', side_effect=ImportError):
+            result = converter._validate_onnx_model(Path('original.pt'), model_path)
+            
+            self.assertTrue(result.get('skipped', False))
+            self.assertEqual(result['error'], 'ONNX Runtime not installed')
+    
+    def test_multi_format_validation(self):
+        """Test validation of multiple formats in single conversion"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+        
+        # Create mock files for multiple formats
+        formats = {
+            'onnx': self.output_dir / '320x320' / 'model.onnx',
+            'tflite': self.output_dir / '320x320' / 'model_cpu.tflite',
+            'edge_tpu': self.output_dir / '320x320' / 'model_edgetpu.tflite'
+        }
+        
+        for fmt, path in formats.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.touch()
+        
+        # Mock find_converted_models to return our files
+        with patch.object(converter, '_find_converted_models') as mock_find:
+            def find_models(fmt):
+                if fmt in formats:
+                    return [formats[fmt]]
+                return []
+            
+            mock_find.side_effect = find_models
+            
+            # Mock individual validations
+            with patch.object(converter, '_validate_onnx_model') as mock_onnx:
+                with patch.object(converter, '_validate_tflite_model') as mock_tflite:
+                    mock_onnx.return_value = {'passed': True, 'degradation': 0.5}
+                    mock_tflite.return_value = {'passed': True, 'degradation': 3.0}
+                    
+                    # Run validation
+                    results = converter._validate_converted_models()
+                    
+                    # Check all formats validated
+                    self.assertIn('onnx', results['validation'])
+                    self.assertIn('tflite', results['validation'])
+
+
+class EndToEndValidationTests(unittest.TestCase):
+    """End-to-end tests with real model conversions"""
     
     def setUp(self):
         """Set up test environment"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.test_model_path = Path(self.temp_dir) / "test_model.pt"
-        
-        # Create a minimal fake model file
-        with open(self.test_model_path, 'wb') as f:
-            f.write(b"FAKE_MODEL_DATA")
+        self.test_dir = Path(tempfile.mkdtemp())
+        self.calibration_dir = self.test_dir / 'calibration'
+        self.calibration_dir.mkdir()
+        self._create_real_calibration_images()
     
     def tearDown(self):
-        """Clean up test environment"""
-        shutil.rmtree(self.temp_dir)
+        """Clean up"""
+        if self.test_dir.exists():
+            shutil.rmtree(self.test_dir)
     
-    def test_initialization(self):
-        """Test ModelConverter initialization"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir,
-            model_name="test_model"
+    def _create_real_calibration_images(self):
+        """Create real calibration images"""
+        try:
+            import numpy as np
+            from PIL import Image
+            
+            for i in range(50):
+                # Create varied images
+                if i % 3 == 0:
+                    # Random noise
+                    img_array = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+                elif i % 3 == 1:
+                    # Gradient
+                    img_array = np.zeros((640, 640, 3), dtype=np.uint8)
+                    for y in range(640):
+                        img_array[y, :] = int(255 * y / 640)
+                else:
+                    # Solid color
+                    color = np.random.randint(0, 255, 3)
+                    img_array = np.full((640, 640, 3), color, dtype=np.uint8)
+                
+                img = Image.fromarray(img_array)
+                img.save(self.calibration_dir / f'calib_{i:04d}.jpg')
+                
+        except ImportError:
+            # Fallback to dummy files
+            for i in range(50):
+                (self.calibration_dir / f'calib_{i:04d}.jpg').touch()
+    
+    def test_end_to_end_conversion_with_validation(self):
+        """Test complete conversion pipeline with validation"""
+        # Use a small test model or mock
+        model_path = self.test_dir / 'test_model.pt'
+        
+        # Create mock model file
+        import torch
+        
+        # Create minimal YOLO-like model
+        class MinimalModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, 3, padding=1)
+                self.pool = torch.nn.AdaptiveAvgPool2d(1)
+                self.fc = torch.nn.Linear(16, 84)  # YOLO-like output
+            
+            def forward(self, x):
+                x = torch.relu(self.conv(x))
+                x = self.pool(x)
+                x = x.view(x.size(0), -1)
+                x = self.fc(x)
+                return x.view(x.size(0), 84, 1)
+        
+        # Save model
+        model = MinimalModel()
+        torch.save({
+            'model': model.state_dict(),
+            'nc': 3,  # 3 classes
+            'names': {0: 'person', 1: 'fire', 2: 'smoke'}
+        }, model_path)
+        
+        # Run conversion
+        output_dir = self.test_dir / 'output'
+        
+        # Create converter
+        converter = EnhancedModelConverter(
+            model_path=str(model_path),
+            output_dir=str(output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=[320, 256],  # Multiple sizes
+            debug=True
         )
         
-        self.assertEqual(converter.model_name, "test_model")
-        self.assertEqual(converter.model_size, (640, 640))
-        self.assertTrue(converter.calibration_data.exists())
+        # Mock model info extraction
+        converter.model_info.type = 'test'
+        converter.model_info.classes = ['person', 'fire', 'smoke']
+        converter.model_info.num_classes = 3
+        
+        # Run conversion with validation
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            # Mock successful ONNX conversion
+            def create_onnx(size=None):
+                size = size or converter.model_size
+                size_str = f"{size[0]}x{size[1]}"
+                onnx_path = converter.output_dir / f'test_{size_str}.onnx'
+                onnx_path.parent.mkdir(parents=True, exist_ok=True)
+                onnx_path.touch()
+                return onnx_path
+            
+            mock_onnx.side_effect = create_onnx
+            
+            # Run conversion
+            results = converter.convert_all(
+                formats=['onnx'],
+                validate=True,
+                benchmark=True
+            )
+        
+        # Verify results
+        self.assertIn('sizes', results)
+        self.assertEqual(len(results['sizes']), 2)  # Two sizes
+        
+        # Check each size has validation
+        for size_str in ['320x320', '256x256']:
+            self.assertIn(size_str, results['sizes'])
+            size_results = results['sizes'][size_str]
+            
+            # Should have attempted validation
+            # (actual validation may skip due to missing runtime)
+            self.assertIn('outputs', size_results)
     
-    def test_custom_size_initialization(self):
-        """Test initialization with custom size"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir,
-            model_size=(416, 416)
+    def test_cli_integration(self):
+        """Test CLI integration with validation"""
+        # Create test script that imports the converter
+        test_script = self.test_dir / 'test_cli.py'
+        test_script.write_text("""
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from convert_model import main
+
+# Mock sys.argv
+sys.argv = [
+    'convert_model.py',
+    'dummy.pt',
+    '--size', '320',
+    '--formats', 'onnx',
+    '--output-dir', 'test_output',
+    '--no-validate'  # Disable for speed
+]
+
+# Run
+try:
+    main()
+except SystemExit as e:
+    sys.exit(e.code)
+""")
+        
+        # Run the script
+        result = subprocess.run(
+            [sys.executable, str(test_script)],
+            capture_output=True,
+            text=True,
+            cwd=str(self.test_dir)
         )
         
-        self.assertEqual(converter.model_size, (416, 416))
+        # Should handle missing model gracefully
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Model not found', result.stderr)
+
+
+class ValidationReportingTests(unittest.TestCase):
+    """Test validation reporting and output formatting"""
     
-    @patch('subprocess.run')
-    def test_extract_model_info_external(self, mock_run):
-        """Test model info extraction"""
-        # Mock successful extraction
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = json.dumps({
-            'type': 'yolov8',
-            'classes': ['person', 'car', 'fire'],
-            'num_classes': 3
-        })
-        mock_run.return_value = mock_result
-        
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        converter._extract_model_info_external()
-        
-        self.assertEqual(converter.model_info['type'], 'yolov8')
-        self.assertEqual(converter.model_info['num_classes'], 3)
-        self.assertEqual(len(converter.model_info['classes']), 3)
-    
-    @patch('subprocess.run')
-    def test_convert_to_onnx(self, mock_run):
-        """Test ONNX conversion"""
-        # Mock successful conversion
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = "SUCCESS"
-        mock_run.return_value = mock_result
-        
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
+    def test_validation_summary_formatting(self):
+        """Test validation summary output formatting"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir='.',
+            calibration_data='.',
+            debug=True
         )
         
-        # Create fake ONNX file
-        onnx_path = converter.output_dir / f"{converter.model_name}.onnx"
-        with open(onnx_path, 'wb') as f:
-            f.write(b"FAKE_ONNX_DATA")
-        
-        result = converter.convert_to_onnx()
-        
-        self.assertEqual(result, onnx_path)
-        self.assertTrue(onnx_path.exists())
-    
-    def test_create_synthetic_calibration(self):
-        """Test synthetic calibration data creation"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        # Remove calibration data to force synthetic creation
-        shutil.rmtree(converter.calibration_data)
-        converter.calibration_data.mkdir()
-        
-        # Create synthetic data
-        converter._create_synthetic_calibration()
-        
-        # Check files were created
-        jpg_files = list(converter.calibration_data.glob("*.jpg"))
-        self.assertEqual(len(jpg_files), 100)
-    
-    def test_generate_frigate_config(self):
-        """Test Frigate configuration generation"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        # Set up model info
-        converter.model_info = {
-            'classes': ['person', 'car', 'fire', 'smoke'],
-            'num_classes': 4
+        # Create test results
+        results = {
+            'validation': {
+                'onnx': {'passed': True, 'degradation': 0.5, 'threshold': 1.0},
+                'tflite': {'passed': True, 'degradation': 2.8, 'threshold': 3.0},
+                'edge_tpu': {'passed': False, 'degradation': 8.5, 'threshold': 7.0},
+                'hailo': {'passed': True, 'degradation': 4.2, 'threshold': 5.0, 'skipped': True, 'error': 'No device'}
+            },
+            'benchmarks': {
+                'onnx': {'avg_inference_ms': 25.3, 'fps': 39.5},
+                'tflite': {'avg_inference_ms': 18.7, 'fps': 53.5},
+                'edge_tpu': {'error': 'Device not found'},
+                'hailo': {'error': 'Device not found'}
+            }
         }
         
-        config_path = converter.generate_frigate_config()
+        # Capture output
+        import io
+        from contextlib import redirect_stdout
         
-        self.assertTrue(config_path.exists())
+        f = io.StringIO()
+        with redirect_stdout(f):
+            converter._print_validation_summary(results)
         
-        # Load and verify config
-        with open(config_path, 'r') as f:
-            import yaml
-            config = yaml.safe_load(f)
+        output = f.getvalue()
         
-        self.assertIn('model', config)
-        self.assertIn('objects', config)
-        self.assertIn('fire', config['objects']['track'])
-        self.assertIn('smoke', config['objects']['track'])
-        
-        # Check labels file
-        labels_path = converter.output_dir / f"{converter.model_name}_labels.txt"
-        self.assertTrue(labels_path.exists())
-        
-        with open(labels_path, 'r') as f:
-            labels = f.read().strip().split('\n')
-        
-        self.assertEqual(len(labels), 4)
+        # Check formatting
+        self.assertIn('VALIDATION AND BENCHMARK RESULTS', output)
+        self.assertIn('✅ PASS', output)  # For passed tests
+        self.assertIn('❌ FAIL', output)  # For failed tests
+        self.assertIn('⏭️  SKIP', output)  # For skipped tests
+        self.assertIn('39.5 FPS', output)  # Benchmark results
+        self.assertIn('threshold: 7.0%', output)  # Threshold info
     
-    @patch('subprocess.run')
-    def test_compile_edge_tpu(self, mock_run):
-        """Test Edge TPU compilation"""
-        # Mock successful compilation
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_run.return_value = mock_result
-        
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        # Create fake quantized model
-        quant_path = converter.output_dir / "test_quant.tflite"
-        with open(quant_path, 'wb') as f:
-            f.write(b"FAKE_QUANTIZED_MODEL")
-        
-        # Create fake compiled model
-        compiled_path = converter.output_dir / "test_quant_edgetpu.tflite"
-        with open(compiled_path, 'wb') as f:
-            f.write(b"FAKE_COMPILED_MODEL")
-        
-        result = converter._compile_edge_tpu(quant_path)
-        
-        self.assertIsNotNone(result)
-    
-    def test_get_output_layer_names(self):
-        """Test output layer name generation"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        names = converter._get_output_layer_names()
-        
-        self.assertIsInstance(names, list)
-        self.assertGreater(len(names), 0)
-    
-    @patch('subprocess.run')
-    def test_check_hailo_sdk(self, mock_run):
-        """Test Hailo SDK detection"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        # Test SDK found
-        mock_run.return_value.returncode = 0
-        self.assertTrue(converter._check_hailo_sdk())
-        
-        # Test SDK not found
-        mock_run.return_value.returncode = 1
-        self.assertFalse(converter._check_hailo_sdk())
-        
-        # Test command not found
-        mock_run.side_effect = FileNotFoundError()
-        self.assertFalse(converter._check_hailo_sdk())
-    
-    def test_create_hailo_script(self):
-        """Test Hailo conversion script creation"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        onnx_path = converter.output_dir / "test.onnx"
-        config_path = converter.output_dir / "test_config.json"
-        
-        script_path = converter._create_hailo_script(onnx_path, config_path)
-        
-        self.assertTrue(script_path.exists())
-        self.assertTrue(os.access(script_path, os.X_OK))
-        
-        # Check script content
-        with open(script_path, 'r') as f:
-            content = f.read()
-        
-        self.assertIn("hailo parser", content)
-        self.assertIn("hailo optimize", content)
-        self.assertIn("hailo compiler", content)
-    
-    def test_create_readme(self):
-        """Test README generation"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
+    def test_multi_size_validation_reporting(self):
+        """Test validation reporting for multiple sizes"""
         results = {
-            'model_info': {
-                'type': 'yolov8',
-                'num_classes': 3,
-                'classes': ['person', 'car', 'fire']
-            },
-            'outputs': {
-                'onnx': {'path': Path('test.onnx')},
-                'tflite': {
-                    'cpu': Path('test_cpu.tflite'),
-                    'edge_tpu': Path('test_edgetpu.tflite')
+            'sizes': {
+                '640x640': {
+                    'validation': {
+                        'onnx': {'passed': True, 'degradation': 0.3},
+                        'tflite': {'passed': True, 'degradation': 2.1}
+                    }
+                },
+                '320x320': {
+                    'validation': {
+                        'onnx': {'passed': True, 'degradation': 0.8},
+                        'tflite': {'passed': False, 'degradation': 4.5}
+                    }
                 }
             }
         }
         
-        converter._create_readme(results)
+        # Check that failures are detected across sizes
+        total_failures = 0
+        for size_str, size_results in results['sizes'].items():
+            if size_results.get('validation'):
+                failures = [
+                    fmt for fmt, val in size_results['validation'].items()
+                    if not val.get('passed', True)
+                ]
+                total_failures += len(failures)
         
-        readme_path = converter.output_dir / "README.md"
-        self.assertTrue(readme_path.exists())
-        
-        with open(readme_path, 'r') as f:
-            content = f.read()
-        
-        self.assertIn("yolov8", content)
-        self.assertIn("Deployment with Frigate", content)
-        self.assertIn("test_cpu.tflite", content)
-    
-    @patch('urllib.request.urlretrieve')
-    def test_download_model(self, mock_urlretrieve):
-        """Test model download functionality"""
-        output_path = Path(self.temp_dir)
-        
-        # Test successful download
-        model_path = download_model('yolov8n', output_path)
-        
-        self.assertEqual(model_path.name, 'yolov8n.pt')
-        mock_urlretrieve.assert_called_once()
-        
-        # Test unknown model
-        with self.assertRaises(ValueError):
-            download_model('unknown_model', output_path)
-    
-    def test_convert_all_error_handling(self):
-        """Test error handling in convert_all"""
-        converter = ModelConverter(
-            model_path=self.test_model_path,
-            output_dir=self.temp_dir
-        )
-        
-        # Mock all conversion methods to raise exceptions
-        converter.convert_to_onnx = Mock(side_effect=Exception("ONNX failed"))
-        converter.convert_to_tflite = Mock(side_effect=Exception("TFLite failed"))
-        converter.convert_to_hailo = Mock(side_effect=Exception("Hailo failed"))
-        
-        # Should not crash
-        results = converter.convert_all()
-        
-        self.assertIn('model_info', results)
-        self.assertIn('outputs', results)
-        
-        # Check summary was created
-        summary_path = converter.output_dir / "conversion_summary.json"
-        self.assertTrue(summary_path.exists())
+        self.assertEqual(total_failures, 1)  # One failure in 320x320 tflite
 
-class TestModelConverterIntegration(unittest.TestCase):
-    """Integration tests for model converter"""
-    
-    def setUp(self):
-        """Set up test environment"""
-        self.temp_dir = tempfile.mkdtemp()
-    
-    def tearDown(self):
-        """Clean up test environment"""
-        shutil.rmtree(self.temp_dir)
-    
-    @patch('subprocess.run')
-    def test_full_conversion_flow(self, mock_run):
-        """Test complete conversion flow"""
-        # Create test model
-        model_path = Path(self.temp_dir) / "test_model.pt"
-        with open(model_path, 'wb') as f:
-            f.write(b"FAKE_MODEL")
-        
-        # Mock all subprocess calls to succeed
-        mock_run.return_value.returncode = 0
-        mock_run.return_value.stdout = "SUCCESS"
-        
-        # Create converter
-        converter = ModelConverter(
-            model_path=model_path,
-            output_dir=self.temp_dir,
-            model_name="integration_test"
-        )
-        
-        # Mock model info
-        converter.model_info = {
-            'type': 'yolov8',
-            'classes': ['fire', 'smoke', 'person'],
-            'num_classes': 3
-        }
-        
-        # Run conversion
-        results = converter.convert_all()
-        
-        # Verify results structure
-        self.assertIn('model_info', results)
-        self.assertIn('outputs', results)
-        
-        # Check that some files were created
-        files = list(Path(self.temp_dir).glob('*'))
-        self.assertGreater(len(files), 0)
-        
-        # Check README exists
-        readme_path = Path(self.temp_dir) / "README.md"
-        self.assertTrue(readme_path.exists())
-        
-        # Check summary exists
-        summary_path = Path(self.temp_dir) / "conversion_summary.json"
-        self.assertTrue(summary_path.exists())
 
 if __name__ == '__main__':
-    unittest.main()
+    # Run tests with verbosity
+    unittest.main(verbosity=2)

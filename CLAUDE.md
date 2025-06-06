@@ -95,6 +95,7 @@ mqtt_broker (core)
 - Supports Coral TPU (.tflite), Hailo (.hef), ONNX, TensorRT formats
 - Update `security_nvr/nvr_base_config.yml` for new models
 - Performance benchmarking required for each accelerator type
+- **Note:** Coral TPU requires Python 3.8 for tflite_runtime compatibility
 
 ### GPIO Safety Systems
 - All pump control in `gpio_trigger/trigger.py` uses state machine pattern
@@ -114,6 +115,7 @@ mqtt_broker (core)
 - Auto-detection via `FRIGATE_DETECTOR=auto`
 - Platform-specific device mappings in docker-compose.yml
 - Performance targets: Coral (15-20ms), Hailo (10-25ms), GPU (8-12ms)
+- Coral TPU requires Python 3.8 runtime environment
 
 ### GPIO Simulation
 - Automatically enabled on non-Raspberry Pi systems
