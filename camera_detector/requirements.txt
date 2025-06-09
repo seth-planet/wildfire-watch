@@ -1,6 +1,6 @@
 # Core dependencies
 paho-mqtt==1.6.1
-python-dotenv==1.0.0
+python-dotenv==1.1.0
 pyyaml==6.0.1
 
 # Camera discovery and control
