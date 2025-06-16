@@ -22,4 +22,4 @@ aiohttp==3.12.13
 asyncio==3.4.3
 
 # Data handling
-numpy==1.24.3
+numpy==2.0.2
