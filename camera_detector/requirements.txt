@@ -18,7 +18,7 @@ netifaces==0.11.0
 requests==2.32.3
 
 # Async support
-aiohttp==3.11.0b0
+aiohttp==3.12.13
 asyncio==3.4.3
 
 # Data handling
