@@ -28,19 +28,43 @@ balena push wildfire-watch
 
 ### Testing
 ```bash
-# Run all tests
-python3.12 -m pytest tests/ -v
+# IMPORTANT: Different tests require different Python versions!
+
+# Python 3.12 tests (most tests)
+python3.12 -m pytest tests/ -v --timeout=300 -k "not (api_usage or yolo_nas or qat_functionality or int8_quantization or frigate_integration or model_converter or hardware_integration or deployment or security_nvr)"
+
+# Python 3.10 tests (YOLO-NAS/super-gradients)
+python3.10 -m pytest tests/test_api_usage.py tests/test_yolo_nas_training.py tests/test_qat_functionality.py -v --timeout=300
+
+# Python 3.8 tests (Coral TPU/tflite_runtime)
+python3.8 -m pytest tests/test_model_converter.py tests/test_hardware_integration.py tests/test_deployment.py -v --timeout=300
 
 # Specific test files
-python3.12 -m pytest tests/test_consensus.py
-python3.12 -m pytest tests/test_integration_e2e.py
+python3.12 -m pytest tests/test_consensus.py -v
+python3.12 -m pytest tests/test_integration_e2e.py -v
 
-# Hardware integration tests (requires actual hardware)
-python3.12 -m pytest tests/test_hardware_integration.py
+# See tests/README.md for complete Python version requirements
 ```
 
 ### Python Version
 This project requires Python 3.12. All commands should use `python3.12` and `pip3.12`.
+
+**Exceptions**:
+
+1. **Coral TPU**: Requires Python 3.8 for `tflite_runtime` compatibility. When running Coral-specific code:
+   - Use `python3.8` instead of `python3.12`
+   - Install tflite_runtime with: `python3.8 -m pip install tflite-runtime`
+   - See `docs/coral_python38_requirements.md` for details
+   - Run `./scripts/check_coral_python.py` to verify Python 3.8 setup
+
+2. **YOLO-NAS Training**: Requires Python 3.10 for `super-gradients` compatibility. When training YOLO-NAS models:
+   - Use `python3.10` instead of `python3.12`
+   - Install super-gradients with: `python3.10 -m pip install super-gradients`
+   - Training scripts in `converted_models/` should be run with Python 3.10:
+     ```bash
+     python3.10 converted_models/train_yolo_nas.py
+     python3.10 converted_models/complete_yolo_nas_pipeline.py
+     ```
 
 ### Service Management
 ```bash
@@ -94,8 +118,33 @@ mqtt_broker (core)
 - Models stored in `converted_models/` with conversion script
 - Supports Coral TPU (.tflite), Hailo (.hef), ONNX, TensorRT formats
 - Update `security_nvr/nvr_base_config.yml` for new models
+- **Model sizes**: Export in multiple sizes - 640x640 (optimal accuracy), 416x416 (balanced), 320x320 (edge devices)
+- **Default model size: 640x640** for optimal fire detection accuracy
+- **Fallback to 320x320** for hardware-limited devices (Raspberry Pi, Coral TPU)
 - Performance benchmarking required for each accelerator type
 - **Note:** Coral TPU requires Python 3.8 for tflite_runtime compatibility
+- **Always use QAT (Quantization-Aware Training) for INT8 formats when available**
+- Model accuracy validation ensures <2% degradation for production deployment
+- **Calibration data**: Download from https://huggingface.co/datasets/mailseth/wildfire-watch/resolve/main/wildfire_calibration_data.tar.gz?download=true
+
+#### Model Conversion Timeouts
+Due to the complexity of neural network compilation and optimization, model conversions can take significant time:
+- **ONNX**: ~2-5 minutes (includes simplification)
+- **TFLite**: ~15-30 minutes (includes INT8 quantization with calibration data)
+- **TensorRT**: ~30-60 minutes (engine optimization is compute-intensive)
+- **OpenVINO**: ~10-30 minutes (includes IR generation and optimization)
+- **Hailo**: ~20-40 minutes (requires Docker and specialized compilation)
+
+All conversion scripts have been configured with appropriate timeouts:
+- Standard conversions: 30 minutes
+- TensorRT engine building: 60 minutes
+- Quantization with large calibration datasets: 30 minutes
+
+If conversions timeout, consider:
+1. Using smaller model sizes (320x320 instead of 640x640)
+2. Reducing calibration dataset size for quantization
+3. Running conversions on more powerful hardware
+4. Using pre-converted models when available
 
 ### GPIO Safety Systems
 - All pump control in `gpio_trigger/trigger.py` uses state machine pattern
@@ -152,6 +201,56 @@ mqtt_broker (core)
 - Mock MQTT broker available for unit tests
 - Camera discovery can be tested with fake RTSP streams
 
+### Test Fixing Guidelines
+When fixing failing tests, follow these principles:
+1. **Test the actual code, not a mock** - Ensure tests exercise the real implementation
+   - If testing `mqtt_connect()`, call the actual function, not a simplified version
+   - Only mock external dependencies (network, hardware, time.sleep)
+2. **Fix the code, not just the test** - If a test reveals a bug, fix the source code
+   - Example: Add retry limits to prevent infinite recursion in network code
+   - Make functions testable by adding optional parameters (e.g., `max_retries`)
+3. **Preserve test intent** - Understand what the test is trying to verify
+   - Don't remove assertions to make tests pass
+   - Don't mock away the functionality being tested
+4. **Minimal mocking** - Only mock what's necessary
+   - Mock external I/O (files, network, hardware)
+   - Don't mock the module or functions under test
+5. **Test real behavior** - Tests should reflect actual usage
+   - If a function is called with certain parameters in production, test those
+   - Include edge cases and error conditions
+
+### Integration Testing Philosophy
+**Avoid mocking functions and files within wildfire-watch**. We want to perform integration tests that actually test our system without mocking out important functionality:
+
+1. **Never mock internal modules** - Don't mock wildfire-watch modules like `consensus`, `trigger`, `detect`, etc.
+   - ❌ Bad: `@patch('consensus.FireConsensus')`
+   - ✅ Good: Actually instantiate and use `FireConsensus` class
+
+2. **Only mock external dependencies**:
+   - ✅ Mock: `RPi.GPIO`, `paho.mqtt.client`, `docker`, `requests`
+   - ✅ Mock: File I/O, network calls, hardware interfaces
+   - ✅ Mock: Time delays (`time.sleep`) for faster tests
+
+3. **Test real interactions**:
+   - Test actual MQTT message flow between components
+   - Test real state transitions and validation logic
+   - Test actual configuration loading and parsing
+
+4. **Use test fixtures properly**:
+   - Create real instances of classes under test
+   - Set up proper test environments (temp dirs, mock MQTT broker)
+   - Clean up resources properly after tests
+
+5. **Integration test examples**:
+   ```python
+   # Good: Testing real consensus logic
+   consensus = FireConsensus()  # Real instance
+   consensus.process_detection(detection)  # Real method call
+   
+   # Bad: Mocking internal functionality
+   @patch('consensus.FireConsensus.process_detection')  # Don't do this
+   ```
+
 ## Common Environment Variables
 
 ### Core Settings
@@ -183,3 +282,187 @@ mqtt_broker (core)
 - MQTT broker creates isolated network (192.168.100.0/24)
 - Frigate UI accessible on port 5000
 - TLS encryption for production MQTT (port 8883)
+
+## File Organization Guidelines
+
+### Directory Structure for Claude-Generated Files
+- **tmp/** - All temporary files including test scripts, debugging files, and intermediate outputs
+- **output/** - Final output files, test results, generated reports, and converted models
+- **scripts/** - Permanent utility scripts that should be kept in the repository
+- **docs/** - Documentation files and guides
+
+### Examples:
+```bash
+# Temporary test scripts
+tmp/test_tensorrt_fix.py
+tmp/debug_yolov9.py
+tmp/test_conversion.py
+
+# Output files
+output/test_results.log
+output/model_conversion_report.md
+output/converted_models/
+output/comprehensive_test_results.log
+
+# Permanent scripts (kept in repo)
+scripts/validate_models.py
+scripts/run_all_tests.py
+scripts/demo_accuracy_validation.py
+```
+
+### Scripts (`scripts/`)
+- Utility and demo scripts belong in the `scripts/` directory
+- Executable scripts should have proper shebang (e.g., `#!/usr/bin/env python3.12`)
+- Examples:
+  - `scripts/generate_certs.sh` - Certificate generation
+  - `scripts/build_multiplatform.sh` - Docker build utilities
+  - `scripts/demo_accuracy_validation.py` - Model accuracy demo
+  - `scripts/startup_coordinator.py` - Service coordination
+
+### Temporary Files (`tmp/`)
+- All testing scripts, debugging files, and temporary utilities belong in `tmp/`
+- This includes validation scripts, quick tests, and experimental code
+- Examples:
+  - `tmp/test_tensorrt_fix.py` - Temporary test scripts
+  - `tmp/debug_yolov9.py` - Debugging utilities
+  - `tmp/quick_validation.py` - Quick validation tests
+
+### Documentation (`docs/`)
+- Technical documentation and guides belong in the `docs/` directory
+- Use descriptive filenames with lowercase and underscores
+- Examples:
+  - `docs/configuration.md` - Configuration guide
+  - `docs/hardware.md` - Hardware requirements
+  - `docs/accuracy_validation.md` - Model accuracy validation guide
+  - `docs/troubleshooting.md` - Common issues and solutions
+
+### Models (`converted_models/`)
+- Model conversion scripts and utilities stay in `converted_models/`
+- Converted model outputs organized by model name and size
+- Calibration data in subdirectories
+- Model conversion logs and reports generated here
+
+### Tests (`tests/`)
+- All test files must start with `test_` prefix
+- Integration tests should be clearly named (e.g., `test_integration_e2e.py`)
+- Hardware-specific tests marked appropriately
+
+## Development Workflow for Non-Trivial Work
+
+### Planning Methodology
+For any non-trivial work (>30 minutes or involving multiple files), follow this structured approach:
+
+1. **Create a Plan File**
+   - Name: `[feature_name]_plan.md` in the appropriate directory
+   - Include: Overview, phases, timeline, technical requirements
+   - Structure with clear phases and deliverables
+
+2. **Execute Plan with Progress Updates**
+   - Mark each phase as: `## Phase X: [Name] - ⏳ IN PROGRESS` when starting
+   - Update to: `## Phase X: [Name] - ✅ COMPLETE` when finished
+   - Add progress notes with what was accomplished
+   - Document any deviations or issues encountered
+
+3. **Testing Requirements**
+   - **At the end of each plan**: Run all tests related to the changed code
+   - **Test failure priority**: Fix the program's code first, not the test
+   - **Change tests only if**: The test itself is incorrect or outdated
+   - **Skip tests only if**: They cannot reasonably be made to pass
+   - **Document skipped tests**: Note at end of plan with specific reasons
+
+### Plan File Template
+```markdown
+# [Feature Name] Implementation Plan
+
+## Overview
+Brief description of what will be accomplished
+
+## Phases
+### Phase 1: [Name] - ⏳ PENDING
+- Task 1
+- Task 2
+
+### Phase 2: [Name] - ⏳ PENDING  
+- Task 1
+- Task 2
+
+## Testing
+- List of test files that will be affected
+- Expected test changes
+
+## Timeline
+- Estimated completion time per phase
+
+## Progress Notes
+[Add progress updates here as work proceeds]
+
+## Test Results
+[Add test results at completion]
+- Tests run: X
+- Tests passed: Y
+- Tests failed: Z
+- Tests skipped: N (with reasons)
+```
+
+### Examples of Non-Trivial Work
+- Adding new model architectures
+- Implementing new conversion formats
+- Multi-service integrations
+- Complex refactoring across multiple files
+- New testing frameworks or validation systems
+
+## AI Assistant Guidelines
+
+### Debugging and Code Analysis
+For complex debugging and code analysis tasks, use specialized AI models to leverage their unique strengths:
+
+**Use Gemini (Google) for:**
+- **Large context analysis** - Gemini can handle extensive codebases and multiple files simultaneously
+- **Complex debugging** - Deep investigation of multi-file issues and complex system interactions
+- **Architecture analysis** - Understanding large-scale system relationships and dependencies
+- **Code review** - Comprehensive analysis of extensive code changes
+- **Performance analysis** - Analyzing performance across multiple components
+- **Large context code reviews** - When reviewing multiple files or entire modules
+
+**Use ChatGPT o3 for:**
+- **Tricky logic problems** - Complex algorithmic and mathematical reasoning
+- **Small context debugging** - Focused analysis of specific functions or modules
+- **Logic flow analysis** - Understanding complex control flow and state management
+- **Algorithm optimization** - Improving specific algorithmic implementations
+- **Edge case identification** - Finding subtle bugs in focused code sections
+- **Small context code reviews** - When reviewing specific functions or algorithms
+- **Logic evaluation** - Verifying correctness of specific logic implementations
+
+**Model Selection Guidelines:**
+- **Context size**: >10 files or >5000 lines → Gemini
+- **Logic complexity**: Algorithmic puzzles, mathematical problems → o3
+- **System scope**: Multi-service interactions → Gemini
+- **Function scope**: Single function debugging → o3
+- **Code review scope**: Multiple files → Gemini, Single function → o3
+- **Unknown complexity**: Start with Gemini for broader analysis, then o3 for specific issues
+
+### Information Accuracy Guidelines
+
+#### Web Search for Technical Details
+When encountering uncertainty about facts, current information, or technical details, always use web search to verify and provide accurate information rather than speculating or admitting uncertainty without investigation.
+
+**Required for web search:**
+1. **API Documentation**: When working with specific APIs or libraries, search for current documentation rather than assuming knowledge
+2. **Library Features**: Verify available methods, parameters, and usage patterns
+3. **Version Compatibility**: Check compatibility between different library versions
+4. **Error Messages**: Search for specific error messages to find solutions
+5. **Best Practices**: Look up current best practices for frameworks and tools
+6. **Breaking Changes**: Verify if APIs have changed between versions
+
+**Examples requiring web search:**
+- "What parameters does super-gradients trainer.train() accept?"
+- "How to configure YOLO-NAS dataloader in super-gradients 3.6+"
+- "What's the correct import path for DetectionMetrics_050?"
+- "How to enable QAT in super-gradients?"
+- "What are the supported transforms in super-gradients detection?"
+
+**Process:**
+1. Use WebSearch tool to find official documentation
+2. Verify information from multiple authoritative sources
+3. Provide accurate, up-to-date information with source references
+4. Update code examples based on current API documentation

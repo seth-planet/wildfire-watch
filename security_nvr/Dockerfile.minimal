@@ -1,0 +1,31 @@
+FROM ghcr.io/blakeblackshear/frigate:stable
+
+# Install minimal additional dependencies
+USER root
+
+# Install ping for connectivity tests
+RUN apt-get update && apt-get install -y iputils-ping && rm -rf /var/lib/apt/lists/*
+
+# Copy our base config
+COPY nvr_base_config.yml /config/
+
+# Copy our scripts
+COPY hardware_detector.py /scripts/
+COPY camera_manager.py /scripts/
+COPY usb_manager.py /scripts/
+COPY entrypoint_simple.sh /scripts/entrypoint.sh
+
+# Make scripts executable
+RUN chmod +x /scripts/*.sh /scripts/*.py
+
+# Create directories
+RUN mkdir -p /media/frigate /var/log/frigate
+
+# Environment variables
+ENV FRIGATE_MQTT_HOST="mqtt_broker" \
+    FRIGATE_MQTT_PORT="1883" \
+    FRIGATE_MQTT_TLS="false" \
+    LOG_LEVEL="info"
+
+# Use the original Frigate entrypoint
+ENTRYPOINT ["/scripts/entrypoint.sh"]

@@ -224,4 +224,9 @@ if __name__ == '__main__':
         with open('/tmp/hardware_config.json', 'w') as f:
             json.dump({'detected': detector.detected_hardware, 'recommended': config}, f)
     else:
-        print(json.dumps(config, indent=2))
+        # Print hardware info for debugging/testing
+        output = {
+            'hardware': detector.detected_hardware,
+            'recommended_config': config
+        }
+        print(json.dumps(output, indent=2))

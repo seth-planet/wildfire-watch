@@ -53,6 +53,9 @@ Edit `.env` file:
 # Platform
 PLATFORM=linux/arm64
 
+# MQTT Security (set to true for production)
+MQTT_TLS=false
+
 # Camera settings
 CAMERA_CREDENTIALS=admin:yourpassword,admin:12345
 DISCOVERY_INTERVAL=300
@@ -124,31 +127,39 @@ GPIO 16 (Pin 36) <---- Reservoir Float Switch
 GPIO 20 (Pin 38) <---- Line Pressure Switch
 ```
 
-### 5. Deploy with Docker Compose
+### 5. Security Setup
+
+#### For Development/Testing
+```bash
+# Default certificates are included - INSECURE!
+# Skip to deployment step
+```
+
+#### For Production
+```bash
+# Generate custom certificates
+./scripts/generate_certs.sh custom
+# Follow prompts for CA password and certificate details
+
+# Enable TLS in .env
+sed -i 's/MQTT_TLS=false/MQTT_TLS=true/' .env
+```
+
+### 6. Deploy Services
 
 ```bash
-# Build and start services
+# Deploy with Docker Compose
 docker-compose up -d
+
+# Verify all services are running
+docker ps
+# Should show: mqtt_broker, camera-detector, security_nvr, fire_consensus, gpio_trigger
 
 # View logs
 docker-compose logs -f
 
-# Check service status
-docker ps
-```
-
-### 6. Generate Secure Certificates
-
-```bash
-# Generate custom certificates (do this BEFORE production!)
-./scripts/generate_certs.sh custom
-
-# Deploy certificates
-sudo mkdir -p /mnt/data/certs
-sudo cp certs/* /mnt/data/certs/
-
-# Restart services
-docker-compose restart
+# Get Frigate credentials
+docker logs security_nvr | grep "Password:"
 ```
 
 ## Verification

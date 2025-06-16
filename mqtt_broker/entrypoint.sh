@@ -5,6 +5,7 @@
 set -e
 
 # Start D-Bus daemon (required for Avahi)
+mkdir -p /var/run/dbus
 if [ ! -f /var/run/dbus/pid ]; then
     dbus-daemon --system --fork
 fi
@@ -34,9 +35,17 @@ fi
 # Create required directories if they don't exist
 mkdir -p /mosquitto/data /mosquitto/log
 
-# Check for TLS certificates
+# Check for TLS certificates and configuration
 if [ -f "/mnt/data/certs/ca.crt" ] && [ -f "/mnt/data/certs/server.crt" ] && [ -f "/mnt/data/certs/server.key" ]; then
     echo "TLS certificates found - secure MQTT will be available on port 8883"
+    
+    # If MQTT_TLS is enabled, use TLS configuration
+    if [ "${MQTT_TLS}" = "true" ]; then
+        echo "MQTT_TLS=true - Using TLS configuration"
+        if [ -f "/mosquitto/config/mosquitto_tls.conf" ]; then
+            export MOSQUITTO_CONF="/mosquitto/config/mosquitto_tls.conf"
+        fi
+    fi
 else
     echo "Warning: TLS certificates not found at /mnt/data/certs/"
     echo "Only plain MQTT on port 1883 will be available"
@@ -55,4 +64,10 @@ echo "Hostname: $(hostname)"
 echo "=================================================="
 
 # Execute mosquitto with the provided configuration
-exec "$@"
+# If MQTT_TLS is true and TLS config exists, use it
+if [ "${MQTT_TLS}" = "true" ] && [ -f "/mosquitto/config/mosquitto_tls.conf" ]; then
+    echo "Starting Mosquitto with TLS configuration..."
+    exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto_tls.conf
+else
+    exec "$@"
+fi

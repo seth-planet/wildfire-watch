@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 # Install system dependencies
 RUN apt-get update && \
@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY detect.py .
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY entrypoint_simple.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Create directories for Frigate config

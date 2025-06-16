@@ -22,14 +22,14 @@ detectors:
       path: "{MODEL_PATH}"
       input_tensor: nhwc
       input_pixel_format: rgb
-      width: 320
-      height: 320
+      width: 640
+      height: 640
     labels: /models/wildfire/labels.txt
 
 # Model customization for wildfire detection
 model:
-  width: 320
-  height: 320
+  width: 640
+  height: 640
   labels:
     - fire
     - smoke

@@ -128,13 +128,16 @@ lsusb | grep 1a6e  # Should show Google Inc.
 # Verify permissions
 ls -la /dev/bus/usb/*/*
 
-# Test Coral directly
+# Test Coral directly (requires Python 3.8)
 docker run --rm --device /dev/bus/usb:/dev/bus/usb \
   --device /dev/dri:/dev/dri \
-  frigate:latest python -c "
-from pycoral.utils.edgetpu import list_edge_tpus
-print(list_edge_tpus())
+  python:3.8-slim bash -c "
+pip install tflite-runtime
+python -c 'import tflite_runtime.interpreter as tflite; print(\"Coral TPU support loaded\")'
 "
+
+# Important: Coral TPU requires Python 3.8 for tflite_runtime
+# See docs/coral_python38_requirements.md for details
 ```
 
 **Hailo not working:**
@@ -371,6 +374,8 @@ docker volume prune
 - Verify udev rules: `/etc/udev/rules.d/99-coral.rules`
 - Try different USB port
 - Check power supply
+- **Ensure Python 3.8 is used** - Coral TPU requires Python 3.8 for tflite_runtime
+  - See [Coral Python 3.8 Requirements](coral_python38_requirements.md)
 
 ### "Failed to connect to MQTT broker"
 - Verify broker is running

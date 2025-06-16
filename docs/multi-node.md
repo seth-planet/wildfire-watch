@@ -269,9 +269,10 @@ scrape_configs:
 Key metrics to monitor:
 - Detections per node/camera
 - Consensus participation rate
-- Node latency and health
+- Node latency and health (via [Camera Telemetry](../cam_telemetry/README.md))
 - Pump activation history
 - Network bandwidth usage
+- System metrics (CPU, memory, disk) from telemetry service
 
 ### Alerting Rules
 
@@ -290,6 +291,24 @@ groups:
       - alert: PumpRuntime
         expr: pump_runtime_seconds > 1200
 ```
+
+## Health Monitoring
+
+The [Camera Telemetry](../cam_telemetry/README.md) service provides real-time health monitoring for all nodes:
+
+```bash
+# Monitor all node telemetry
+mosquitto_sub -h central-broker -t "system/telemetry/+" -v
+
+# Watch for offline nodes (Last Will Testament)
+mosquitto_sub -h central-broker -t "system/telemetry/+/lwt" -v
+```
+
+Telemetry data includes:
+- System metrics (CPU, memory, disk usage)
+- Camera status and configuration
+- Node uptime and availability
+- Detection backend in use
 
 ## Scaling Considerations
 

@@ -262,6 +262,8 @@ log_dest file /mosquitto/log/debug.log
 - `camera/discovery/{camera_id}` - New cameras found
 - `camera/status/{camera_id}` - Camera online/offline
 - `system/+/health` - Component health reports
+- `system/telemetry` - Camera node telemetry (see [Camera Telemetry](../cam_telemetry/README.md))
+- `system/telemetry/{camera_id}/lwt` - Camera offline notifications
 - `frigate/events` - Frigate NVR events
 
 ## Advanced Features

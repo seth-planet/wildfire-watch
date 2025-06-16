@@ -350,6 +350,124 @@ class TestConsensusAlgorithm:
                    if pub[0] == consensus_service.config.TOPIC_TRIGGER]
         assert len(triggers) == 0
     
+    def test_multiple_fire_objects_per_camera(self, consensus_service):
+        """Test handling multiple simultaneous fires per camera"""
+        camera = CameraState('multi_fire_cam')
+        current_time = time.time()
+        
+        # Add detections for first fire object (growing)
+        for i in range(8):
+            area = 0.01 * (1.15 ** i)
+            detection = Detection(
+                'multi_fire_cam',
+                current_time - (8 - i - 1) * 1,
+                0.8,
+                area,
+                [0.1, 0.1, area ** 0.5, area ** 0.5],
+                'fire_obj_1'
+            )
+            camera.add_detection(detection)
+        
+        # Add detections for second fire object (also growing)
+        for i in range(8):
+            area = 0.015 * (1.12 ** i)
+            detection = Detection(
+                'multi_fire_cam',
+                current_time - (8 - i - 1) * 1,
+                0.85,
+                area,
+                [0.5, 0.5, area ** 0.5, area ** 0.5],
+                'fire_obj_2'
+            )
+            camera.add_detection(detection)
+        
+        # Add detections for third fire object (shrinking - should not be growing)
+        for i in range(8):
+            area = 0.02 * (0.9 ** i)
+            detection = Detection(
+                'multi_fire_cam',
+                current_time - (8 - i - 1) * 1,
+                0.75,
+                area,
+                [0.3, 0.3, area ** 0.5, area ** 0.5],
+                'fire_obj_3'
+            )
+            camera.add_detection(detection)
+        
+        # Check that camera tracks all objects
+        assert len(camera.fire_objects) == 3
+        assert 'fire_obj_1' in camera.fire_objects
+        assert 'fire_obj_2' in camera.fire_objects
+        assert 'fire_obj_3' in camera.fire_objects
+        
+        # Check growing fires detection
+        growing_fires = camera.get_growing_fires(current_time)
+        assert len(growing_fires) == 2
+        assert 'fire_obj_1' in growing_fires
+        assert 'fire_obj_2' in growing_fires
+        assert 'fire_obj_3' not in growing_fires
+    
+    def test_growth_percentage_tolerance(self, consensus_service):
+        """Test that 70% growth transitions tolerance works correctly"""
+        camera = CameraState('tolerance_cam')
+        current_time = time.time()
+        
+        # Create a pattern with mostly growth but some shrinkage (>70% growth transitions)
+        # This simulates realistic fire detection with some noise
+        areas = [
+            0.010,  # Start
+            0.012,  # Growth
+            0.011,  # Slight shrink (noise)
+            0.014,  # Growth
+            0.016,  # Growth
+            0.015,  # Slight shrink (noise)
+            0.018,  # Growth
+            0.021,  # Growth
+        ]
+        
+        for i, area in enumerate(areas):
+            detection = Detection(
+                'tolerance_cam',
+                current_time - (len(areas) - i - 1) * 1,
+                0.8,
+                area,
+                [0, 0, area ** 0.5, area ** 0.5],
+                'noisy_growth_obj'
+            )
+            camera.add_detection(detection)
+        
+        # Should still detect growth despite some shrinkage
+        growing_fires = camera.get_growing_fires(current_time)
+        assert len(growing_fires) > 0
+        
+        # Test pattern with too much shrinkage (<70% growth transitions)
+        camera2 = CameraState('intolerance_cam')
+        areas2 = [
+            0.010,  # Start
+            0.009,  # Shrink
+            0.008,  # Shrink
+            0.011,  # Growth
+            0.010,  # Shrink
+            0.009,  # Shrink
+            0.012,  # Growth
+            0.011,  # Shrink
+        ]
+        
+        for i, area in enumerate(areas2):
+            detection = Detection(
+                'intolerance_cam',
+                current_time - (len(areas2) - i - 1) * 1,
+                0.8,
+                area,
+                [0, 0, area ** 0.5, area ** 0.5],
+                'too_much_shrinkage_obj'
+            )
+            camera2.add_detection(detection)
+        
+        # Should not detect growth due to too much shrinkage
+        growing_fires2 = camera2.get_growing_fires(current_time)
+        assert len(growing_fires2) == 0
+    
     def test_multi_camera_consensus_triggers(self, consensus_service, mock_mqtt):
         """Test that multi-camera consensus triggers fire response"""
         # Add growing fires to multiple cameras
@@ -603,6 +721,31 @@ class TestErrorHandling:
         if 'extreme_test' in consensus_service.cameras:
             assert len(consensus_service.cameras['extreme_test'].detections) == 0
     
+    def test_nan_inf_negative_validation(self, consensus_service):
+        """Test comprehensive NaN/Inf/negative value validation in area calculation"""
+        # Test various invalid bbox values
+        invalid_bboxes = [
+            [float('nan'), 0, 0.1, 0.1],
+            [0, float('nan'), 0.1, 0.1],
+            [0, 0, float('nan'), 0.1],
+            [0, 0, 0.1, float('nan')],
+            [float('inf'), 0, 0.1, 0.1],
+            [0, float('-inf'), 0.1, 0.1],
+            [-0.1, 0, 0.1, 0.1],
+            [0, -0.2, 0.1, 0.1],
+            [0, 0, -0.1, 0.1],
+            [0, 0, 0.1, -0.1],
+        ]
+        
+        for bbox in invalid_bboxes:
+            area = consensus_service._calculate_area(bbox)
+            assert area == 0, f"Invalid bbox {bbox} should return 0 area"
+        
+        # Test that valid positive values work
+        valid_bbox = [0.1, 0.2, 0.3, 0.4]
+        area = consensus_service._calculate_area(valid_bbox)
+        assert area > 0, "Valid bbox should return positive area"
+    
     def test_concurrent_detection_processing(self, consensus_service, mock_mqtt):
         """Test thread safety of concurrent detection processing"""
         def add_detections(camera_prefix, count):
@@ -769,6 +912,23 @@ class TestConfiguration:
         assert consensus_service._calculate_area([0.1, 0.2, 0.3]) == 0  # Wrong length
         assert consensus_service._calculate_area([0, 0, 0, 0]) == 0  # Zero area
     
+    def test_frigate_pixel_coordinate_conversion(self, consensus_service):
+        """Test Frigate pixel coordinate to normalized area conversion"""
+        # Test pixel coordinates (values > 1.0 indicate pixel format)
+        pixel_bbox = [100, 150, 300, 400]  # x1, y1, x2, y2 in pixels
+        area = consensus_service._calculate_area(pixel_bbox)
+        
+        # Should calculate area and normalize it
+        # Width = 200 pixels, Height = 250 pixels, Area = 50,000 pixels
+        # Normalized by estimated 1920x1080 = 2,073,600 pixels
+        expected_area = (200 * 250) / (1920 * 1080)
+        assert abs(area - expected_area) < 0.001
+        
+        # Test mixed coordinates (should still work)
+        mixed_bbox = [0.1, 0.2, 300, 400]  # Mixed normalized and pixel
+        area = consensus_service._calculate_area(mixed_bbox)
+        assert area > 0
+    
     def test_detection_validation(self, consensus_service):
         """Test detection validation logic"""
         # Valid detection
@@ -821,6 +981,124 @@ class TestConfiguration:
         # Test insufficient data
         short_averages = [0.01]
         assert camera._check_growth_trend(short_averages, 1.2) is False
+    
+    def test_object_tracking_cleanup(self, consensus_service):
+        """Test automatic cleanup of stale object tracks"""
+        camera = CameraState('test_cam')
+        current_time = time.time()
+        
+        # First add old detection for object that will become stale
+        # Make it old enough to be cleaned up (older than DETECTION_WINDOW * 2)
+        old_detection = Detection(
+            'test_cam',
+            current_time - 25,  # 25 seconds ago (> 20 seconds for default DETECTION_WINDOW=10)
+            0.8,
+            0.02,
+            [0, 0, 0.1, 0.2],
+            'stale_object'
+        )
+        # Directly add to fire_objects to avoid immediate cleanup
+        camera.fire_objects['stale_object'] = [old_detection]
+        
+        # Add recent detection for active object
+        recent_detection = Detection(
+            'test_cam',
+            current_time - 2,  # 2 seconds ago
+            0.8,
+            0.03,
+            [0, 0, 0.1, 0.3],
+            'active_object'
+        )
+        camera.fire_objects['active_object'] = [recent_detection]
+        
+        # Both objects should exist initially
+        assert 'stale_object' in camera.fire_objects
+        assert 'active_object' in camera.fire_objects
+        
+        # Manually call cleanup with current time
+        camera._cleanup_old_objects(current_time)
+        
+        # Stale object should be cleaned up (older than DETECTION_WINDOW * 2 = 20 seconds)
+        assert 'stale_object' not in camera.fire_objects
+        assert 'active_object' in camera.fire_objects
+    
+    def test_mqtt_last_will_testament(self, consensus_service, mock_mqtt):
+        """Test MQTT Last Will Testament configuration"""
+        # Check LWT was set during initialization
+        assert mock_mqtt.will_topic is not None
+        assert mock_mqtt.will_payload is not None
+        
+        # Verify LWT topic format
+        expected_topic = f"{consensus_service.config.TOPIC_HEALTH}/{consensus_service.config.NODE_ID}/lwt"
+        assert mock_mqtt.will_topic == expected_topic
+        
+        # Verify LWT payload
+        import json
+        lwt_data = json.loads(mock_mqtt.will_payload)
+        assert lwt_data['node_id'] == consensus_service.config.NODE_ID
+        assert lwt_data['service'] == 'fire_consensus'
+        assert lwt_data['status'] == 'offline'
+        assert 'timestamp' in lwt_data
+
+# ─────────────────────────────────────────────────────────────
+# Additional Features Tests
+# ─────────────────────────────────────────────────────────────
+class TestAdditionalFeatures:
+    def test_mqtt_tls_configuration(self, monkeypatch):
+        """Test MQTT TLS configuration"""
+        # Set TLS environment variables before importing
+        monkeypatch.setenv("MQTT_TLS", "true")
+        monkeypatch.setenv("TLS_CA_PATH", "/test/ca.crt")
+        
+        # Track if tls_set was called
+        tls_config = {'called': False, 'ca_path': None}
+        
+        # Create a custom mock client class
+        class TLSMockClient(MockMQTTClient):
+            def tls_set(self, ca_certs=None, cert_reqs=None, tls_version=None):
+                tls_config['called'] = True
+                tls_config['ca_path'] = ca_certs
+        
+        with patch('consensus.mqtt.Client') as mock_client_class:
+            mock_client_class.return_value = TLSMockClient()
+            with patch('threading.Timer'):
+                # Need to reload the Config class to pick up new env vars
+                import importlib
+                importlib.reload(consensus)
+                
+                # Create service with TLS enabled
+                service = consensus.FireConsensus()
+                
+                # Verify TLS was configured
+                assert tls_config['called'], "tls_set was not called"
+                assert tls_config['ca_path'] == "/test/ca.crt"
+    
+    def test_mqtt_reconnection_behavior(self, consensus_service, mock_mqtt):
+        """Test MQTT reconnection behavior"""
+        # Simulate unexpected disconnection
+        consensus_service._on_mqtt_disconnect(mock_mqtt, None, 1)
+        
+        # Service should mark as disconnected but remain functional
+        assert not consensus_service.mqtt_connected
+        
+        # Simulate reconnection
+        consensus_service._on_mqtt_connect(mock_mqtt, None, None, 0)
+        
+        # Should be connected again
+        assert consensus_service.mqtt_connected
+        
+        # Should resubscribe to topics
+        expected_topics = [
+            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.TOPIC_FRIGATE,
+            consensus_service.config.TOPIC_CAMERA_TELEMETRY,
+            f"{consensus_service.config.TOPIC_DETECTION}/+"
+        ]
+        
+        # Check subscriptions (may have duplicates from initial connect)
+        subscribed_topics = [topic for topic, qos in mock_mqtt.subscriptions]
+        for expected in expected_topics:
+            assert expected in subscribed_topics
 
 # ─────────────────────────────────────────────────────────────
 # Integration Tests

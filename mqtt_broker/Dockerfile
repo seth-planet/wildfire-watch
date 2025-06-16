@@ -6,6 +6,7 @@ RUN apk add --no-cache avahi avahi-tools dbus
 
 # Copy configuration files
 COPY mosquitto.conf /mosquitto/config/mosquitto.conf
+COPY mosquitto_tls.conf /mosquitto/config/mosquitto_tls.conf
 COPY conf.d /mosquitto/config/conf.d/
 COPY entrypoint.sh /entrypoint.sh
 COPY nsswitch.conf /etc/nsswitch.conf

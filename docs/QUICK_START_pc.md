@@ -43,6 +43,8 @@ sudo usermod -aG docker $USER
 sudo apt install -y docker-compose
 
 # Logout and login for group changes
+exit
+# Log back in
 ```
 
 ### 2. Hardware-Specific Setup
@@ -224,31 +226,39 @@ sudo mkdir -p /media/frigate
 sudo chown $USER:docker /media/frigate
 ```
 
-### 4. Deploy with Docker Compose
+### 4. Security Setup
+
+#### For Development/Testing
+```bash
+# Default certificates are included - INSECURE!
+# Skip to deployment step
+```
+
+#### For Production
+```bash
+# Generate custom certificates
+./scripts/generate_certs.sh custom
+# Follow prompts for CA password and certificate details
+
+# Enable TLS in .env
+sed -i 's/MQTT_TLS=false/MQTT_TLS=true/' .env
+```
+
+### 5. Deploy Services
 
 ```bash
-# Use local compose file for development
-docker-compose -f docker-compose.local.yml up -d
+# Deploy with Docker Compose
+docker-compose up -d
+
+# Verify all services are running
+docker ps
+# Should show: mqtt_broker, camera-detector, security_nvr, fire_consensus, gpio_trigger
 
 # View logs
 docker-compose logs -f
 
-# Check service status
-docker ps
-```
-
-### 5. Generate Secure Certificates
-
-```bash
-# Generate custom certificates
-./scripts/generate_certs.sh custom
-
-# Deploy certificates
-sudo mkdir -p /mnt/data/certs
-sudo cp certs/* /mnt/data/certs/
-
-# Restart services
-docker-compose restart
+# Get Frigate credentials
+docker logs security_nvr | grep "Password:"
 ```
 
 ## Verification

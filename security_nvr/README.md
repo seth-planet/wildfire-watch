@@ -4,12 +4,12 @@
 
 The Security NVR Service is your intelligent video surveillance system that:
 
-- 📹 **Records all cameras** continuously to external USB storage
-- 🔥 **Detects wildfires** using custom AI models
-- 🚀 **Auto-configures hardware** acceleration (Raspberry Pi, Intel, AMD)
-- 💾 **Stores 6+ months** of security footage efficiently
-- 🔋 **Optimizes power usage** for off-grid operation
-- 📊 **Provides searchable history** of all detections
+- 📹 **Records all cameras** with motion-based retention
+- 🔥 **Detects wildfires** using AI models optimized for edge devices
+- 🚀 **Auto-detects hardware** acceleration (Coral, Hailo, GPU)
+- 💾 **Manages storage** efficiently with event-based recording
+- 🔋 **Optimizes performance** based on available hardware
+- 📊 **Provides real-time alerts** via MQTT
 - 🔄 **Integrates with camera_detector** for automatic camera discovery
 
 ## Why This Matters
@@ -31,14 +31,22 @@ Our system:
 ### Automatic Deployment
 
 The system automatically:
-1. Detects available hardware (Coral, Hailo, GPU, etc.)
-2. Discovers cameras via camera_detector service
-3. Configures optimal settings for your hardware
-4. Begins recording to USB storage
+1. Detects available hardware via `hardware_detector.py`
+2. Discovers cameras from the camera_detector service
+3. Manages USB storage with `usb_manager.py`
+4. Configures Frigate using `camera_manager.py`
+
+### Key Components
+
+- **hardware_detector.py** - Identifies Coral, Hailo, GPU acceleration
+- **camera_manager.py** - Integrates discovered cameras into Frigate
+- **usb_manager.py** - Auto-mounts and manages USB storage
+- **nvr_base_config.yml** - Base Frigate configuration template
+- **entrypoint.sh** - Startup orchestration
 
 ### Manual Camera Configuration (Optional)
 
-Add cameras manually in `/config/frigate/custom_cameras.yml`:
+Add cameras manually in `/config/custom_cameras.yml`:
 ```yaml
 cameras:
   front_yard:
@@ -54,18 +62,17 @@ cameras:
 
 ### Automatic Detection
 
-The system automatically detects and configures:
+The hardware detector (`hardware_detector.py`) automatically identifies and configures:
 
-| Hardware | Detection | Notes |
-|----------|-----------|-------|
-| **Raspberry Pi 5** | ✅ | Hardware H.265 decode, VideoCore VII |
-| **Coral USB** | ✅ | 4 TOPS, USB 3.0 required, Python 3.8 |
-| **Coral PCIe** | ✅ | M.2 or PCIe versions, Python 3.8 |
-| **Hailo-8** | ✅ | 26 TOPS, PCIe |
-| **Hailo-8L** | ✅ | 13 TOPS, lower power |
-| **Intel QuickSync** | ✅ | Hardware decode/encode |
-| **AMD VCE** | ✅ | Hardware decode/encode |
-| **NVIDIA GPU** | ✅ | CUDA acceleration |
+| Hardware | Status | Notes |
+|----------|--------|-------|
+| **Raspberry Pi 5** | ✅ | Hardware H.264/H.265 decode via V4L2 |
+| **Coral USB** | ✅ | Edge TPU support, requires USB 3.0 |
+| **Coral PCIe** | ✅ | M.2 or PCIe versions |
+| **Hailo-8** | ✅ | 26 TOPS, requires PCIe slot |
+| **Intel QuickSync** | ✅ | Hardware decode/encode via VAAPI |
+| **NVIDIA GPU** | ✅ | CUDA/NVDEC acceleration |
+| **CPU Fallback** | ✅ | Works on any system without acceleration |
 
 ### Power Efficiency Features
 
@@ -110,55 +117,69 @@ sudo mkfs.ext4 -L frigate-storage /dev/sda1
 
 ## Wildfire Detection Models
 
-### Pre-trained Models Included
+### Model Integration
 
-| Model | Hardware | Accuracy | Speed | Power |
-|-------|----------|----------|-------|-------|
-| `wildfire_coral_lite` | Coral USB/PCIe | Good | Fast | Low |
-| `wildfire_hailo8` | Hailo-8 | Excellent | Very Fast | Medium |
-| `wildfire_hailo8l` | Hailo-8L | Good | Fast | Low |
-| `wildfire_tensorrt` | NVIDIA GPU | Excellent | Fast | High |
-| `wildfire_openvino` | Intel CPU/GPU | Good | Medium | Medium |
-| `wildfire_cpu` | Any CPU | Fair | Slow | Low |
+The system uses models from the [Model Converter](../converted_models/README.md) service:
 
-### Model Selection
+| Model Format | Hardware | Notes |
+|--------------|----------|-------|
+| `.tflite` | Coral TPU | INT8 quantized models |
+| `.hef` | Hailo-8/8L | Compiled for Hailo accelerator |
+| `.onnx` | TensorRT/OpenVINO | Optimized for GPU/CPU |
+| `.pt` | CPU | PyTorch format (fallback) |
 
-The system automatically selects the best model for your hardware. Override with:
+### Model Configuration
 
-```bash
-FRIGATE_MODEL=wildfire_hailo8
+Models are specified in the Frigate configuration:
+
+```yaml
+detectors:
+  coral:
+    type: edgetpu
+    device: usb
+    model:
+      path: /models/yolo8l_rev5_640x640.tflite
+      width: 640
+      height: 640
+      # Note: Use 320x320 models for Raspberry Pi or low-power devices
 ```
 
-### Custom Model Training
+### Model Labels
 
-See [model_training/README.md](model_training/README.md) for training your own models.
+Wildfire-specific labels:
+- `fire` - Active flames
+- `smoke` - Smoke plumes
+- `person` - Human presence (safety)
+- `vehicle` - Cars/trucks (context)
 
 ## Configuration
 
 ### Environment Variables
 
 ```bash
+# MQTT Connection
+FRIGATE_MQTT_HOST=mqtt_broker     # MQTT broker hostname
+FRIGATE_MQTT_PORT=8883            # MQTT port (8883 for TLS)
+FRIGATE_MQTT_TLS=true             # Enable TLS encryption
+FRIGATE_CLIENT_ID=frigate-nvr     # MQTT client ID
+
 # Storage
-USB_MOUNT_PATH=/media/frigate     # Where to mount USB drive
-RECORD_RETAIN_DAYS=180            # How long to keep recordings
+USB_MOUNT_PATH=/media/frigate     # USB storage mount point
+RECORD_RETAIN_DAYS=180            # Recording retention period
 
 # Detection
-FRIGATE_MODEL=auto                # auto|wildfire_coral_lite|wildfire_hailo8|etc
-DETECTION_THRESHOLD=0.7           # Confidence threshold (0-1)
+FRIGATE_DETECTOR=auto             # auto|coral|hailo|gpu|cpu
+DETECTION_THRESHOLD=0.7           # AI confidence threshold
 DETECTION_FPS=5                   # Detections per second
-
-# Power Management
-POWER_MODE=balanced               # performance|balanced|powersave
-BATTERY_THRESHOLD=20              # Switch to powersave below this %
+MIN_CONFIDENCE=0.7                # Minimum confidence for fire alerts
 
 # Camera Settings
-CAMERA_DETECT_WIDTH=1280          # Detection resolution
-CAMERA_DETECT_HEIGHT=720
-CAMERA_RECORD_QUALITY=70          # Recording quality (0-100)
+CAMERA_DETECT_WIDTH=640           # Detection resolution (640 optimal, 320 for limited hardware)
+CAMERA_DETECT_HEIGHT=640
+CAMERA_RECORD_QUALITY=70          # Recording quality percentage
 
-# Hardware
-FRIGATE_HARDWARE=auto             # auto|coral|hailo8|hailo8l|gpu|cpu
-HARDWARE_ACCEL=auto               # auto|vaapi|qsv|nvdec|v4l2
+# Hardware Acceleration
+HARDWARE_ACCEL=auto               # auto|v4l2|vaapi|qsv|nvdec
 ```
 
 ### Power Profiles
@@ -178,48 +199,51 @@ HARDWARE_ACCEL=auto               # auto|vaapi|qsv|nvdec|v4l2
 - 2 FPS detection
 - Critical cameras only
 
-## Searching Historical Data
+## Integration with Wildfire Watch
 
-### Web Interface
+### MQTT Events
 
-Access at `http://device-ip:5000`:
-- Timeline view of all events
-- Filter by object type (fire, smoke, person)
-- Search by date/time
+The NVR publishes fire detection events to MQTT:
+
+```json
+{
+  "type": "new",
+  "before": {
+    "id": "1234567890.123456-abc123",
+    "camera": "front_yard",
+    "frame_time": 1234567890.123456,
+    "label": "fire",
+    "score": 0.85,
+    "box": [320, 180, 480, 360]
+  }
+}
+```
+
+Published to: `frigate/events`
+
+### Camera Integration
+
+The service integrates with [Camera Detector](../camera_detector/README.md):
+1. Monitors `cameras/discovered` topic for new cameras
+2. Automatically adds discovered cameras to Frigate config
+3. Applies optimal settings based on camera capabilities
+4. Handles camera disconnections gracefully
+
+### Fire Consensus Integration
+
+Works with [Fire Consensus](../fire_consensus/README.md):
+- Publishes detection events to `frigate/events`
+- Includes confidence scores and bounding boxes
+- Provides camera location for multi-camera validation
+
+## Web Interface
+
+Access Frigate UI at `http://device-ip:5000`:
+- Live view of all cameras
+- Timeline of detection events
+- Review recordings
 - Export clips
-
-### Command Line Search
-
-```bash
-# Find all fire detections from last week
-docker exec frigate-nvr find-events \
-  --type fire \
-  --days 7 \
-  --min-score 0.8
-
-# Export specific timeframe
-docker exec frigate-nvr export-recording \
-  --camera front_yard \
-  --start "2024-01-15 14:00" \
-  --end "2024-01-15 15:00" \
-  --output /media/exports/
-```
-
-### API Access
-
-```python
-import requests
-
-# Get recent events
-events = requests.get('http://device-ip:5000/api/events', params={
-    'label': 'fire',
-    'after': 1704067200,  # Unix timestamp
-    'limit': 100
-}).json()
-
-# Download clip
-clip_url = f"http://device-ip:5000/api/events/{event_id}/clip"
-```
+- System statistics
 
 ## Multi-Node Deployment
 
@@ -277,41 +301,50 @@ cameras:
         - '1'
 ```
 
-## Debugging and Logs
+## Monitoring and Debugging
 
-### Log Levels
-
-```bash
-# Set debug logging
-LOG_LEVEL=debug
-
-# Component-specific debugging
-FRIGATE_LOGGER_LEVEL=detector.coral=debug
-```
-
-### Key Log Locations
-
-- **Frigate logs**: `docker logs security-nvr`
-- **Detection logs**: `/media/frigate/logs/detection.log`
-- **Hardware logs**: `/media/frigate/logs/hardware.log`
-
-### Common Debug Commands
+### View Logs
 
 ```bash
-# Check hardware detection
-docker exec security-nvr check-hardware
+# Frigate logs
+docker logs security_nvr -f
 
-# View detection statistics
-docker exec security-nvr stats
+# Hardware detection logs
+docker exec security_nvr cat /tmp/hardware_detection.log
 
-# Test camera connection
-docker exec security-nvr test-camera front_yard
-
-# Benchmark detection speed
-docker exec security-nvr benchmark-detector
+# Check detector status
+docker exec security_nvr python3 /opt/frigate/frigate/detectors/detector_status.py
 ```
+
+### Common Issues
+
+**No detections:**
+- Check model is loaded: Look for "detector started" in logs
+- Verify camera streams are working in UI
+- Lower detection threshold: `MIN_CONFIDENCE=0.5`
+
+**High CPU usage:**
+- Ensure hardware acceleration is detected
+- Reduce detection FPS: `DETECTION_FPS=3`
+- Use substreams for detection
+
+**Storage issues:**
+- Check USB mount: `docker exec security_nvr df -h`
+- Verify write permissions: `docker exec security_nvr touch /media/frigate/test`
+- Monitor disk usage in Frigate UI
 
 ## Performance Optimization
+
+### Performance Metrics
+
+Expected performance with proper hardware acceleration:
+
+| Hardware | Inference Speed | Max FPS | CPU Usage | Bandwidth |
+|----------|----------------|---------|-----------|-----------|
+| **Coral USB** | 15-20ms | 10 FPS | 5-15% | 2-4 Mbps/camera |
+| **Hailo-8** | 10-25ms | 15 FPS | 5-10% | 2-4 Mbps/camera |
+| **GPU (RTX)** | 8-12ms | 20 FPS | 10-20% | 2-4 Mbps/camera |
+| **CPU Only** | 100-200ms | 5 FPS | 60-80% | 2-4 Mbps/camera |
 
 ### Raspberry Pi 5 Specific
 
@@ -405,47 +438,29 @@ ffmpeg:
    DETECTION_THRESHOLD=0.5
    ```
 
-## Advanced Features
+## Important Notes
 
-### Custom Detection Zones
+### Model Compatibility
 
-```yaml
-cameras:
-  front_yard:
-    motion:
-      mask:
-        - 0,0,300,0,300,300,0,300  # Ignore this area
-    zones:
-      high_risk:
-        coordinates: 400,0,800,0,800,600,400,600
-        fire_threshold: 0.6  # More sensitive in high risk areas
-```
+- **Coral TPU**: Requires INT8 quantized models from [Model Converter](../converted_models/README.md)
+  - **Important**: Requires Python 3.8 for `tflite_runtime` compatibility
+  - See [Coral Python 3.8 Requirements](../docs/coral_python38_requirements.md) for details
+- **Hailo**: Uses compiled `.hef` format models
+- **GPU**: Best with ONNX or TensorRT models
+- **CPU**: Can use any format but slower
 
-### Integration with Home Assistant
+### Storage Requirements
 
-```yaml
-# configuration.yaml
-frigate:
-  host: security-nvr.local
-  port: 5000
-  client_id: frigate
-  stats: true
-```
+- **Minimum**: 64GB USB drive for 30 days retention
+- **Recommended**: 256GB+ for 180 days
+- **Format**: ext4 recommended for Linux
+- **Speed**: USB 3.0 or better
 
-### Alerts and Notifications
+### Network Bandwidth
 
-```yaml
-notifications:
-  mqtt:
-    enabled: true
-    topic: frigate/events
-  webhook:
-    enabled: true
-    url: https://your-webhook.com/frigate
-    events:
-      - fire
-      - smoke
-```
+- Each camera: ~2-4 Mbps for main stream
+- Detection stream: ~0.5-1 Mbps
+- Plan network capacity accordingly
 
 ## Best Practices
 
@@ -469,20 +484,25 @@ notifications:
    - Use wired connections when possible
    - Configure retry settings
 
-## Learn More
+## Related Documentation
 
-- [Frigate Documentation](https://docs.frigate.video/)
-- [Hardware Acceleration Guide](https://docs.frigate.video/configuration/hardware_acceleration)
-- [Custom Model Training](model_training/README.md)
-- [Multi-Node Setup](docs/multi-node-nvr.md)
+- [Camera Detector](../camera_detector/README.md) - Automatic camera discovery
+- [Model Converter](../converted_models/README.md) - Convert models for your hardware
+- [Fire Consensus](../fire_consensus/README.md) - Multi-camera fire validation
+- [Hardware Guide](../docs/hardware.md) - Recommended hardware configurations
+- [Multi-Node Setup](../docs/multi-node.md) - Scaling to multiple locations
 
-## Getting Help
+## External Resources
 
-If detection isn't working:
-1. Check hardware is detected
-2. Verify cameras are accessible
-3. Review detection logs
-4. Test with lower thresholds
-5. Try a different model
+- [Frigate Documentation](https://docs.frigate.video/) - Official Frigate docs
+- [Hardware Acceleration](https://docs.frigate.video/configuration/hardware_acceleration) - Frigate hardware guide
 
-Remember: The system is designed to work with minimal configuration while allowing deep customization for advanced users.
+## Troubleshooting Summary
+
+1. **No cameras showing**: Check camera_detector service is running
+2. **No detections**: Verify model is loaded and lower threshold
+3. **High CPU**: Enable hardware acceleration
+4. **Storage full**: Reduce retention days or add larger drive
+5. **Can't access UI**: Check port 5000 is not blocked
+
+The system prioritizes reliability and automatic configuration while supporting advanced customization when needed.

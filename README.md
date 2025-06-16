@@ -21,22 +21,69 @@ Wildfire Watch is an automated fire detection and suppression platform that runs
 
 ## Quick Start
 
+### 1. Clone and Setup
+
 ```bash
 # Clone repository
 git clone https://github.com/your-org/wildfire-watch.git
 cd wildfire-watch
 
-# Generate secure certificates (REQUIRED for production)
-./scripts/generate_certs.sh custom
+# Copy environment template
+cp .env.example .env
+# Edit .env to configure your settings
+```
 
+### 2. Security Setup (Choose One)
+
+#### Option A: Development/Testing (Insecure)
+```bash
+# Use default certificates - INSECURE, for testing only!
+# No action needed, default certs are included
+```
+
+#### Option B: Production (Secure)
+```bash
+# Generate secure certificates and enable TLS
+./scripts/configure_security.sh enable
+# This will guide you through certificate generation if needed
+
+# Or manually:
+./scripts/generate_certs.sh custom
+echo "MQTT_TLS=true" >> .env
+```
+
+### 3. Deploy Services
+
+```bash
 # Deploy with Docker Compose
 docker-compose up -d
 
-# Access Frigate UI
-http://your-device:5000
+# Verify all services are running
+docker ps
+
+# Check service logs
+docker-compose logs -f
 ```
 
-⚠️ **Security Warning**: Default certificates are INSECURE. See [Security Setup](../docs/security.md).
+### 4. Access Services
+
+- **Frigate NVR**: http://your-device:5000
+  - Default credentials are shown in logs: `docker logs security_nvr | grep Password`
+- **MQTT Broker**: Port 1883 (insecure) or 8883 (TLS)
+
+⚠️ **Security Warning**: Default certificates are INSECURE. Always generate custom certificates for production use. See [Security Guide](docs/security.md).
+
+### 5. Verify Security Configuration
+
+```bash
+# Check current security status
+./scripts/configure_security.sh status
+
+# Example output:
+# ✓ TLS is ENABLED
+# ✓ Using CUSTOM certificates
+# ✓ MQTT broker is using TLS port 8883
+```
 
 ## Documentation
 
@@ -51,6 +98,7 @@ http://your-device:5000
 - [**Fire Consensus**](fire_consensus/README.md) - Multi-camera validation
 - [**GPIO Trigger**](gpio_trigger/README.md) - Pump control system
 - [**MQTT Broker**](mqtt_broker/README.md) - Communication hub
+- [**Camera Telemetry**](cam_telemetry/README.md) - Health monitoring and metrics
 
 ### Advanced Topics
 - [**Model Converter**](converted_models/README.md) - Custom AI models

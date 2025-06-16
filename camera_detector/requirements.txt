@@ -1,25 +1,27 @@
+# Camera Detector Service Requirements
+# Python 3.12 compatible
+
 # Core dependencies
-paho-mqtt==1.6.1
-python-dotenv==1.0.0
-pyyaml==6.0.1
+paho-mqtt>=2.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
 
 # Camera discovery and control
-onvif-zeep==0.2.12
-wsdiscovery==2.1.2
-zeep==4.3.1
+onvif-zeep>=0.2.12
+wsdiscovery>=2.1.2
+zeep>=4.3.1
 
 # RTSP validation
-opencv-python==4.8.1.78
-av==14.4.0
+opencv-python>=4.8.1.78
+av>=11.0.0
 
 # Network utilities
-python-arp==0.0.2
-netifaces==0.11.0
-requests==2.32.2
+netifaces>=0.11.0
+requests>=2.32.2
+scapy>=2.5.0
 
 # Async support
-aiohttp==3.11.0b0
-asyncio==3.4.3
+aiohttp>=3.9.1
 
 # Data handling
-numpy==1.24.3
+numpy>=1.26.0

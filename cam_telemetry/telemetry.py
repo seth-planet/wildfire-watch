@@ -6,7 +6,7 @@ import json
 import socket
 import threading
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -51,21 +51,25 @@ client.will_set(
     payload=json.dumps({
         "camera_id": CAMERA_ID,
         "status": "offline",
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     }),
     qos=1,
     retain=True
 )
 
-def mqtt_connect():
+def mqtt_connect(retry_count=0, max_retries=None):
+    """Connect to MQTT broker with optional retry limit"""
     try:
         client.connect(MQTT_BROKER, 1883, keepalive=60)
         client.loop_start()
         logging.info(f"Connected to MQTT broker at {MQTT_BROKER}")
     except Exception as e:
         logging.error(f"Failed to connect to MQTT broker: {e}")
+        if max_retries is not None and retry_count >= max_retries:
+            logging.error(f"Max retries ({max_retries}) reached, giving up")
+            raise
         time.sleep(5)
-        mqtt_connect()
+        mqtt_connect(retry_count + 1, max_retries)
 
 mqtt_connect()
 
@@ -92,7 +96,7 @@ def get_system_metrics():
 #  Telemetry Publish
 # ─────────────────────────────────────────────────────────────
 def publish_telemetry():
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     payload = {
         "camera_id": CAMERA_ID,
         "timestamp": timestamp,
@@ -112,7 +116,9 @@ def publish_telemetry():
         logging.error(f"Failed to publish telemetry: {e}")
 
     # Schedule next telemetry
-    threading.Timer(TELEMETRY_INT, publish_telemetry, daemon=True).start()
+    timer = threading.Timer(TELEMETRY_INT, publish_telemetry)
+    timer.daemon = True
+    timer.start()
 
 # ─────────────────────────────────────────────────────────────
 #  Main Loop

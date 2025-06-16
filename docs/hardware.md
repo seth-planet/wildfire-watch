@@ -48,6 +48,7 @@ Complete hardware guide for building a Wildfire Watch system.
 - **M.2 A+E:** $35 - For mini PCs
 - **M.2 B+M:** $35 - For NVMe slots  
 - **USB:** $60 - Universal compatibility
+- **Model size:** 320x320 recommended due to memory constraints
 - **Performance:** 4 TOPS, ~15ms inference
 - **Important:** Requires Python 3.8 for tflite_runtime compatibility
 
@@ -57,6 +58,7 @@ Complete hardware guide for building a Wildfire Watch system.
 - **Performance:** 13 TOPS, ~20ms inference
 - **Power:** 2.5W typical
 - **Driver:** Pre-installed on Pi OS
+- **Model size:** 640x640 or 320x320 supported
 
 ### Hailo-8
 **Best for:** Maximum edge performance
@@ -64,6 +66,7 @@ Complete hardware guide for building a Wildfire Watch system.
 - **Performance:** 26 TOPS, ~10ms inference
 - **Power:** 5W typical
 - **Form Factor:** M.2 A+E or B+M
+- **Model size:** 640x640 recommended for best accuracy
 
 ### NVIDIA GPU
 **Best for:** Multiple cameras, development
@@ -71,6 +74,7 @@ Complete hardware guide for building a Wildfire Watch system.
 - **Recommended:** RTX 3060 or T400
 - **Performance:** 5-10ms inference
 - **Power:** 75W+
+- **Model size:** 640x640 standard, larger sizes supported
 
 ## Pump Control Hardware
 

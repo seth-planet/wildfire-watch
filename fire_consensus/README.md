@@ -274,7 +274,7 @@ Example health report:
 - `fire/detection` - Individual camera detections
 - `fire/detection/+` - Camera-specific detection topics (wildcard)
 - `frigate/events` - Frigate NVR events
-- `system/camera_telemetry` - Camera health status
+- `system/telemetry` - Camera health status (see [Camera Telemetry](../cam_telemetry/README.md))
 
 **Publishes to:**
 - `fire/trigger` - Sprinkler activation command

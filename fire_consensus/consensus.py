@@ -36,7 +36,8 @@ class Config:
     CONSENSUS_THRESHOLD = int(os.getenv("CONSENSUS_THRESHOLD", "2"))
     DETECTION_WINDOW = float(os.getenv("CAMERA_WINDOW", "10"))
     INCREASE_COUNT = int(os.getenv("INCREASE_COUNT", "3"))
-    COOLDOWN_PERIOD = float(os.getenv("DETECTION_COOLDOWN", "30"))
+    COOLDOWN_PERIOD = float(os.getenv("COOLDOWN_PERIOD", "30"))
+    SINGLE_CAMERA_TRIGGER = os.getenv("SINGLE_CAMERA_TRIGGER", "false").lower() == "true"
     
     # Advanced Detection Parameters
     MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.7"))
@@ -60,6 +61,10 @@ class Config:
     TOPIC_HEALTH = os.getenv("CONSENSUS_HEALTH_TOPIC", "system/consensus_telemetry")
     TOPIC_FRIGATE = os.getenv("FRIGATE_EVENTS_TOPIC", "frigate/events")
     TOPIC_CAMERA_TELEMETRY = os.getenv("CAMERA_TELEMETRY_TOPIC", "system/camera_telemetry")
+    
+    # Zone-based activation
+    ZONE_MAPPING = json.loads(os.getenv("ZONE_MAPPING", "{}"))  # Camera ID -> Zone mapping
+    ZONE_ACTIVATION = os.getenv("ZONE_ACTIVATION", "false").lower() == "true"
     
     # Resilience Settings
     MQTT_RECONNECT_DELAY = 5
@@ -235,6 +240,7 @@ class FireConsensus:
     def _setup_mqtt(self):
         """Setup MQTT client with resilient connection"""
         self.mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.config.SERVICE_ID,
             clean_session=False  # Preserve subscriptions across reconnects
         )
@@ -287,7 +293,7 @@ class FireConsensus:
                 logger.info(f"Retrying in {delay}s...")
                 time.sleep(delay)
     
-    def _on_mqtt_connect(self, client, userdata, flags, rc):
+    def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback"""
         if rc == 0:
             self.mqtt_connected = True
@@ -323,20 +329,27 @@ class FireConsensus:
     def _on_mqtt_message(self, client, userdata, msg):
         """Process incoming MQTT messages"""
         try:
+            logger.debug(f"Received message on topic: {msg.topic}")
             # Route message to appropriate handler
             if msg.topic.startswith(self.config.TOPIC_DETECTION):
+                logger.debug(f"Processing fire detection message")
                 self._process_detection(msg)
             elif msg.topic == self.config.TOPIC_FRIGATE:
+                logger.debug(f"Processing Frigate event")
                 self._process_frigate_event(msg)
             elif msg.topic == self.config.TOPIC_CAMERA_TELEMETRY:
+                logger.debug(f"Processing camera telemetry")
                 self._process_camera_telemetry(msg)
+            else:
+                logger.debug(f"Message topic {msg.topic} not handled")
         except Exception as e:
-            logger.error(f"Error processing message on {msg.topic}: {e}")
+            logger.error(f"Error processing message on {msg.topic}: {e}", exc_info=True)
     
     def _process_detection(self, msg):
         """Process fire detection messages"""
         try:
             data = json.loads(msg.payload)
+            logger.debug(f"Detection data: {data}")
             
             # Extract detection info
             camera_id = data.get('camera_id')
@@ -345,15 +358,19 @@ class FireConsensus:
             timestamp = data.get('timestamp', time.time())
             object_id = data.get('object_id')  # Optional object ID for tracking
             
+            logger.debug(f"Parsed: camera_id={camera_id}, confidence={confidence}, bbox={bbox}")
+            
             if not camera_id or not bbox or len(bbox) != 4:
+                logger.warning(f"Invalid detection data: camera_id={camera_id}, bbox={bbox}")
                 return
             
             # Calculate area
             area = self._calculate_area(bbox)
+            logger.debug(f"Calculated area: {area}")
             
             # Validate detection
             if not self._validate_detection(confidence, area):
-                logger.debug(f"Detection from {camera_id} failed validation")
+                logger.debug(f"Detection from {camera_id} failed validation: confidence={confidence}, area={area}")
                 return
             
             # Create detection object
@@ -366,11 +383,13 @@ class FireConsensus:
                 object_id=object_id
             )
             
+            logger.info(f"Valid detection from {camera_id}: confidence={confidence:.2f}, area={area:.6f}")
+            
             # Process detection
             self._add_detection(detection)
             
         except Exception as e:
-            logger.error(f"Error processing detection: {e}")
+            logger.error(f"Error processing detection: {e}", exc_info=True)
     
     def _process_frigate_event(self, msg):
         """Process Frigate NVR events"""
@@ -510,8 +529,11 @@ class FireConsensus:
         """Check if fire consensus criteria are met"""
         current_time = time.time()
         
+        logger.debug(f"Checking consensus at {current_time}")
+        
         # Check cooldown
         if current_time - self.last_trigger_time < self.config.COOLDOWN_PERIOD:
+            logger.debug(f"In cooldown period, skipping consensus check")
             return
         
         # Get cameras with growing fires
@@ -519,13 +541,16 @@ class FireConsensus:
         fire_details = {}
         
         with self.lock:
+            logger.debug(f"Checking {len(self.cameras)} cameras")
             for camera_id, camera in self.cameras.items():
                 # Skip offline cameras
                 if not camera.is_online(current_time):
+                    logger.debug(f"Camera {camera_id} is offline")
                     continue
                 
                 # Get growing fires for this camera
                 growing_fires = camera.get_growing_fires(current_time)
+                logger.debug(f"Camera {camera_id}: {len(growing_fires)} growing fires, {len(camera.detections)} detections")
                 
                 if growing_fires:
                     cameras_with_fire.append(camera_id)
@@ -537,8 +562,15 @@ class FireConsensus:
                     }
         
         # Check if consensus threshold is met
-        if len(cameras_with_fire) >= self.config.CONSENSUS_THRESHOLD:
+        # Allow single camera trigger if configured
+        required_cameras = 1 if self.config.SINGLE_CAMERA_TRIGGER else self.config.CONSENSUS_THRESHOLD
+        logger.info(f"Consensus check: {len(cameras_with_fire)} cameras with fire (need {required_cameras})")
+        
+        if len(cameras_with_fire) >= required_cameras:
+            logger.warning(f"CONSENSUS THRESHOLD MET! Triggering fire response")
             self._trigger_fire_response(cameras_with_fire, fire_details)
+        else:
+            logger.debug(f"Consensus not met yet")
     
     def _trigger_fire_response(self, cameras: List[str], details: dict):
         """Trigger fire response system"""
@@ -546,6 +578,14 @@ class FireConsensus:
             current_time = time.time()
             self.last_trigger_time = current_time
             self.trigger_count += 1
+            
+            # Determine affected zones if zone-based activation is enabled
+            affected_zones = set()
+            if self.config.ZONE_ACTIVATION and self.config.ZONE_MAPPING:
+                for camera_id in cameras:
+                    zone = self.config.ZONE_MAPPING.get(camera_id)
+                    if zone:
+                        affected_zones.add(zone)
             
             # Create trigger payload
             payload = {
@@ -555,7 +595,9 @@ class FireConsensus:
                 'consensus_cameras': cameras,
                 'camera_count': len(cameras),
                 'details': details,
-                'confidence': np.mean([d['confidence'] for d in details.values()])
+                'confidence': np.mean([d['confidence'] for d in details.values()]),
+                'zones': list(affected_zones) if affected_zones else None,
+                'zone_activation': self.config.ZONE_ACTIVATION
             }
             
             # Log consensus event

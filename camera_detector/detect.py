@@ -348,6 +348,7 @@ class CameraDetector:
         self.cameras: Dict[str, Camera] = {}  # MAC -> Camera
         self.mac_tracker = MACTracker()
         self.lock = threading.RLock()
+        self._running = True  # Flag to control background threads
         
         # Parse credentials
         self.credentials = self._parse_credentials()
@@ -548,7 +549,7 @@ class CameraDetector:
     
     def _discovery_loop(self):
         """Main discovery loop with smart resource management"""
-        while True:
+        while self._running:
             try:
                 # Determine discovery mode
                 if self.config.SMART_DISCOVERY_ENABLED:
@@ -601,10 +602,17 @@ class CameraDetector:
                 logger.error(f"Discovery error: {e}", exc_info=True)
                 interval = self.config.DISCOVERY_INTERVAL
             
-            time.sleep(interval)
+            # Interruptible sleep
+            for _ in range(int(interval)):
+                if not self._running:
+                    break
+                time.sleep(1)
     
     def _run_full_discovery(self):
         """Run full discovery scan"""
+        if not self._running:
+            return
+            
         logger.info("Starting full camera discovery...")
         start_time = time.time()
         
@@ -614,21 +622,31 @@ class CameraDetector:
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
             futures = []
             
+            # Check if still running before submitting tasks
+            if not self._running:
+                return
+            
             # Update MAC mappings first if enabled
-            if self.config.MAC_TRACKING_ENABLED:
+            if self.config.MAC_TRACKING_ENABLED and self._running:
                 futures.append(
                     executor.submit(self._update_mac_mappings)
                 )
             
             # Run discovery methods in parallel
-            futures.extend([
-                executor.submit(self._discover_onvif_cameras),
-                executor.submit(self._discover_mdns_cameras),
-                executor.submit(self._scan_rtsp_ports)
-            ])
+            if self._running:
+                futures.extend([
+                    executor.submit(self._discover_onvif_cameras),
+                    executor.submit(self._discover_mdns_cameras),
+                    executor.submit(self._scan_rtsp_ports)
+                ])
             
             # Wait for all to complete
             for future in concurrent.futures.as_completed(futures):
+                if not self._running:
+                    # Cancel remaining futures
+                    for f in futures:
+                        f.cancel()
+                    break
                 try:
                     future.result()
                 except Exception as e:
@@ -699,7 +717,7 @@ class CameraDetector:
     
     def _mac_tracking_loop(self):
         """Periodic MAC address tracking"""
-        while True:
+        while self._running:
             try:
                 self._update_mac_mappings()
             except Exception as e:
@@ -711,7 +729,7 @@ class CameraDetector:
         """Monitor for network changes that require re-discovery"""
         last_networks = set(self._get_local_networks())
         
-        while True:
+        while self._running:
             try:
                 time.sleep(30)  # Check every 30 seconds
                 
@@ -1448,7 +1466,7 @@ class CameraDetector:
     
     def _health_check_loop(self):
         """Check health of known cameras"""
-        while True:
+        while self._running:
             try:
                 current_time = time.time()
                 cameras_to_rediscover = []
@@ -1755,6 +1773,9 @@ class CameraDetector:
     def cleanup(self):
         """Clean shutdown"""
         logger.info("Cleaning up Camera Detector Service")
+        
+        # Stop all background threads
+        self._running = False
         
         # Mark all cameras offline
         with self.lock:

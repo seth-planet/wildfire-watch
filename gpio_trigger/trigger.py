@@ -32,6 +32,7 @@ CONFIG = {
     'MQTT_TLS': os.getenv('MQTT_TLS', 'false').lower() == 'true',
     'TLS_CA_PATH': os.getenv('TLS_CA_PATH', '/mnt/data/certs/ca.crt'),
     'TRIGGER_TOPIC': os.getenv('TRIGGER_TOPIC', 'fire/trigger'),
+    'EMERGENCY_TOPIC': os.getenv('EMERGENCY_TOPIC', 'fire/emergency'),
     'TELEMETRY_TOPIC': os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry'),
     
     # GPIO Pins - Control
@@ -120,6 +121,7 @@ except (ImportError, RuntimeError):
         HIGH = True
         LOW = False
         _state = {}
+        _lock = threading.RLock()  # Add GPIO state lock
         
         @classmethod
         def setmode(cls, mode):
@@ -131,26 +133,36 @@ except (ImportError, RuntimeError):
         
         @classmethod
         def setup(cls, pin, mode, initial=None, pull_up_down=None):
-            if mode == cls.OUT:
-                cls._state[pin] = initial if initial is not None else cls.LOW
-            else:
-                # Input pins default based on pull resistor
-                if pull_up_down == cls.PUD_UP:
-                    cls._state[pin] = cls.HIGH
+            with cls._lock:
+                if mode == cls.OUT:
+                    cls._state[pin] = initial if initial is not None else cls.LOW
                 else:
-                    cls._state[pin] = cls.LOW
+                    # Input pins default based on pull resistor
+                    if pull_up_down == cls.PUD_UP:
+                        cls._state[pin] = cls.HIGH
+                    else:
+                        cls._state[pin] = cls.LOW
         
         @classmethod
         def output(cls, pin, value):
-            cls._state[pin] = bool(value)
+            with cls._lock:
+                # Convert GPIO constants to boolean consistently
+                if value == cls.HIGH or value is True:
+                    cls._state[pin] = True
+                elif value == cls.LOW or value is False:
+                    cls._state[pin] = False
+                else:
+                    cls._state[pin] = bool(value)
         
         @classmethod
         def input(cls, pin):
-            return cls._state.get(pin, cls.LOW)
+            with cls._lock:
+                return cls._state.get(pin, cls.LOW)
         
         @classmethod
         def cleanup(cls):
-            cls._state.clear()
+            with cls._lock:
+                cls._state.clear()
 
 # ─────────────────────────────────────────────────────────────
 # State Machine
@@ -194,6 +206,9 @@ class PumpController:
         self._pump_start_time = None
         self._water_flow_detected = False
         self._dry_run_warnings = 0
+        
+        # Shutdown flag for clean thread termination
+        self._shutdown = False
         
         # Initialize GPIO
         self._init_gpio()
@@ -288,9 +303,10 @@ class PumpController:
         # Connect
         self._mqtt_connect_with_retry()
     
-    def _mqtt_connect_with_retry(self):
+    def _mqtt_connect_with_retry(self, max_retries=None):
         """Connect to MQTT with retry logic"""
-        while True:
+        retry_count = 0
+        while not self._shutdown:
             try:
                 port = 8883 if self.cfg['MQTT_TLS'] else 1883
                 self.client.connect(self.cfg['MQTT_BROKER'], port, keepalive=60)
@@ -298,8 +314,14 @@ class PumpController:
                 logger.info(f"MQTT client connected to {self.cfg['MQTT_BROKER']}:{port}")
                 break
             except Exception as e:
-                logger.error(f"MQTT connection failed: {e}")
-                time.sleep(5)
+                retry_count += 1
+                if max_retries is not None and retry_count >= max_retries:
+                    logger.error(f"MQTT connection failed after {max_retries} attempts: {e}")
+                    raise
+                logger.error(f"MQTT connection failed (attempt {retry_count}): {e}")
+                # Use shorter sleep for tests if max_retries is set
+                sleep_time = 0.1 if max_retries is not None else 5
+                time.sleep(sleep_time)
     
     def _now_iso(self) -> str:
         """Get current UTC timestamp in ISO format"""
@@ -362,15 +384,21 @@ class PumpController:
         
         for attempt in range(max_retries):
             try:
-                GPIO.output(pin, GPIO.HIGH if state else GPIO.LOW)
-                
-                # Verify operation succeeded for critical pins
-                if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START']:
-                    time.sleep(0.05)  # Small delay for hardware response
-                    actual_state = GPIO.input(pin)
-                    expected_state = state  # Use boolean directly since GPIO.input returns boolean
-                    if actual_state != expected_state:
-                        raise Exception(f"Pin state verification failed: expected {expected_state}, got {actual_state}")
+                # Use controller lock to prevent concurrent pin changes
+                with self._lock:
+                    GPIO.output(pin, GPIO.HIGH if state else GPIO.LOW)
+                    
+                    # Verify operation succeeded for critical pins
+                    if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START']:
+                        time.sleep(0.05)  # Small delay for hardware response
+                        actual_state = GPIO.input(pin)
+                        expected_state = bool(state)  # Ensure both are boolean
+                        if actual_state != expected_state:
+                            # Debug logging
+                            logger.debug(f"Pin verification issue - pin_name: {pin_name}, pin: {pin}, "
+                                       f"requested: {state}, expected: {expected_state}, actual: {actual_state}")
+                            logger.debug(f"GPIO state dict: {getattr(GPIO, '_state', {})}")
+                            raise Exception(f"Pin state verification failed: expected {expected_state}, got {actual_state}")
                 
                 logger.debug(f"Set {pin_name} (pin {pin}) to {'HIGH' if state else 'LOW'}")
                 return True
@@ -474,7 +502,7 @@ class PumpController:
     
     def _monitor_reservoir_level(self):
         """Monitor reservoir level during refill operations"""
-        while True:
+        while not self._shutdown:
             try:
                 if self._state == PumpState.REFILLING:
                     if self._is_reservoir_full():
@@ -489,13 +517,20 @@ class PumpController:
             except Exception as e:
                 logger.error(f"Reservoir monitoring error: {e}")
             
-            time.sleep(1)  # Check every second
+            # Sleep with shutdown check
+            for _ in range(10):
+                if self._shutdown:
+                    break
+                time.sleep(0.1)
     
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback"""
         if rc == 0:
-            client.subscribe([(self.cfg['TRIGGER_TOPIC'], 0)])
-            logger.info(f"Subscribed to {self.cfg['TRIGGER_TOPIC']}")
+            client.subscribe([
+                (self.cfg['TRIGGER_TOPIC'], 0),
+                (self.cfg['EMERGENCY_TOPIC'], 0)
+            ])
+            logger.info(f"Subscribed to {self.cfg['TRIGGER_TOPIC']} and {self.cfg['EMERGENCY_TOPIC']}")
             self._publish_event('mqtt_connected')
         else:
             logger.error(f"MQTT connection failed with code {rc}")
@@ -515,6 +550,9 @@ class PumpController:
             if msg.topic == self.cfg['TRIGGER_TOPIC']:
                 logger.info(f"Received fire trigger on {msg.topic}")
                 self.handle_fire_trigger()
+            elif msg.topic == self.cfg['EMERGENCY_TOPIC']:
+                logger.warning(f"Received emergency command on {msg.topic}")
+                self.handle_emergency_command(msg.payload.decode())
         except Exception as e:
             logger.error(f"Error handling message: {e}")
     
@@ -557,6 +595,116 @@ class PumpController:
             elif self._state == PumpState.ERROR:
                 logger.error("System in ERROR state - manual intervention required")
                 self._publish_event('error_state_trigger_ignored')
+    
+    def handle_emergency_command(self, command):
+        """Handle emergency bypass commands"""
+        with self._lock:
+            try:
+                cmd_data = json.loads(command) if command.startswith('{') else {'action': command}
+                action = cmd_data.get('action', '').lower()
+                
+                logger.warning(f"Processing emergency command: {action}")
+                
+                if action == 'start' or action == 'bypass_start':
+                    # Emergency start bypass - force pump activation regardless of state
+                    logger.warning("EMERGENCY BYPASS: Force starting pump")
+                    self._emergency_start()
+                    
+                elif action == 'stop' or action == 'emergency_stop':
+                    # Emergency stop - immediate shutdown
+                    logger.warning("EMERGENCY STOP: Immediate pump shutdown")
+                    self._emergency_stop()
+                    
+                elif action == 'valve_open':
+                    # Emergency valve open - open main valve only
+                    logger.warning("EMERGENCY: Opening main valve")
+                    self._set_pin('MAIN_VALVE', True)
+                    self._publish_event('emergency_valve_open')
+                    
+                elif action == 'valve_close':
+                    # Emergency valve close
+                    logger.warning("EMERGENCY: Closing main valve")
+                    self._set_pin('MAIN_VALVE', False)
+                    self._publish_event('emergency_valve_close')
+                    
+                elif action == 'reset':
+                    # Emergency reset - clear error state
+                    logger.warning("EMERGENCY RESET: Clearing error state")
+                    self._emergency_reset()
+                    
+                else:
+                    logger.error(f"Unknown emergency command: {action}")
+                    self._publish_event('emergency_command_unknown', {'command': action})
+                    
+            except Exception as e:
+                logger.error(f"Error processing emergency command: {e}")
+                self._publish_event('emergency_command_error', {'error': str(e)})
+    
+    def _emergency_start(self):
+        """Emergency start bypass - force pump activation"""
+        logger.warning("EMERGENCY BYPASS START - Forcing pump activation")
+        
+        # Force state to IDLE to allow start sequence
+        if self._state == PumpState.ERROR:
+            self._state = PumpState.IDLE
+            
+        # Force start regardless of refill status
+        self._refill_complete = True
+        self._state = PumpState.IDLE
+        
+        # Start pump sequence
+        self._start_pump_sequence()
+        self._publish_event('emergency_bypass_start')
+    
+    def _emergency_stop(self):
+        """Emergency stop - immediate shutdown"""
+        logger.warning("EMERGENCY STOP - Immediate pump shutdown")
+        
+        # Cancel all timers
+        for timer_name in list(self._timers.keys()):
+            self._cancel_timer(timer_name)
+        
+        # Turn off all control pins immediately
+        self._set_pin('IGN_START', False)
+        self._set_pin('IGN_ON', False) 
+        self._set_pin('IGN_OFF', True)  # Active stop signal
+        time.sleep(0.5)
+        self._set_pin('IGN_OFF', False)
+        
+        # Close main valve
+        self._set_pin('MAIN_VALVE', False)
+        self._set_pin('REFILL_VALVE', False)
+        self._set_pin('PRIMING_VALVE', False)
+        self._set_pin('RPM_REDUCE', False)
+        
+        # Set to cooldown state
+        self._state = PumpState.COOLDOWN
+        self._schedule_timer('cooldown_complete', self._enter_idle, self.cfg['COOLDOWN_DELAY'])
+        
+        self._publish_event('emergency_stop')
+    
+    def _emergency_reset(self):
+        """Emergency reset - clear error state"""
+        logger.warning("EMERGENCY RESET - Clearing error state")
+        
+        # Reset all pins to safe state
+        self._set_pin('IGN_START', False)
+        self._set_pin('IGN_ON', False)
+        self._set_pin('IGN_OFF', False)
+        self._set_pin('MAIN_VALVE', False)
+        self._set_pin('REFILL_VALVE', False)
+        self._set_pin('PRIMING_VALVE', False)
+        self._set_pin('RPM_REDUCE', False)
+        
+        # Clear error state
+        self._state = PumpState.IDLE
+        self._refill_complete = True
+        
+        # Cancel all timers
+        for timer_name in list(self._timers.keys()):
+            self._cancel_timer(timer_name)
+        
+        self._publish_event('emergency_reset')
     
     def _start_pump_sequence(self):
         """Start the pump startup sequence with enhanced error handling"""
@@ -778,6 +926,8 @@ class PumpController:
             
             if time_since_trigger >= self.cfg['FIRE_OFF_DELAY']:
                 logger.info(f"No fire trigger for {time_since_trigger:.1f}s, initiating shutdown")
+                # Cancel RPM reduction timer since we're shutting down due to fire off
+                self._cancel_timer('rpm_reduction')
                 self._shutdown_engine()
             else:
                 # Re-schedule check
@@ -986,7 +1136,7 @@ class PumpController:
     
     def _monitor_dry_run_protection(self):
         """Monitor for pump running without water flow (dry run protection)"""
-        while True:
+        while not self._shutdown:
             try:
                 with self._lock:
                     current_time = time.time()
@@ -1042,14 +1192,18 @@ class PumpController:
             except Exception as e:
                 logger.error(f"Dry run protection monitoring error: {e}")
             
-            time.sleep(1)  # Check every second
+            # Sleep with shutdown check
+            for _ in range(10):
+                if self._shutdown:
+                    break
+                time.sleep(0.1)
     
     def _monitor_emergency_button(self):
         """Monitor emergency button for manual fire trigger (optional)"""
         last_state = None
         debounce_time = 0.1  # 100ms debounce
         
-        while True:
+        while not self._shutdown:
             try:
                 if self.cfg['EMERGENCY_BUTTON_PIN']:
                     current_state = GPIO.input(self.cfg['EMERGENCY_BUTTON_PIN'])
@@ -1143,6 +1297,9 @@ class PumpController:
         """Clean shutdown of controller"""
         logger.info("Cleaning up PumpController")
         
+        # Set shutdown flag to stop monitoring threads
+        self._shutdown = True
+        
         with self._lock:
             # Cancel all timers
             self._cancel_all_timers()
@@ -1150,7 +1307,9 @@ class PumpController:
             # Ensure pump is off
             if self._state in [PumpState.RUNNING, PumpState.REDUCING_RPM]:
                 self._shutdown_engine()
-                time.sleep(5)  # Allow shutdown to complete
+                # Use shorter sleep for tests
+                sleep_time = 0.5 if hasattr(self, '_test_mode') else 5
+                time.sleep(sleep_time)  # Allow shutdown to complete
             
             # Close all valves
             for pin_name in ['MAIN_VALVE', 'REFILL_VALVE', 'PRIMING_VALVE']:
@@ -1161,9 +1320,17 @@ class PumpController:
                 self._set_pin(pin_name, False)
         
         # Disconnect MQTT
-        self._publish_event('controller_shutdown')
-        self.client.loop_stop()
-        self.client.disconnect()
+        try:
+            self._publish_event('controller_shutdown')
+            self.client.loop_stop()
+            self.client.disconnect()
+        except Exception as e:
+            logger.debug(f"Error during MQTT cleanup: {e}")
+        
+        # Give threads a moment to terminate
+        # Use longer timeout for non-test mode to ensure all threads exit
+        thread_timeout = 0.5 if hasattr(self, '_test_mode') else 1.0
+        time.sleep(thread_timeout)
         
         # Cleanup GPIO
         if GPIO_AVAILABLE:

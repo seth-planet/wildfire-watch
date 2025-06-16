@@ -63,6 +63,7 @@ services:
     environment:
       MOSQUITTO_USERNAME: ${MOSQUITTO_USERNAME:-}
       MOSQUITTO_PASSWORD: ${MOSQUITTO_PASSWORD:-}
+      MQTT_TLS: ${MQTT_TLS:-false}
     labels:
       io.balena.features.dbus: '1'
       io.balena.features.supervisor-api: '1'
