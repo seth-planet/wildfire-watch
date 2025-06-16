@@ -15,7 +15,7 @@ av==14.4.0
 # Network utilities
 python-arp==0.0.2
 netifaces==0.11.0
-requests==2.32.3
+requests==2.32.4
 
 # Async support
 aiohttp==3.12.13
