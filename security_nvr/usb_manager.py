@@ -1,7 +1,51 @@
 #!/usr/bin/env python3
-"""
-USB Storage Manager for Frigate NVR
-Automatically detects and mounts USB drives for recording storage
+"""USB storage management for Frigate NVR video recording expansion.
+
+This module provides automatic detection and mounting of USB storage devices
+for Frigate's video recordings. It solves the storage limitation problem on
+edge devices like Raspberry Pi by allowing hot-pluggable external storage.
+
+The manager monitors USB events and automatically mounts the largest available
+drive when inserted. It creates the required Frigate directory structure and
+monitors disk usage to prevent storage exhaustion.
+
+Key Features:
+    - Automatic USB drive detection using udev
+    - Intelligent drive selection (largest available)
+    - Filesystem support: ext4, ext3, NTFS, FAT32
+    - Hot-plug support with automatic mounting
+    - Storage monitoring with configurable alerts
+    - Frigate directory structure creation
+
+Security Considerations:
+    - Requires root/sudo for mounting operations
+    - Mounts with restrictive permissions (755)
+    - No automatic execution of files from USB
+    - Filesystem-specific security options applied
+
+Integration:
+    This service runs independently but integrates with Frigate by:
+    - Mounting drives to Frigate's expected recording path
+    - Creating required directory structure
+    - Monitoring storage to prevent recording failures
+
+Dependencies:
+    - pyudev: For USB device monitoring
+    - Linux commands: mount, umount, df, blockdev
+
+Example:
+    Run as service with auto-mounting:
+        $ sudo python usb_manager.py monitor
+        
+    List available USB drives:
+        $ sudo python usb_manager.py list
+        
+    Mount largest drive manually:
+        $ sudo python usb_manager.py mount
+
+Note:
+    This service must run with root privileges for mount operations.
+    In Docker, requires privileged mode or specific capabilities.
 """
 import os
 import sys
@@ -17,7 +61,48 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 class USBStorageManager:
+    """Manages USB storage devices for Frigate NVR recordings.
+    
+    Provides automatic detection, mounting, and monitoring of USB storage
+    devices. Designed to expand storage capacity on edge devices with
+    limited internal storage by utilizing external USB drives.
+    
+    The manager uses udev for device detection and standard Linux mount
+    commands for filesystem operations. It automatically selects the
+    largest available drive and creates Frigate's required directory
+    structure.
+    
+    Attributes:
+        mount_path (str): Target mount point for USB storage
+        context (pyudev.Context): udev context for device enumeration
+        monitor (pyudev.Monitor): udev monitor for hot-plug events
+        
+    Mount Strategy:
+        1. Detects all USB block devices with partitions
+        2. Filters out already mounted devices
+        3. Selects largest unmounted drive by capacity
+        4. Mounts with appropriate filesystem options
+        5. Creates Frigate directory structure
+        
+    Thread Safety:
+        Not thread-safe. Use single instance per process.
+    """
+    
     def __init__(self, mount_path: str = "/media/frigate"):
+        """Initialize USB storage manager.
+        
+        Sets up udev context and monitor for USB device detection.
+        The monitor is configured to only watch block devices with
+        partitions (not whole disks).
+        
+        Args:
+            mount_path: Directory where USB drives will be mounted.
+                       Must be accessible and writable by the process.
+                       
+        Side Effects:
+            - Creates pyudev context and monitor
+            - Does not start monitoring (call setup_auto_mount for that)
+        """
         self.mount_path = mount_path
         self.context = pyudev.Context()
         self.monitor = pyudev.Monitor.from_netlink(self.context)
@@ -108,7 +193,32 @@ class USBStorageManager:
         return f"{bytes_size:.1f} PB"
     
     def mount_largest_drive(self) -> Optional[str]:
-        """Mount the largest available USB drive"""
+        """Mount the largest available USB drive for Frigate storage.
+        
+        Implements intelligent drive selection by finding all USB drives,
+        filtering out mounted ones, and selecting the largest by capacity.
+        If a drive is already mounted at the target path, returns success.
+        
+        Returns:
+            Device path (e.g., '/dev/sdb1') if successful, None otherwise
+            
+        Selection Algorithm:
+            1. Find all USB storage devices
+            2. Filter out already mounted drives
+            3. Sort by size (largest first)
+            4. Mount the largest drive
+            5. Create Frigate directory structure
+            
+        Side Effects:
+            - Mounts filesystem at self.mount_path
+            - Creates Frigate directories
+            - Logs selection process
+            
+        Error Handling:
+            - Returns None if no suitable drives found
+            - Returns existing device if already mounted correctly
+            - Mount failures logged and None returned
+        """
         drives = self.find_usb_drives()
         
         # Filter unmounted drives
@@ -257,7 +367,31 @@ class USBStorageManager:
         return None
     
     def setup_auto_mount(self):
-        """Setup automatic mounting on USB insertion"""
+        """Setup automatic mounting on USB insertion with storage monitoring.
+        
+        Starts a udev monitor that watches for USB device insertion/removal
+        events. When a USB drive is inserted, automatically mounts it if
+        no drive is currently mounted. Also performs periodic storage
+        monitoring to alert on low disk space.
+        
+        This method blocks indefinitely until interrupted (Ctrl+C).
+        
+        Monitoring Features:
+            - Hot-plug detection via udev
+            - Automatic mounting on insertion
+            - Periodic storage usage checks (every 60s)
+            - Warning at 90% usage, critical at 95%
+            
+        Side Effects:
+            - Starts background udev observer thread
+            - Blocks main thread in monitoring loop
+            - Logs storage statistics periodically
+            - Mounts/unmounts drives on USB events
+            
+        Signal Handling:
+            - KeyboardInterrupt (Ctrl+C) stops monitoring gracefully
+            - Observer thread is properly stopped on exit
+        """
         logger.info("Starting USB monitor...")
         
         observer = pyudev.MonitorObserver(self.monitor, self._handle_usb_event)
@@ -287,6 +421,39 @@ class USBStorageManager:
             logger.info(f"USB device removed: {device.device_node}")
 
 def main():
+    """Command-line interface for USB storage management.
+    
+    Provides utilities for managing USB storage devices for Frigate NVR.
+    Must be run with root/sudo privileges for mount operations.
+    
+    Commands:
+        list: Display all detected USB storage devices
+        mount: Mount the largest available USB drive
+        unmount: Unmount the current drive
+        stats: Show storage usage statistics
+        monitor: Start auto-mount service (blocks)
+        (no command): Mount largest drive and start monitoring
+        
+    Exit Codes:
+        0: Success
+        1: Mount/unmount operation failed
+        
+    Examples:
+        List USB drives:
+            $ sudo python usb_manager.py list
+            
+        Mount and monitor (service mode):
+            $ sudo python usb_manager.py monitor
+            
+        Check storage usage:
+            $ sudo python usb_manager.py stats
+            
+    Permissions:
+        All mount operations require root/sudo. In Docker, requires:
+        - Privileged mode, or
+        - CAP_SYS_ADMIN capability
+        - Device access to /dev/bus/usb/*
+    """
     manager = USBStorageManager()
     
     if len(sys.argv) > 1:

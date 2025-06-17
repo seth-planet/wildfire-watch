@@ -56,22 +56,49 @@ balena push wildfire-watch
 
 ### Testing
 ```bash
-# IMPORTANT: Different tests require different Python versions!
+# AUTOMATIC PYTHON VERSION SELECTION (Recommended)
+# Tests automatically run with correct Python version based on dependencies
 
-# Python 3.12 tests (most tests)
-python3.12 -m pytest tests/ -v --timeout=300 -k "not (api_usage or yolo_nas or qat_functionality or int8_quantization or frigate_integration or model_converter or hardware_integration or deployment or security_nvr)"
+# Run all tests with automatic Python version selection
+./scripts/run_tests_by_python_version.sh --all
+
+# Run specific Python version tests
+./scripts/run_tests_by_python_version.sh --python312  # Most tests
+./scripts/run_tests_by_python_version.sh --python310  # YOLO-NAS/super-gradients  
+./scripts/run_tests_by_python_version.sh --python38   # Coral TPU/TensorFlow Lite
+
+# Run specific test with auto-detection
+./scripts/run_tests_by_python_version.sh --test tests/test_detect.py
+
+# Validate Python environment
+./scripts/run_tests_by_python_version.sh --validate
+
+# MANUAL PYTHON VERSION SELECTION (Advanced)
+# Python 3.12 tests (most tests) - timeout configuration handles long infrastructure setup
+python3.12 -m pytest -c pytest-python312.ini
 
 # Python 3.10 tests (YOLO-NAS/super-gradients)
-python3.10 -m pytest tests/test_api_usage.py tests/test_yolo_nas_training.py tests/test_qat_functionality.py -v --timeout=300
+python3.10 -m pytest -c pytest-python310.ini
 
 # Python 3.8 tests (Coral TPU/tflite_runtime)
-python3.8 -m pytest tests/test_model_converter.py tests/test_hardware_integration.py tests/test_deployment.py -v --timeout=300
+python3.8 -m pytest -c pytest-python38.ini
 
-# Specific test files
-python3.12 -m pytest tests/test_consensus.py -v
-python3.12 -m pytest tests/test_integration_e2e.py -v
+# SPECIFIC TEST CATEGORIES
+# Quick tests (skip slow infrastructure setup)
+python3.12 -m pytest tests/ -v -m "not slow and not infrastructure_dependent"
 
-# See tests/README.md for complete Python version requirements
+# MQTT-specific tests (expected ~15s infrastructure setup)
+python3.12 -m pytest tests/ -v -m "mqtt"
+
+# Technology-specific tests
+python3.10 -m pytest tests/ -v -m "yolo_nas"      # YOLO-NAS training
+python3.8 -m pytest tests/ -v -m "coral_tpu"     # Coral TPU hardware
+
+# Disable timeouts for debugging
+python3.12 -m pytest tests/ -v --timeout=0
+
+# See docs/python_version_testing.md for automatic version selection details
+# See docs/timeout_configuration.md for timeout handling details
 ```
 
 ### Python Version
@@ -447,6 +474,136 @@ Brief description of what will be accomplished
 - Multi-service integrations
 - Complex refactoring across multiple files
 - New testing frameworks or validation systems
+
+## Documentation Best Practices
+
+### Sphinx-Compatible Documentation
+All Python code in this repository should follow Sphinx documentation standards for automatic documentation generation. Documentation should be insightful and helpful for debugging and understanding the system architecture.
+
+Reference: https://www.sphinx-doc.org/en/master/usage/quickstart.html
+
+#### Documentation Principles
+1. **Component Connectivity**: Clearly document how each component connects to other services via MQTT topics
+2. **Parameter Implications**: Document non-obvious effects of parameter values
+3. **Side Effects**: Document any side effects of function calls, especially MQTT publishes
+4. **Error Handling**: Document what exceptions can be raised and under what conditions
+5. **Thread Safety**: Document if functions/classes are thread-safe or require synchronization
+6. **MQTT Topics**: Document all MQTT topics published to or subscribed from
+
+#### Docstring Format
+Use Google-style docstrings for consistency:
+
+```python
+def process_detection(self, detection: Dict[str, Any]) -> bool:
+    """Process a fire detection from a camera and update consensus state.
+    
+    This method handles incoming fire/smoke detections from the security NVR
+    (Frigate) and maintains a sliding window of detections for multi-camera
+    consensus. When consensus is reached, it publishes a trigger command.
+    
+    Args:
+        detection: Detection data containing:
+            - camera_id (str): Unique camera identifier (MAC address preferred)
+            - confidence (float): Detection confidence score (0.0-1.0)
+            - object_type (str): 'fire' or 'smoke'
+            - timestamp (float): Unix timestamp of detection
+            - bbox (dict, optional): Bounding box coordinates
+    
+    Returns:
+        bool: True if consensus threshold is met, False otherwise
+        
+    Raises:
+        ValueError: If detection data is missing required fields
+        
+    Side Effects:
+        - Updates internal detection history
+        - May publish to 'trigger/fire_detected' if consensus reached
+        - Logs detection details to configured logger
+        
+    MQTT Topics:
+        - Subscribes to: frigate/+/fire, frigate/+/smoke
+        - Publishes to: trigger/fire_detected (on consensus)
+        
+    Thread Safety:
+        This method is thread-safe due to internal locking on detection_history
+    """
+```
+
+#### Class Documentation
+```python
+class FireConsensus:
+    """Multi-camera fire detection consensus manager.
+    
+    This service subscribes to fire/smoke detections from multiple cameras
+    and implements a voting mechanism to reduce false positives. It requires
+    a configurable number of cameras to agree before triggering the suppression
+    system.
+    
+    The consensus algorithm uses a sliding time window and confidence weighting
+    to evaluate detections. Recent detections are weighted more heavily than
+    older ones within the window.
+    
+    Attributes:
+        consensus_threshold (int): Number of cameras required for consensus
+        time_window (float): Time window in seconds for valid detections
+        detection_history (Dict[str, List[Detection]]): Per-camera detection history
+        mqtt_client (mqtt.Client): MQTT client for pub/sub operations
+        
+    MQTT Integration:
+        - Broker: Connects to MQTT_BROKER:MQTT_PORT (default: localhost:1883)
+        - Client ID: 'fire_consensus_service'
+        - Topics:
+            - Subscribes: cameras/discovered, frigate/+/fire, frigate/+/smoke
+            - Publishes: trigger/fire_detected, consensus/status
+            
+    Thread Model:
+        - Main thread: MQTT message handling
+        - Background thread: Cleanup of old detections (runs every 60s)
+        
+    Configuration:
+        Environment variables:
+        - CONSENSUS_THRESHOLD: Number of cameras for consensus (default: 2)
+        - TIME_WINDOW: Detection validity window in seconds (default: 30)
+        - MIN_CONFIDENCE: Minimum confidence score (default: 0.7)
+    """
+```
+
+#### Module Documentation
+Add module-level docstrings at the top of each Python file:
+
+```python
+"""Fire detection consensus service for multi-camera validation.
+
+This module implements the consensus logic for the Wildfire Watch system.
+It aggregates fire/smoke detections from multiple cameras running through
+the Frigate NVR and determines when to trigger the suppression system.
+
+The consensus mechanism helps reduce false positives by requiring multiple
+cameras to detect fire before activation. This is critical for preventing
+unnecessary water discharge.
+
+Communication Flow:
+    1. Camera Detector publishes discovered cameras to 'cameras/discovered'
+    2. Frigate processes video streams and publishes to 'frigate/{camera}/fire'
+    3. This service aggregates detections and evaluates consensus
+    4. On consensus, publishes to 'trigger/fire_detected'
+    5. GPIO Trigger receives command and activates sprinkler system
+
+Integration Points:
+    - Upstream: camera_detector (camera discovery), security_nvr (AI detection)
+    - Downstream: gpio_trigger (pump control), cam_telemetry (monitoring)
+    - Lateral: mqtt_broker (message bus)
+
+Example:
+    Run standalone::
+    
+        $ python3.12 consensus.py
+        
+    Run in Docker::
+    
+        $ docker-compose up fire-consensus
+"""
+```
 
 ## AI Assistant Guidelines
 

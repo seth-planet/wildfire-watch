@@ -8,10 +8,13 @@ import sys
 import time
 import json
 import threading
+import logging
 import pytest
 import paho.mqtt.client as mqtt
 from unittest.mock import Mock, MagicMock, patch, call
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 # Add consensus module to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../fire_consensus")))
@@ -194,10 +197,11 @@ def consensus_service(test_mqtt_broker, monkeypatch):
     
     yield service
     
-    # Cleanup
-    if service.mqtt_client:
-        service.mqtt_client.disconnect()
-        service.mqtt_client.loop_stop()
+    # Cleanup - use the service's cleanup method
+    try:
+        service.cleanup()
+    except Exception as e:
+        logger.error(f"Error during service cleanup: {e}")
 
 def wait_for_condition(condition_func, timeout=2):
     """Wait for a condition to become true"""
@@ -470,7 +474,7 @@ class TestConsensusAlgorithm:
     
     def test_multiple_fire_objects_per_camera(self, consensus_service):
         """Test handling multiple simultaneous fires per camera"""
-        camera = CameraState('multi_fire_cam')
+        camera = CameraState('multi_fire_cam', consensus_service.config)
         current_time = time.time()
         
         # Add detections for first fire object (growing)
@@ -527,7 +531,7 @@ class TestConsensusAlgorithm:
     
     def test_growth_percentage_tolerance(self, consensus_service):
         """Test that 70% growth transitions tolerance works correctly"""
-        camera = CameraState('tolerance_cam')
+        camera = CameraState('tolerance_cam', consensus_service.config)
         current_time = time.time()
         
         # Create a pattern with mostly growth but some shrinkage (>70% growth transitions)
@@ -559,7 +563,7 @@ class TestConsensusAlgorithm:
         assert len(growing_fires) > 0
         
         # Test pattern with too much shrinkage (<70% growth transitions)
-        camera2 = CameraState('intolerance_cam')
+        camera2 = CameraState('intolerance_cam', consensus_service.config)
         areas2 = [
             0.010,  # Start
             0.009,  # Shrink
@@ -586,11 +590,18 @@ class TestConsensusAlgorithm:
         growing_fires2 = camera2.get_growing_fires(current_time)
         assert len(growing_fires2) == 0
     
-    def test_multi_camera_consensus_triggers(self, consensus_service, mqtt_publisher):
+    def test_multi_camera_consensus_triggers(self, consensus_service, mqtt_publisher, trigger_monitor):
         """Test that multi-camera consensus triggers fire response"""
+        # Start monitoring triggers  
+        trigger_monitor.start_monitoring()
+        trigger_monitor.clear()
+        
         # Add growing fires to multiple cameras
         self._add_growing_fire(consensus_service, 'cam1', 3)
         self._add_growing_fire(consensus_service, 'cam2', 3)
+        
+        # Wait for processing
+        time.sleep(1.0)
         
         # Should trigger consensus
         triggers = trigger_monitor.get_triggers()
@@ -606,7 +617,7 @@ class TestConsensusAlgorithm:
     
     def test_growing_fire_detection(self, consensus_service):
         """Test fire growth pattern detection with moving averages"""
-        camera = CameraState('test_cam')
+        camera = CameraState('test_cam', consensus_service.config)
         current_time = time.time()
         
         # Add more detections to support moving average algorithm (need 6+ for window=3)
@@ -628,7 +639,7 @@ class TestConsensusAlgorithm:
     
     def test_non_growing_fire_ignored(self, consensus_service):
         """Test that non-growing fires don't trigger consensus"""
-        camera = CameraState('test_cam')
+        camera = CameraState('test_cam', consensus_service.config)
         current_time = time.time()
         
         # Add detections with decreasing area (shrinking fire) - need more for moving average
@@ -650,7 +661,7 @@ class TestConsensusAlgorithm:
     
     def test_moving_average_with_noise(self, consensus_service):
         """Test that moving averages handle noisy detection data"""
-        camera = CameraState('test_cam')
+        camera = CameraState('test_cam', consensus_service.config)
         current_time = time.time()
         
         # Add detections with growth trend but significant noise
@@ -672,7 +683,7 @@ class TestConsensusAlgorithm:
     
     def test_insufficient_detections_for_moving_average(self, consensus_service):
         """Test that insufficient detections don't trigger consensus"""
-        camera = CameraState('test_cam')
+        camera = CameraState('test_cam', consensus_service.config)
         current_time = time.time()
         
         # Add only 4 detections (need 6+ for moving average with window=3)
@@ -724,7 +735,7 @@ class TestConsensusAlgorithm:
         # Add another camera but mark it as offline BEFORE adding detections
         current_time = time.time()
         if 'cam2' not in consensus_service.cameras:
-            consensus_service.cameras['cam2'] = CameraState('cam2')
+            consensus_service.cameras['cam2'] = CameraState('cam2', consensus_service.config)
         # Set telemetry way in the past to ensure camera is considered offline
         consensus_service.cameras['cam2'].last_telemetry = current_time - consensus_service.config.CAMERA_TIMEOUT - 60
         
@@ -891,11 +902,10 @@ class TestErrorHandling:
                     'timestamp': time.time()
                 }
                 mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
-            json.dumps(detection_data),
-            qos=1
-        )
-        time.sleep(0.5)  # Wait for processing
+                    consensus_service.config.TOPIC_DETECTION,
+                    json.dumps(detection_data),
+                    qos=1
+                )
         
         # Start multiple threads adding detections
         threads = []
@@ -907,6 +917,9 @@ class TestErrorHandling:
         # Wait for all threads
         for thread in threads:
             thread.join()
+        
+        # Wait for MQTT processing
+        time.sleep(2.0)
         
         # Should have processed all detections without errors
         assert len(consensus_service.cameras) == 50  # 5 threads * 10 cameras each
@@ -952,11 +965,11 @@ class TestHealthMonitoring:
         current_time = time.time()
         
         # Add camera with recent telemetry
-        consensus_service.cameras['online_cam'] = CameraState('online_cam')
+        consensus_service.cameras['online_cam'] = CameraState('online_cam', consensus_service.config)
         consensus_service.cameras['online_cam'].last_telemetry = current_time - 10
         
         # Add camera with old telemetry
-        consensus_service.cameras['offline_cam'] = CameraState('offline_cam')
+        consensus_service.cameras['offline_cam'] = CameraState('offline_cam', consensus_service.config)
         consensus_service.cameras['offline_cam'].last_telemetry = current_time - 300  # 5 minutes ago
         
         # Check online status
@@ -968,10 +981,10 @@ class TestHealthMonitoring:
         current_time = time.time()
         
         # Add cameras with different staleness levels
-        consensus_service.cameras['recent_cam'] = CameraState('recent_cam')
+        consensus_service.cameras['recent_cam'] = CameraState('recent_cam', consensus_service.config)
         consensus_service.cameras['recent_cam'].last_seen = current_time - 100
         
-        consensus_service.cameras['stale_cam'] = CameraState('stale_cam')
+        consensus_service.cameras['stale_cam'] = CameraState('stale_cam', consensus_service.config)
         consensus_service.cameras['stale_cam'].last_seen = current_time - 500  # Very stale
         
         # Run cleanup
@@ -1082,7 +1095,8 @@ class TestConfiguration:
     def test_moving_average_calculation(self, consensus_service):
         """Test moving average calculation helper method"""
         # Create a camera state to access the method
-        camera = CameraState('test')
+        config = Config()
+        camera = CameraState('test', config)
         
         # Test normal case
         areas = [0.01, 0.02, 0.03, 0.04, 0.05]
@@ -1100,7 +1114,8 @@ class TestConfiguration:
     
     def test_growth_trend_checking(self, consensus_service):
         """Test growth trend checking helper method"""
-        camera = CameraState('test')
+        config = Config()
+        camera = CameraState('test', config)
         
         # Test clear growth trend
         growth_averages = [0.01, 0.012, 0.015, 0.018]
@@ -1120,7 +1135,7 @@ class TestConfiguration:
     
     def test_object_tracking_cleanup(self, consensus_service):
         """Test automatic cleanup of stale object tracks"""
-        camera = CameraState('test_cam')
+        camera = CameraState('test_cam', consensus_service.config)
         current_time = time.time()
         
         # First add old detection for object that will become stale

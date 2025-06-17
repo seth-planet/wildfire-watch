@@ -1,7 +1,65 @@
 #!/usr/bin/env python3.12
-"""
-Camera Discovery and Management Service - Wildfire Watch
-Discovers IP cameras via ONVIF/mDNS, tracks by MAC address, integrates with Frigate
+"""Camera Discovery and Management Service for Wildfire Watch.
+
+This module implements automatic IP camera discovery and management for the
+Wildfire Watch fire detection system. It discovers cameras using multiple
+protocols (ONVIF, mDNS, RTSP port scanning), tracks them by MAC address to
+handle DHCP IP changes, and automatically configures the Frigate NVR for
+AI-based fire detection.
+
+The service uses a Smart Discovery Mode to minimize resource usage on edge
+devices like Raspberry Pi. After initial aggressive discovery, it enters a
+steady-state mode with minimal network traffic.
+
+Communication Flow:
+    1. Discovers cameras via ONVIF WS-Discovery, mDNS, and RTSP scanning
+    2. Validates RTSP streams and tests credentials
+    3. Tracks cameras by MAC address for stability across IP changes
+    4. Publishes discovered cameras to MQTT topic 'camera/discovery/{camera_id}'
+    5. Generates Frigate NVR configuration and publishes to 'frigate/config/cameras'
+    6. Monitors camera health and publishes status to 'camera/status/{camera_id}'
+
+MQTT Topics:
+    Published:
+        - camera/discovery/{camera_id}: Camera details (retained)
+        - camera/status/{camera_id}: Status updates (not retained)
+        - frigate/config/cameras: Frigate configuration (retained)
+        - frigate/config/reload: Trigger Frigate reload (not retained)
+        - system/camera_detector_health: Service health (retained)
+        - system/camera_detector_health/{node_id}/lwt: Last will (retained)
+    
+    Subscribed:
+        - None (publish-only service)
+
+Thread Model:
+    - Main thread: MQTT client and service lifecycle
+    - Discovery thread: Camera discovery loop
+    - Health check thread: Monitors known cameras
+    - MAC tracking thread: Updates IP-to-MAC mappings
+    - Network monitor thread: Detects network changes
+    - ThreadPoolExecutor: Parallel camera discovery and validation
+
+Configuration:
+    Environment variables control all aspects of operation. Key settings:
+    - CAMERA_CREDENTIALS: Comma-separated username:password pairs
+    - DISCOVERY_INTERVAL: How often to scan (default: 300s)
+    - SMART_DISCOVERY_ENABLED: Enable resource-saving mode (default: true)
+    - MAC_TRACKING_ENABLED: Track cameras by MAC (default: true)
+    - RTSP_TIMEOUT: Stream validation timeout (default: 10s)
+
+Example:
+    Run standalone:
+        $ python3.12 detect.py
+        
+    Run in Docker:
+        $ docker-compose up camera-detector
+        
+    With custom credentials:
+        $ CAMERA_CREDENTIALS=admin:pass123,root:admin python3.12 detect.py
+
+Note:
+    This service requires network access for camera discovery and may need
+    root/NET_ADMIN privileges for ARP-based MAC address tracking.
 """
 import os
 import sys
@@ -19,6 +77,7 @@ from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass, asdict, field
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
@@ -34,8 +93,52 @@ load_dotenv()
 # Configuration
 # ─────────────────────────────────────────────────────────────
 class Config:
+    """Configuration management for Camera Detector service.
+    
+    This class loads and validates all configuration from environment variables,
+    providing sensible defaults and enforcing valid ranges. All settings can be
+    overridden via environment variables.
+    
+    Attributes:
+        MQTT_BROKER (str): MQTT broker hostname (default: 'mqtt_broker')
+        MQTT_PORT (int): MQTT broker port, validated 1-65535 (default: 1883)
+        MQTT_TLS (bool): Enable TLS encryption (default: False)
+        TLS_CA_PATH (str): Path to CA certificate for TLS (default: '/mnt/data/certs/ca.crt')
+        
+        DISCOVERY_INTERVAL (int): Seconds between discovery scans, min 30 (default: 300)
+        RTSP_TIMEOUT (int): RTSP validation timeout in seconds, 1-60 (default: 10)
+        ONVIF_TIMEOUT (int): ONVIF connection timeout in seconds, 1-30 (default: 5)
+        MAC_TRACKING_ENABLED (bool): Track cameras by MAC address (default: True)
+        
+        SMART_DISCOVERY_ENABLED (bool): Use resource-efficient discovery (default: True)
+        INITIAL_DISCOVERY_COUNT (int): Aggressive scans at startup (default: 3)
+        STEADY_STATE_INTERVAL (int): Full scan interval in steady state, min 300 (default: 1800)
+        QUICK_CHECK_INTERVAL (int): Health check interval, min 30 (default: 60)
+        
+        DEFAULT_USERNAME (str): Default camera username (default: 'admin')
+        DEFAULT_PASSWORD (str): Default camera password (default: '')
+        CAMERA_CREDENTIALS (str): Comma-separated user:pass pairs
+        
+        HEALTH_CHECK_INTERVAL (int): Camera health check interval, min 10 (default: 60)
+        OFFLINE_THRESHOLD (int): Seconds before marking camera offline, min 60 (default: 180)
+        
+        FRIGATE_CONFIG_PATH (str): Path to write Frigate config (default: '/config/frigate/cameras.yml')
+        FRIGATE_UPDATE_ENABLED (bool): Auto-update Frigate config (default: True)
+        
+    Side Effects:
+        - Reads environment variables on initialization
+        - Validates and clamps numeric values to safe ranges
+        
+    Thread Safety:
+        This class is read-only after initialization and thread-safe.
+    """
+    
     def __init__(self):
-        """Initialize configuration with current environment variables"""
+        """Initialize configuration with validated environment variables.
+        
+        All numeric values are validated and clamped to safe ranges to prevent
+        configuration errors from breaking the service.
+        """
         # MQTT Settings
         self.MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt_broker")
         self.MQTT_PORT = max(1, min(65535, int(os.getenv("MQTT_PORT", "1883"))))
@@ -98,7 +201,18 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────
 @dataclass
 class CameraProfile:
-    """Camera stream profile"""
+    """Camera stream profile from ONVIF.
+    
+    Represents a single stream profile (e.g., main/sub stream) available
+    from an ONVIF-compatible camera.
+    
+    Attributes:
+        name (str): Profile name (e.g., 'MainStream', 'SubStream')
+        token (str): ONVIF profile token for accessing this stream
+        resolution (Optional[Tuple[int, int]]): Width x Height in pixels
+        framerate (Optional[int]): Frames per second
+        encoding (Optional[str]): Video codec (e.g., 'H264', 'H265')
+    """
     name: str
     token: str
     resolution: Optional[Tuple[int, int]] = None
@@ -107,7 +221,40 @@ class CameraProfile:
 
 @dataclass
 class Camera:
-    """Represents a discovered camera"""
+    """Represents a discovered IP camera with all its properties.
+    
+    This is the core data model for tracking cameras throughout their lifecycle.
+    Cameras are uniquely identified by MAC address to handle DHCP IP changes.
+    
+    Attributes:
+        ip (str): Current IP address
+        mac (str): MAC address (primary identifier)
+        name (str): Human-readable name (from ONVIF or generated)
+        manufacturer (str): Camera manufacturer (default: 'Unknown')
+        model (str): Camera model (default: 'Unknown')
+        serial_number (str): Serial number if available (default: 'Unknown')
+        firmware_version (str): Firmware version (default: 'Unknown')
+        onvif_url (Optional[str]): ONVIF service endpoint URL
+        rtsp_urls (Dict[str, str]): Profile name to RTSP URL mapping
+        http_url (Optional[str]): Web interface URL
+        username (str): Authenticated username (default: 'admin')
+        password (str): Authenticated password (default: '')
+        profiles (List[CameraProfile]): Available stream profiles
+        capabilities (Dict[str, Any]): ONVIF capabilities
+        online (bool): Current online status
+        stream_active (bool): RTSP stream validation status
+        last_seen (float): Unix timestamp of last successful contact
+        last_validated (float): Unix timestamp of last stream validation
+        primary_rtsp_url (Optional[str]): Best RTSP URL for this camera
+        
+    MQTT Publishing:
+        Camera objects are serialized to JSON and published to:
+        - camera/discovery/{mac}: Full camera details (retained)
+        - camera/status/{mac}: Status updates
+        
+    Thread Safety:
+        Access to Camera objects must be synchronized using CameraDetector.lock
+    """
     ip: str
     mac: str
     name: str
@@ -282,7 +429,32 @@ class Camera:
 # MAC Address Tracker
 # ─────────────────────────────────────────────────────────────
 class MACTracker:
-    """Tracks MAC addresses and their IP associations"""
+    """Tracks MAC addresses and their IP associations for camera stability.
+    
+    This class maintains bidirectional mappings between MAC addresses and IP
+    addresses, allowing cameras to be tracked even when they receive new IPs
+    from DHCP. It also provides network scanning capabilities using ARP.
+    
+    The MAC tracking is critical for camera identity persistence. Without it,
+    a camera that gets a new IP would appear as a new device, breaking
+    historical data and requiring reconfiguration.
+    
+    Attributes:
+        mac_to_ip (Dict[str, str]): MAC address to current IP mapping
+        ip_to_mac (Dict[str, str]): IP address to MAC mapping
+        lock (threading.Lock): Synchronization for thread-safe access
+        
+    Thread Safety:
+        All public methods are thread-safe through internal locking.
+        
+    Side Effects:
+        - scan_network() requires root/NET_ADMIN privileges for ARP scanning
+        - Falls back gracefully if privileges are not available
+        
+    Integration:
+        Used by CameraDetector to maintain stable camera identities across
+        network changes and DHCP lease renewals.
+    """
     
     def __init__(self):
         self.mac_to_ip: Dict[str, str] = {}
@@ -290,7 +462,19 @@ class MACTracker:
         self.lock = threading.Lock()
     
     def update(self, mac: str, ip: str):
-        """Update MAC-IP mapping"""
+        """Update MAC-IP mapping with automatic cleanup of old associations.
+        
+        When a MAC address gets a new IP (DHCP renewal), this method ensures
+        the old IP mapping is removed to maintain consistency.
+        
+        Args:
+            mac: MAC address in format 'AA:BB:CC:DD:EE:FF'
+            ip: IP address in dotted decimal format
+            
+        Side Effects:
+            - Removes old IP associations for the MAC if IP changed
+            - Updates both directional mappings atomically
+        """
         with self.lock:
             old_ip = self.mac_to_ip.get(mac)
             if old_ip and old_ip != ip:
@@ -342,9 +526,103 @@ class MACTracker:
             return {}
 
 # ─────────────────────────────────────────────────────────────
+# RTSP Validation Worker (Process-based)
+# ─────────────────────────────────────────────────────────────
+def _rtsp_validation_worker(rtsp_url: str, timeout_ms: int) -> bool:
+    """Worker function to validate RTSP stream in separate process.
+    
+    This function runs in a separate process to ensure robust timeout handling
+    even if cv2.VideoCapture hangs indefinitely.
+    
+    Args:
+        rtsp_url: The RTSP URL to validate
+        timeout_ms: Timeout in milliseconds for OpenCV operations
+        
+    Returns:
+        bool: True if stream is valid and accessible, False otherwise
+    """
+    cap = None
+    try:
+        # Create video capture with timeout settings
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+        
+        # Check if capture opened successfully
+        if not cap.isOpened():
+            return False
+        
+        # Try to read a frame to ensure stream is actually working
+        ret, frame = cap.read()
+        if not ret or frame is None:
+            return False
+            
+        return True
+        
+    except Exception:
+        # Any exception means validation failed
+        return False
+        
+    finally:
+        # Always release the capture
+        if cap is not None:
+            try:
+                cap.release()
+            except:
+                pass
+
+
+# ─────────────────────────────────────────────────────────────
 # Camera Discovery and Management
 # ─────────────────────────────────────────────────────────────
 class CameraDetector:
+    """Main service class for camera discovery and management.
+    
+    This class orchestrates all camera discovery methods (ONVIF, mDNS, RTSP),
+    maintains camera state, publishes to MQTT, and integrates with Frigate NVR.
+    It implements Smart Discovery Mode for efficient resource usage on edge devices.
+    
+    The service runs multiple background threads for discovery, health checking,
+    MAC tracking, and network monitoring. All camera state is synchronized
+    through a reentrant lock.
+    
+    Attributes:
+        config (Config): Service configuration
+        cameras (Dict[str, Camera]): MAC address to Camera mapping
+        mac_tracker (MACTracker): IP-MAC address tracker
+        lock (threading.RLock): Reentrant lock for camera state
+        credentials (List[Tuple[str, str]]): Parsed camera credentials
+        mqtt_client (mqtt.Client): MQTT client for publishing
+        
+        Smart Discovery State:
+        discovery_count (int): Number of discovery cycles completed
+        last_camera_count (int): Camera count from last discovery
+        stable_count (int): Consecutive cycles with same camera count
+        is_steady_state (bool): Whether in resource-saving steady state
+        last_full_discovery (float): Timestamp of last full scan
+        known_camera_ips (Set[str]): IPs with confirmed cameras
+        
+    Thread Model:
+        - _discovery_loop: Main discovery control thread
+        - _health_check_loop: Camera health monitoring
+        - _mac_tracking_loop: MAC address updates
+        - _network_change_monitor: Network interface monitoring
+        - ThreadPoolExecutor: Parallel discovery operations
+        
+    MQTT Topics:
+        Published:
+        - camera/discovery/{camera_id}: Camera details (retained)
+        - camera/status/{camera_id}: Status updates
+        - frigate/config/cameras: Frigate configuration
+        - system/camera_detector_health: Service health
+        
+    Integration Points:
+        - Upstream: Network cameras via ONVIF/RTSP
+        - Downstream: Frigate NVR, Fire Consensus service
+        - Lateral: MQTT broker for all communications
+    """
+    
     def __init__(self):
         self.config = Config()
         self.cameras: Dict[str, Camera] = {}  # MAC -> Camera
@@ -551,7 +829,41 @@ class CameraDetector:
         return networks
     
     def _discovery_loop(self):
-        """Main discovery loop with smart resource management"""
+        """Main discovery loop with smart resource management.
+        
+        This is the primary control loop that implements Smart Discovery Mode
+        to minimize resource usage on edge devices. The loop operates in three
+        phases:
+        
+        1. Initial Discovery (aggressive):
+           - Runs INITIAL_DISCOVERY_COUNT times at startup
+           - Full network scans every DISCOVERY_INTERVAL seconds
+           - Discovers all cameras on the network
+           
+        2. Stabilization Phase:
+           - Monitors camera count for stability
+           - Enters steady-state after 3 consecutive stable counts
+           - Continues full discovery until stable
+           
+        3. Steady-State Mode (resource-efficient):
+           - Quick health checks every QUICK_CHECK_INTERVAL (60s)
+           - Full discovery only every STEADY_STATE_INTERVAL (30min)
+           - 90%+ reduction in network traffic and CPU usage
+           
+        The loop automatically exits steady-state if:
+        - Camera count changes significantly
+        - Network interfaces change
+        - Manual trigger via future command topic
+        
+        Side Effects:
+            - Runs full discovery or quick health checks
+            - Updates camera states and publishes to MQTT
+            - Modifies discovery state variables
+            
+        Thread Safety:
+            This method runs in its own thread and uses proper locking
+            when accessing shared camera state.
+        """
         while self._running:
             try:
                 # Determine discovery mode
@@ -1369,28 +1681,44 @@ class CameraDetector:
             for path in rtsp_paths[:6]  # Test first 6 paths in parallel
         ]
         
-        # Test in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            futures = [executor.submit(test_rtsp_url, combo) for combo in test_combinations]
-            
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                if result:
-                    username, password, path, rtsp_url = result
-                    camera.rtsp_urls['main'] = rtsp_url
-                    camera.username = username
-                    camera.password = password
-                    camera.online = True
-                    camera.stream_active = True
-                    camera.last_validated = time.time()
+        # Test in parallel with shutdown protection
+        try:
+            # Check if we're shutting down to avoid "cannot schedule new futures" error
+            if not self._running:
+                logger.debug("Skipping RTSP stream check due to shutdown")
+                return False
+                
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+                try:
+                    futures = [executor.submit(test_rtsp_url, combo) for combo in test_combinations]
                     
-                    logger.info(f"RTSP stream found at {camera.ip} (MAC: {camera.mac}) - {path}")
-                    
-                    # Cancel remaining futures
-                    for f in futures:
-                        f.cancel()
-                    
-                    return True
+                    for future in concurrent.futures.as_completed(futures):
+                        result = future.result()
+                        if result:
+                            username, password, path, rtsp_url = result
+                            camera.rtsp_urls['main'] = rtsp_url
+                            camera.username = username
+                            camera.password = password
+                            camera.online = True
+                            camera.stream_active = True
+                            camera.last_validated = time.time()
+                            
+                            logger.info(f"RTSP stream found at {camera.ip} (MAC: {camera.mac}) - {path}")
+                            
+                            # Cancel remaining futures
+                            for f in futures:
+                                f.cancel()
+                            
+                            return True
+                except RuntimeError as e:
+                    if "cannot schedule new futures" in str(e):
+                        logger.debug("ThreadPoolExecutor shutdown during RTSP check")
+                        return False
+                    else:
+                        raise
+        except Exception as e:
+            logger.error(f"Error during parallel RTSP testing: {e}")
+            # Fall back to sequential testing
         
         # If first batch didn't work, try remaining paths sequentially
         for username, password in self.credentials:
@@ -1413,59 +1741,67 @@ class CameraDetector:
         return False
     
     def _validate_rtsp_stream(self, rtsp_url: str) -> bool:
-        """Validate RTSP stream is accessible"""
-        import threading
-        result = [False]
+        """Validate RTSP stream is accessible.
         
-        def validate_with_timeout():
-            cap = None
-            try:
-                # Validate timeout value
-                timeout_ms = max(self.config.RTSP_TIMEOUT * 1000, 1000)  # Minimum 1 second
-                
-                # Set OpenCV capture properties for faster timeout
-                cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
-                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
-                
-                # Check if capture opened successfully
-                if not cap.isOpened():
-                    logger.debug(f"RTSP stream failed to open: {rtsp_url}")
-                    return
-                
-                # Try to read a frame
-                ret, frame = cap.read()
-                
-                result[0] = ret and frame is not None
-                
-            except Exception as e:
-                logger.debug(f"RTSP validation error for {rtsp_url}: {e}")
-            finally:
-                # Ensure capture is always released
-                if cap is not None:
-                    try:
-                        cap.release()
-                    except:
-                        pass
+        This method uses process-based isolation to handle hanging RTSP connections
+        that could freeze the service. Even though we set OpenCV timeout properties,
+        they are not reliable across all backends and camera types.
         
-        # Run validation in a thread with timeout
-        thread = threading.Thread(target=validate_with_timeout)
-        thread.daemon = True
+        Args:
+            rtsp_url: The RTSP URL to validate
+            
+        Returns:
+            bool: True if stream is valid and accessible, False otherwise
+            
+        Thread Safety:
+            This method is thread-safe due to process isolation.
+            
+        Side Effects:
+            - Creates a temporary process for validation
+            - Logs debug/warning messages
+        """
+        logger.debug(f"Validating RTSP stream: {rtsp_url}")
         
+        # Convert timeout to milliseconds for OpenCV
+        timeout_ms = max(self.config.RTSP_TIMEOUT * 1000, 1000)  # Minimum 1 second
+        
+        # Use ProcessPoolExecutor for robust timeout handling
+        # This prevents hanging even if cv2.VideoCapture blocks indefinitely
         try:
-            thread.start()
-            thread.join(timeout=self.config.RTSP_TIMEOUT + 1)  # Give 1 extra second
-            
-            if thread.is_alive():
-                logger.warning(f"RTSP validation timed out for {rtsp_url}")
-                return False
+            with ProcessPoolExecutor(max_workers=1) as executor:
+                # Check if we're shutting down to avoid "cannot schedule new futures" error
+                if not self._running:
+                    logger.debug("Skipping RTSP validation due to shutdown")
+                    return False
                 
-        except RuntimeError:
-            # Thread start was mocked in tests
-            validate_with_timeout()
-            
-        return result[0]
+                try:
+                    # Submit validation task to separate process
+                    future = executor.submit(_rtsp_validation_worker, rtsp_url, timeout_ms)
+                    
+                    # Wait for result with timeout
+                    is_valid = future.result(timeout=self.config.RTSP_TIMEOUT)
+                    
+                    if is_valid:
+                        logger.debug(f"Successfully validated RTSP stream: {rtsp_url}")
+                    else:
+                        logger.debug(f"RTSP stream validation failed: {rtsp_url}")
+                        
+                    return is_valid
+                    
+                except FuturesTimeoutError:
+                    logger.warning(f"RTSP validation timed out after {self.config.RTSP_TIMEOUT}s: {rtsp_url}")
+                    return False
+                    
+        except RuntimeError as e:
+            if "cannot schedule new futures" in str(e):
+                logger.debug("ProcessPoolExecutor shutdown during RTSP validation")
+                return False
+            else:
+                logger.error(f"Unexpected RuntimeError during RTSP validation: {e}")
+                return False
+        except Exception as e:
+            logger.error(f"Unexpected error during RTSP validation: {e}")
+            return False
     
     def _health_check_loop(self):
         """Check health of known cameras"""

@@ -1,7 +1,59 @@
 #!/usr/bin/env python3
-"""
-Hardware Detection Script for Frigate NVR
-Automatically detects and configures available hardware acceleration
+"""Hardware detection and configuration for Frigate NVR AI accelerators.
+
+This module automatically detects available hardware acceleration capabilities
+and generates optimal Frigate configuration. It probes for various AI accelerators
+(Coral TPU, Hailo-8, NVIDIA GPU) and video decoding hardware (Intel/AMD VA-API,
+NVIDIA NVDEC, Raspberry Pi V4L2) to maximize performance on edge devices.
+
+The detector uses common Linux command-line utilities to probe hardware. This
+approach is portable but can be fragile if tool output formats change. The
+script is designed to fail gracefully when tools are missing or inaccessible.
+
+Hardware Priority (for AI detection):
+    1. NVIDIA GPU with TensorRT - Highest performance
+    2. Hailo-8/8L - Purpose-built AI accelerator
+    3. Google Coral TPU - Efficient edge AI
+    4. CPU - Fallback option
+
+Video Decoding Priority:
+    1. NVIDIA NVDEC - Hardware decoding on NVIDIA GPUs
+    2. Intel/AMD VA-API - Hardware decoding via Video Acceleration API
+    3. Raspberry Pi V4L2 - Hardware decoding on Pi 4/5
+    4. Software decoding - CPU fallback
+
+Required Command-Line Tools:
+    - lspci, lsusb: Hardware enumeration (pciutils, usbutils packages)
+    - vainfo: VA-API capability detection (libva-utils package)
+    - nvidia-smi: NVIDIA GPU detection (nvidia-driver package)
+    - hailortcli: Hailo device detection (hailo-driver package)
+
+Container Requirements:
+    - Device access: /dev/dri/*, /dev/bus/usb/*, /dev/hailo*, /dev/apex_*
+    - For NVIDIA: nvidia-container-runtime or device mapping
+    - For Coral USB: Privileged mode or specific USB device mapping
+
+Known Issues:
+    1. Missing hwaccel configuration: Current implementation doesn't set
+       hardware video decoding flags, forcing CPU decoding
+    2. Fragile GPU detection: Relies on string parsing of 'ls' output
+    3. No permission checks: Doesn't verify if detected devices are accessible
+    4. Hailo duplication: May report same device twice if both methods succeed
+
+Example:
+    Run detection and print results:
+        $ python hardware_detector.py
+        
+    Export configuration to file:
+        $ python hardware_detector.py --export
+        
+    Use in Docker:
+        $ docker run --device /dev/dri --device /dev/bus/usb \\
+            wildfire-nvr python hardware_detector.py
+
+Note:
+    For production use, ensure the container has appropriate device
+    mappings and the required command-line tools are installed.
 """
 import os
 import sys
@@ -15,7 +67,43 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 class HardwareDetector:
+    """Detects available hardware acceleration for AI inference and video decoding.
+    
+    This class probes the system for various hardware components that can
+    accelerate wildfire detection. It runs detection methods sequentially
+    during initialization and stores results for configuration generation.
+    
+    The detector is designed to work in containerized environments where
+    not all hardware may be accessible. It fails gracefully when tools
+    are missing or devices are not mapped into the container.
+    
+    Attributes:
+        detected_hardware (Dict): Complete hardware inventory with subkeys:
+            - cpu: Processor information and capabilities
+            - gpu: Graphics card for video decoding and AI
+            - coral: Google Coral TPU devices (USB and PCIe)
+            - hailo: Hailo-8 AI processors
+            - memory: System RAM information
+            - platform: OS and container environment
+            
+    Detection Methods:
+        Each hardware type has a dedicated detection method that returns
+        a dictionary with device-specific information. Methods handle
+        missing tools and inaccessible devices gracefully.
+        
+    Thread Safety:
+        This class is not thread-safe. Create separate instances for
+        concurrent use.
+    """
+    
     def __init__(self):
+        """Initialize detector and run all hardware detection methods.
+        
+        Executes all detection methods sequentially and stores results.
+        Detection failures are logged but don't prevent initialization.
+        The detected_hardware dictionary is always populated, though
+        values may indicate no hardware found.
+        """
         self.detected_hardware = {
             'cpu': self._detect_cpu(),
             'gpu': self._detect_gpu(),
@@ -26,7 +114,25 @@ class HardwareDetector:
         }
         
     def _run_command(self, cmd: List[str]) -> Optional[str]:
-        """Run command and return output"""
+        """Execute shell command and return stdout.
+        
+        Runs a command with timeout and returns its output. Designed to
+        handle missing tools and permission errors gracefully.
+        
+        Args:
+            cmd: Command and arguments as list (e.g., ['lspci', '-nn'])
+            
+        Returns:
+            Stripped stdout as string if successful, None otherwise
+            
+        Side Effects:
+            - Logs warnings for missing commands (FileNotFoundError)
+            - Logs debug messages for other failures
+            
+        Note:
+            Commands have a 5-second timeout to prevent hanging on
+            unresponsive hardware or drivers.
+        """
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
@@ -66,7 +172,33 @@ class HardwareDetector:
         return info
     
     def _detect_gpu(self) -> Dict:
-        """Detect GPU capabilities"""
+        """Detect GPU capabilities for video decoding and AI inference.
+        
+        Probes for Intel, AMD, and NVIDIA GPUs using various methods.
+        For Intel/AMD, uses VA-API (Video Acceleration API) to determine
+        hardware decoding capabilities. For NVIDIA, uses nvidia-smi.
+        
+        Returns:
+            dict: GPU information with keys:
+                - vendor: 'intel', 'amd', 'nvidia', or None
+                - model: GPU model name (NVIDIA only)
+                - driver: 'vaapi' or 'nvdec'
+                - decode: List of supported codecs ['h264', 'h265']
+                - encode: List of supported encoding (currently unused)
+                
+        Detection Methods:
+            - Intel/AMD: Checks for /dev/dri/renderD* devices and runs vainfo
+            - NVIDIA: Runs nvidia-smi to query GPU name
+            
+        Known Issues:
+            - AMD detection relies on fragile 'ls' output parsing
+            - Assumes renderD128 exists, but there may be multiple devices
+            - No verification that detected devices are accessible
+            
+        Note:
+            VA-API detection requires vainfo tool from libva-utils package.
+            NVIDIA detection requires nvidia-smi from driver package.
+        """
         gpu = {
             'vendor': None,
             'model': None,
@@ -193,7 +325,45 @@ class HardwareDetector:
         return platform
     
     def get_recommended_config(self) -> Dict:
-        """Get recommended configuration based on detected hardware"""
+        """Generate optimal Frigate configuration based on detected hardware.
+        
+        Analyzes detected hardware and returns configuration that maximizes
+        performance. Selects best available options for both AI detection
+        and video decoding independently.
+        
+        Returns:
+            dict: Frigate configuration with keys:
+                - detector_type: AI accelerator type ('cpu', 'edgetpu', 'hailo', 'tensorrt')
+                - detector_device: Device index/path
+                - model_path: Path to model file for selected detector
+                - hwaccel_args: FFmpeg hardware acceleration arguments
+                - record_codec: Recording codec ('copy' to avoid transcoding)
+                - record_preset: Encoding preset if transcoding
+                - record_quality: Encoding quality if transcoding
+                
+        Priority Logic:
+            AI Detection (in order):
+                1. NVIDIA GPU with TensorRT (if available)
+                2. Hailo-8/8L AI processor
+                3. Google Coral TPU (USB or PCIe)
+                4. CPU fallback
+                
+            Video Decoding (in order):
+                1. NVIDIA NVDEC
+                2. Intel/AMD VA-API
+                3. Raspberry Pi V4L2
+                4. Software decoding
+                
+        Critical Issue:
+            Current implementation ONLY configures AI detection, completely
+            ignoring hardware video decoding. This forces CPU decoding even
+            when hardware acceleration is available, causing unnecessary
+            CPU load and reducing camera capacity.
+            
+        Note:
+            Model paths assume a standard directory structure. Actual paths
+            may need adjustment based on deployment.
+        """
         config = {
             'detector_type': 'cpu',
             'detector_device': '0',

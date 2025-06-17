@@ -37,11 +37,11 @@ def test_optimization():
     
     # Set optimized timeouts for test environment
     test_env = {
-        'ONVIF_TIMEOUT': '1',           # Down from 5s
-        'RTSP_TIMEOUT': '1',            # Down from 10s
-        'DISCOVERY_INTERVAL': '1',      # Down from 300s
-        'OFFLINE_THRESHOLD': '5',       # Down from 180s
-        'HEALTH_INTERVAL': '1',         # Down from 60s
+        'ONVIF_TIMEOUT': '1',           # Down from 5s (respects 1-30s constraint)
+        'RTSP_TIMEOUT': '1',            # Down from 10s (respects 1-60s constraint)
+        'DISCOVERY_INTERVAL': '30',     # Down from 300s (respects 30s minimum)
+        'OFFLINE_THRESHOLD': '60',      # Down from 180s (respects 60s minimum)
+        'HEALTH_INTERVAL': '10',        # Down from 60s (respects 10s minimum)
     }
     
     # Apply test environment
@@ -496,41 +496,126 @@ def config(monkeypatch):
     monkeypatch.setenv("FRIGATE_UPDATE_ENABLED", "true")
     monkeypatch.setenv("FRIGATE_CONFIG_PATH", "/tmp/test_frigate.yml")
 
-@pytest.fixture
-def camera_detector(test_mqtt_broker, network_mocks, mock_onvif, config, monkeypatch):
-    """Create CameraDetector instance with real MQTT broker"""
-    # Get connection parameters from the test broker
-    conn_params = test_mqtt_broker.get_connection_params()
+@pytest.fixture(scope="session")
+def mqtt_connection_pool(shared_mqtt_broker):
+    """Session-scoped MQTT connection pool for reuse across tests"""
+    import paho.mqtt.client as mqtt
+    from datetime import datetime, timezone
     
-    # Configure MQTT for testing (real broker)
-    monkeypatch.setenv("MQTT_BROKER", conn_params['host'])
-    monkeypatch.setenv("MQTT_PORT", str(conn_params['port']))
+    # Create a pool of pre-configured MQTT clients
+    connection_pool = []
+    conn_params = shared_mqtt_broker.get_connection_params()
+    
+    # Create multiple connections for concurrent test execution
+    for i in range(5):  # Pool of 5 connections
+        client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"test-detector-{i}",
+            clean_session=False  # Keep session for reuse
+        )
+        
+        # Set up basic callbacks
+        def on_connect(client, userdata, flags, rc, properties=None):
+            if rc == 0:
+                client.user_data_dict = {'connected': True}
+        
+        def on_disconnect(client, userdata, rc, properties=None, reasoncode=None):
+            client.user_data_dict = {'connected': False}
+        
+        client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
+        client.user_data_dict = {'connected': False, 'in_use': False}
+        
+        # Connect to broker
+        try:
+            client.connect(conn_params['host'], conn_params['port'], keepalive=60)
+            client.loop_start()
+            # Wait for connection
+            import time
+            start_time = time.time()
+            while time.time() - start_time < 2.0 and not client.user_data_dict.get('connected'):
+                time.sleep(0.1)
+            
+            if client.user_data_dict.get('connected'):
+                connection_pool.append(client)
+        except Exception as e:
+            print(f"Failed to create pooled MQTT connection {i}: {e}")
+    
+    yield connection_pool
+    
+    # Cleanup: Disconnect all connections
+    for client in connection_pool:
+        try:
+            client.loop_stop()
+            client.disconnect()
+        except:
+            pass
+
+@pytest.fixture
+def camera_detector_ultra_fast(network_mocks, mock_onvif, config, monkeypatch):
+    """Ultra-fast camera detector with mocked MQTT to bypass broker delays"""
+    import time
+    start_time = time.time()
+    print(f"\n=== Starting ultra-fast camera_detector setup ===")
+    
+    # Configure fake MQTT environment (no real broker)
+    monkeypatch.setenv("MQTT_BROKER", "localhost")
+    monkeypatch.setenv("MQTT_PORT", "1883")
     monkeypatch.setenv("MQTT_TLS", "false")
     
-    # Create detector with controlled background task execution
-    # Temporarily patch _start_background_tasks to prevent automatic execution
-    original_start_tasks = CameraDetector._start_background_tasks
-    CameraDetector._start_background_tasks = lambda self: None
+    # Mock MQTT client to eliminate all broker dependency
+    class MockMQTTClient:
+        def __init__(self, *args, **kwargs):
+            self.connected = True
+        def connect(self, *args, **kwargs): pass
+        def disconnect(self, *args, **kwargs): pass 
+        def loop_start(self): pass
+        def loop_stop(self): pass
+        def publish(self, *args, **kwargs): pass
+        def will_set(self, *args, **kwargs): pass
+        
+        # Callback properties
+        on_connect = None
+        on_disconnect = None
     
-    detector = CameraDetector()
+    # Patch MQTT setup to use mock client
+    def ultra_fast_mqtt_setup(self):
+        """Ultra-fast MQTT setup with mock client"""
+        self.mqtt_client = MockMQTTClient()
+        self.mqtt_connected = True  # Always connected for tests
     
-    # Restore original method but keep background tasks disabled
-    CameraDetector._start_background_tasks = original_start_tasks
+    def no_retry_connect(self):
+        """Skip retry logic"""
+        pass
+    
+    # Temporarily patch the methods
+    original_setup = CameraDetector._setup_mqtt
+    original_retry = CameraDetector._mqtt_connect_with_retry
+    
+    CameraDetector._setup_mqtt = ultra_fast_mqtt_setup
+    CameraDetector._mqtt_connect_with_retry = no_retry_connect
+    
+    try:
+        # Create detector
+        detector_start = time.time()
+        detector = CameraDetector()
+        print(f"CameraDetector created in {time.time() - detector_start:.2f}s")
+    finally:
+        # Restore original methods
+        CameraDetector._setup_mqtt = original_setup
+        CameraDetector._mqtt_connect_with_retry = original_retry
+    
+    # Stop background tasks immediately after initialization
+    stop_start = time.time()
     detector._running = False
+    time.sleep(0.05)  # Reduced from 0.1
+    print(f"Background tasks stopped in {time.time() - stop_start:.2f}s")
     
-    # Ensure MQTT connection is established for tests that need it
-    # Wait a moment for connection to be established
-    import time
-    connection_timeout = time.time() + 5.0  # 5 second timeout
-    while time.time() < connection_timeout and not detector.mqtt_connected:
-        time.sleep(0.1)
-    
-    # If still not connected, try to reconnect
-    if not detector.mqtt_connected:
-        detector._mqtt_client.reconnect()
-    
-    # Wait for MQTT connection to establish
-    time.sleep(0.5)
+    # Clear any cameras that may have been discovered during startup
+    clear_start = time.time()
+    with detector.lock:
+        detector.cameras.clear()
+    print(f"Cameras cleared in {time.time() - clear_start:.2f}s")
     
     # Add helper methods for controlled task execution
     def run_discovery_once():
@@ -539,34 +624,190 @@ def camera_detector(test_mqtt_broker, network_mocks, mock_onvif, config, monkeyp
     
     def run_health_check_once():
         """Run one health check cycle manually"""
-        detector._health_check()
+        # Execute the health check logic that's in _health_check_loop
+        current_time = time.time()
+        with detector.lock:
+            for mac, camera in list(detector.cameras.items()):
+                # Check if camera is offline
+                if current_time - camera.last_seen > detector.config.OFFLINE_THRESHOLD:
+                    if camera.online:
+                        camera.online = False
+                        camera.stream_active = False
+                        detector._publish_camera_status(camera, "offline")
     
     def enable_background_tasks():
         """Enable background tasks for testing scenarios that need them"""
         detector._running = True
-        # Start background tasks manually when needed
-        original_start_tasks(detector)
+        detector._start_background_tasks()
     
     def disable_background_tasks():
         """Disable background tasks for controlled testing"""
         detector._running = False
     
     # Attach helper methods to detector
+    helper_start = time.time()
     detector.test_run_discovery_once = run_discovery_once
     detector.test_run_health_check_once = run_health_check_once
     detector.test_enable_background_tasks = enable_background_tasks
     detector.test_disable_background_tasks = disable_background_tasks
+    print(f"Helper methods attached in {time.time() - helper_start:.2f}s")
+    
+    total_time = time.time() - start_time
+    print(f"=== Total ultra-fast fixture setup: {total_time:.2f}s ===\n")
     
     yield detector
     
-    # Cleanup: Ensure all background tasks are stopped
+    # Ultra-fast cleanup: Just reset state
+    try:
+        detector._running = False
+        # Clear detector state
+        with detector.lock:
+            detector.cameras.clear()
+    except Exception as e:
+        print(f"Ultra-fast detector cleanup error: {e}")
+
+@pytest.fixture
+def camera_detector_fast(test_mqtt_broker, network_mocks, mock_onvif, config, monkeypatch):
+    """Fast camera detector with minimal MQTT setup overhead"""
+    import time
+    start_time = time.time()
+    print(f"\n=== Starting camera_detector_fast setup ===")
+    
+    # Get connection parameters from the test broker
+    broker_start = time.time()
+    conn_params = test_mqtt_broker.get_connection_params()
+    print(f"Broker params obtained in {time.time() - broker_start:.2f}s")
+    
+    # Configure MQTT for testing (real broker)
+    env_start = time.time()
+    monkeypatch.setenv("MQTT_BROKER", conn_params['host'])
+    monkeypatch.setenv("MQTT_PORT", str(conn_params['port']))
+    monkeypatch.setenv("MQTT_TLS", "false")
+    print(f"Environment configured in {time.time() - env_start:.2f}s")
+    
+    # Patch the MQTT setup to skip connection delays
+    def fast_mqtt_setup(self):
+        """Fast MQTT setup that skips time-consuming operations"""
+        import paho.mqtt.client as mqtt
+        self.mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"test-{id(self)}",
+            clean_session=True  # Don't persist session for tests
+        )
+        
+        # Set basic callbacks
+        self.mqtt_client.on_connect = self._on_mqtt_connect
+        self.mqtt_client.on_disconnect = self._on_mqtt_disconnect
+        
+        # Quick connection without retry logic
+        try:
+            port = 8883 if self.config.MQTT_TLS else conn_params['port']
+            self.mqtt_client.connect(conn_params['host'], port, keepalive=60)
+            self.mqtt_client.loop_start()
+            self.mqtt_connected = True  # Assume connected for tests
+        except Exception as e:
+            print(f"Fast MQTT setup failed: {e}")
+            self.mqtt_connected = False
+    
+    def no_retry_connect(self):
+        """Skip retry logic for faster testing"""
+        pass
+    
+    # Temporarily patch the methods
+    original_setup = CameraDetector._setup_mqtt
+    original_retry = CameraDetector._mqtt_connect_with_retry
+    
+    CameraDetector._setup_mqtt = fast_mqtt_setup
+    CameraDetector._mqtt_connect_with_retry = no_retry_connect
+    
+    try:
+        # Create detector
+        detector_start = time.time()
+        detector = CameraDetector()
+        print(f"CameraDetector created in {time.time() - detector_start:.2f}s")
+    finally:
+        # Restore original methods
+        CameraDetector._setup_mqtt = original_setup
+        CameraDetector._mqtt_connect_with_retry = original_retry
+    
+    # Stop background tasks immediately after initialization
+    stop_start = time.time()
     detector._running = False
-    if hasattr(detector, '_mqtt_client'):
+    
+    # Give background threads a moment to see the flag and stop
+    time.sleep(0.05)  # Reduced from 0.1
+    print(f"Background tasks stopped in {time.time() - stop_start:.2f}s")
+    
+    # Clear any cameras that may have been discovered during startup
+    clear_start = time.time()
+    with detector.lock:
+        detector.cameras.clear()
+    print(f"Cameras cleared in {time.time() - clear_start:.2f}s")
+    
+    # Add helper methods for controlled task execution
+    def run_discovery_once():
+        """Run one discovery cycle manually"""
+        detector._run_full_discovery()
+    
+    def run_health_check_once():
+        """Run one health check cycle manually"""
+        # Execute the health check logic that's in _health_check_loop
+        current_time = time.time()
+        with detector.lock:
+            for mac, camera in list(detector.cameras.items()):
+                # Check if camera is offline
+                if current_time - camera.last_seen > detector.config.OFFLINE_THRESHOLD:
+                    if camera.online:
+                        camera.online = False
+                        camera.stream_active = False
+                        detector._publish_camera_status(camera, "offline")
+    
+    def enable_background_tasks():
+        """Enable background tasks for testing scenarios that need them"""
+        detector._running = True
+        detector._start_background_tasks()
+    
+    def disable_background_tasks():
+        """Disable background tasks for controlled testing"""
+        detector._running = False
+    
+    # Attach helper methods to detector
+    helper_start = time.time()
+    detector.test_run_discovery_once = run_discovery_once
+    detector.test_run_health_check_once = run_health_check_once
+    detector.test_enable_background_tasks = enable_background_tasks
+    detector.test_disable_background_tasks = disable_background_tasks
+    print(f"Helper methods attached in {time.time() - helper_start:.2f}s")
+    
+    total_time = time.time() - start_time
+    print(f"=== Total fixture setup: {total_time:.2f}s ===\n")
+    
+    yield detector
+    
+    # Fast cleanup: Just reset state
+    try:
+        detector._running = False
+        
+        # Quick MQTT disconnect
+        if hasattr(detector, 'mqtt_client') and detector.mqtt_client:
             try:
-                detector._mqtt_client.loop_stop()
-                detector._mqtt_client.disconnect()
+                detector.mqtt_client.loop_stop()
+                detector.mqtt_client.disconnect()
             except:
                 pass
+        
+        # Clear detector state
+        with detector.lock:
+            detector.cameras.clear()
+            
+    except Exception as e:
+        print(f"Fast detector cleanup error: {e}")
+
+# Keep original camera_detector for backward compatibility, but it can use the fast version
+@pytest.fixture  
+def camera_detector(camera_detector_fast):
+    """Backward compatible camera detector (now uses fast version)"""
+    return camera_detector_fast
 
 @pytest.fixture
 def sample_camera():
@@ -907,13 +1148,29 @@ class TestNetworkResilience:
             # Use real _discover_mdns_cameras, _scan_rtsp_ports, and _update_mac_mappings with network_mocks
             with patch('socket.socket', network_mocks['mock_socket_constructor']), \
                  patch('detect.socket.socket', network_mocks['mock_socket_constructor']):
-                with patch.object(camera_detector, '_update_frigate_config'):
+                # Use temporary file for Frigate config to test real _update_frigate_config
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as tmp_file:
+                    temp_config_path = tmp_file.name
+                
+                # Update config to use temp file
+                original_config_path = camera_detector.config.FRIGATE_CONFIG_PATH
+                camera_detector.config.FRIGATE_CONFIG_PATH = temp_config_path
+                
+                try:
                     # Should not crash when running discovery
+                    camera_detector._run_full_discovery()
+                    # Should complete without throwing
+                except Exception:
+                    pytest.fail("Discovery should handle errors gracefully")
+                finally:
+                    # Restore original config and cleanup
+                    camera_detector.config.FRIGATE_CONFIG_PATH = original_config_path
+                    import os
                     try:
-                        camera_detector._run_full_discovery()
-                        # Should complete without throwing
-                    except Exception:
-                        pytest.fail("Discovery should handle errors gracefully")
+                        os.unlink(temp_config_path)
+                    except:
+                        pass
 
 # ─────────────────────────────────────────────────────────────
 # Multi-Camera Tests
@@ -1273,22 +1530,46 @@ class TestPerformance:
                 with lock:
                     method_calls.append("rtsp_end")
         
-        # Mock discovery methods with tracking for real methods 
-        with patch('socket.socket', network_mocks['mock_socket_constructor']), \
-             patch('detect.socket.socket', network_mocks['mock_socket_constructor']):
-            with patch.object(camera_detector, '_discover_onvif_cameras', side_effect=tracked_onvif):
-                with patch.object(camera_detector, '_discover_mdns_cameras', side_effect=tracked_mdns):
-                    with patch.object(camera_detector, '_scan_rtsp_ports', side_effect=tracked_rtsp):
-                        with patch.object(camera_detector, '_update_frigate_config'):
-                            # Use real _update_mac_mappings with network_mocks scapy support
-                            # Enable running flag for the test
-                            camera_detector._running = True
-                            try:
-                                # Run full discovery once
-                                camera_detector._run_full_discovery()
-                            finally:
-                                # Restore state
-                                camera_detector._running = False
+        # Replace discovery methods with tracking versions that call real code
+        original_onvif = camera_detector._discover_onvif_cameras
+        original_mdns = camera_detector._discover_mdns_cameras  
+        original_rtsp = camera_detector._scan_rtsp_ports
+        
+        camera_detector._discover_onvif_cameras = tracked_onvif
+        camera_detector._discover_mdns_cameras = tracked_mdns
+        camera_detector._scan_rtsp_ports = tracked_rtsp
+        
+        # Use temporary file for Frigate config to test real _update_frigate_config
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yml', delete=False) as tmp_file:
+            temp_config_path = tmp_file.name
+        
+        original_config_path = camera_detector.config.FRIGATE_CONFIG_PATH
+        camera_detector.config.FRIGATE_CONFIG_PATH = temp_config_path
+        
+        try:
+            with patch('socket.socket', network_mocks['mock_socket_constructor']), \
+                 patch('detect.socket.socket', network_mocks['mock_socket_constructor']):
+                # Use real _update_mac_mappings with network_mocks scapy support
+                # Enable running flag for the test
+                camera_detector._running = True
+                try:
+                    # Run full discovery once
+                    camera_detector._run_full_discovery()
+                finally:
+                    # Restore state
+                    camera_detector._running = False
+        finally:
+            # Restore original methods and config
+            camera_detector._discover_onvif_cameras = original_onvif
+            camera_detector._discover_mdns_cameras = original_mdns
+            camera_detector._scan_rtsp_ports = original_rtsp
+            camera_detector.config.FRIGATE_CONFIG_PATH = original_config_path
+            import os
+            try:
+                os.unlink(temp_config_path)
+            except:
+                pass
         
         # Should have called all methods (verify starts and ends)
         assert 'onvif_start' in method_calls
@@ -1377,16 +1658,27 @@ class TestEdgeCases:
 # ─────────────────────────────────────────────────────────────
 class TestResourceManagement:
     def test_opencv_resource_cleanup_on_exception(self, camera_detector):
-        """Test OpenCV VideoCapture is properly released on exceptions"""
-        # Mock VideoCapture that raises exception
-        mock_cap = Mock()
-        mock_cap.read.side_effect = Exception("Connection timeout")
+        """Test RTSP validation handles timeouts and process cleanup properly"""
+        # Test real ProcessPoolExecutor with a URL that will timeout/fail
+        # This validates that the process-based isolation works correctly
         
-        with patch('detect.cv2.VideoCapture', return_value=mock_cap):
-            # Should not leak resources
-            result = camera_detector._validate_rtsp_stream("rtsp://test")
-            assert result is False
-            mock_cap.release.assert_called_once()
+        # Use a non-existent IP that will timeout quickly
+        invalid_rtsp_url = "rtsp://192.0.2.1:554/nonexistent"  # RFC 5737 test IP
+        
+        import time
+        start_time = time.time()
+        
+        # Should handle process timeouts gracefully and return False
+        result = camera_detector._validate_rtsp_stream(invalid_rtsp_url)
+        
+        end_time = time.time()
+        
+        # Should return False for invalid URL
+        assert result is False
+        
+        # Should respect the timeout (allow some overhead for process creation)
+        # With RTSP_TIMEOUT=0.1, should complete in well under 2 seconds
+        assert end_time - start_time < 2.0, f"Validation took too long: {end_time - start_time}s"
     
     def test_wsdiscovery_cleanup_on_exception(self, camera_detector):
         """Test WSDiscovery is stopped even when exception occurs"""

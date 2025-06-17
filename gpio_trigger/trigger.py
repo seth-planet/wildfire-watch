@@ -1,12 +1,84 @@
 #!/usr/bin/env python3.12
-"""
-PumpController for wildfire-watch:
-- Fail-safe, thread-safe engine and valve control
-- State machine approach for consistent operation
-- Comprehensive error recovery and safety checks
-- Idempotent operations resilient to concurrent events
-- Reservoir level and line pressure monitoring
-- Refill valve opens immediately on engine start
+"""GPIO-based fire suppression pump controller with comprehensive safety systems.
+
+This module implements the physical control layer for the Wildfire Watch system,
+managing a gasoline/diesel pump engine and water valves through GPIO pins. It
+receives fire detection triggers via MQTT and activates the suppression system
+with multiple layers of safety protection.
+
+Critical Safety Features:
+    1. State Machine Control: Enforces valid state transitions only
+    2. Refill Lockout: Prevents starting with low water levels
+    3. Maximum Runtime Limit: Prevents pump damage from empty reservoir
+    4. Dry Run Protection: Monitors water flow and shuts down if absent
+    5. Valve-First Startup: Opens valves before engine to prevent deadheading
+    6. Emergency Override: Manual control via MQTT for unusual situations
+
+The Refill Cycle (Most Important Safety Feature):
+    - Refill valve opens IMMEDIATELY when pump starts (not after)
+    - System enters REFILLING state after pump stops
+    - Cannot start again until refill completes (time or float switch)
+    - This prevents repeated starts with progressively lower water levels
+
+State Machine:
+    IDLE -> PRIMING -> STARTING -> RUNNING -> STOPPING -> REFILLING -> IDLE
+    Any state can transition to ERROR on critical failure
+
+Hardware Configuration:
+    All GPIO pins and logic levels are configurable via environment variables.
+    The system auto-detects Raspberry Pi hardware and enters simulation mode
+    if not available, allowing development and testing on any platform.
+
+Communication Flow:
+    1. Subscribes to 'fire/trigger' for consensus-based activation
+    2. Subscribes to 'fire/emergency' for manual override commands
+    3. Publishes detailed telemetry to 'system/trigger_telemetry'
+    4. Monitors optional hardware sensors (float switch, pressure switch)
+
+MQTT Topics:
+    Subscribed:
+        - fire/trigger: Fire suppression activation command
+        - fire/emergency: Manual override (start/stop/reset)
+        
+    Published:
+        - system/trigger_telemetry: Detailed status and events
+        - system/trigger_telemetry/{NODE_ID}/lwt: Last will testament
+
+Thread Model:
+    - Main thread: MQTT message handling and state management
+    - Timer threads: Scheduled state transitions (priming, shutdown, refill)
+    - Monitor thread: Continuous dry-run protection
+    - All state access synchronized via single RLock
+
+Critical Parameters:
+    - MAX_ENGINE_RUNTIME: MUST be set based on tank capacity/flow rate!
+    - REFILL_MULTIPLIER: Determines refill duration (runtime * multiplier)
+    - DRY_RUN_TIME: Maximum time without water flow before emergency stop
+    - PRIMING_TIME: Time for pump to build pressure before starting
+
+GPIO Pin Functions:
+    - ENGINE_START_PIN: Momentary signal to start engine
+    - ENGINE_STOP_PIN: Sustained signal to stop engine
+    - MAIN_VALVE_PIN: Controls main water output valve
+    - PRIMING_VALVE_PIN: Small valve for pump priming
+    - REFILL_VALVE_PIN: Controls reservoir refill valve
+    - RESERVOIR_FLOAT_PIN: Optional water level sensor
+    - LINE_PRESSURE_PIN: Optional output pressure sensor
+
+Example:
+    Run standalone:
+        $ python3.12 trigger.py
+        
+    Run in Docker:
+        $ docker-compose up gpio-trigger
+        
+    Test in simulation mode:
+        $ GPIO_SIMULATION=true python3.12 trigger.py
+
+Warning:
+    This controls physical hardware that could cause property damage or injury
+    if misconfigured. Always test thoroughly in simulation mode first and 
+    ensure MAX_ENGINE_RUNTIME is set conservatively for your water capacity.
 """
 import os
 import time
@@ -167,7 +239,35 @@ except (ImportError, RuntimeError):
 # State Machine
 # ─────────────────────────────────────────────────────────────
 class PumpState(Enum):
-    """State machine for pump controller"""
+    """State machine states for pump controller.
+    
+    The pump controller enforces strict state transitions to ensure safe operation.
+    Invalid transitions are rejected, preventing dangerous conditions like starting
+    an already-running pump or stopping during refill.
+    
+    Valid State Transitions:
+        IDLE -> PRIMING: Fire detected, begin startup sequence
+        PRIMING -> STARTING: Priming complete, start engine
+        STARTING -> RUNNING: Engine started successfully
+        RUNNING -> STOPPING: Fire extinguished or max runtime reached
+        STOPPING -> REFILLING: Engine stopped, begin refill cycle
+        REFILLING -> IDLE: Refill complete (time or float switch)
+        
+        Any state -> ERROR: Critical failure detected
+        ERROR -> IDLE: Manual reset command received
+        
+    States:
+        IDLE: System ready, monitoring for fire detection
+        PRIMING: Priming valve open, building line pressure
+        STARTING: Sending start signal to engine
+        RUNNING: Engine running, main valve open, water flowing
+        REDUCING_RPM: Unused in current implementation
+        STOPPING: Shutting down engine, closing valves
+        COOLDOWN: Brief pause after shutdown
+        REFILLING: Refill valve open, waiting for reservoir to fill
+        ERROR: Critical failure, manual intervention required
+        LOW_PRESSURE: Pressure loss detected, transitioning to safe state
+    """
     IDLE = auto()          # System ready, no fire detected
     PRIMING = auto()       # Valve open, priming before engine start
     STARTING = auto()      # Starting engine sequence
@@ -183,6 +283,59 @@ class PumpState(Enum):
 # PumpController Class
 # ─────────────────────────────────────────────────────────────
 class PumpController:
+    """Thread-safe pump controller with comprehensive safety systems.
+    
+    This class implements the complete control logic for a fire suppression pump
+    system, including gasoline/diesel engine control, valve management, and
+    safety monitoring. It uses a strict state machine to ensure safe operation
+    and prevent hardware damage.
+    
+    Safety Systems:
+        1. Refill Lockout: Cannot start if refill cycle is incomplete
+        2. Maximum Runtime: Automatic shutdown to prevent empty reservoir
+        3. Dry Run Protection: Monitors water flow and shuts down if absent
+        4. State Machine: Only allows valid, safe state transitions
+        5. Emergency Override: Manual control for unusual situations
+        6. Sensor Monitoring: Optional float and pressure switches
+        
+    The Refill Cycle (Critical Safety Feature):
+        The refill valve opens IMMEDIATELY when the pump starts, not after it
+        stops. This ensures the reservoir begins refilling while water is being
+        used. After pump shutdown, the system enters REFILLING state and will
+        not allow restart until either:
+        - The calculated refill time expires (runtime * REFILL_MULTIPLIER)
+        - The reservoir float switch indicates full (if installed)
+        
+    Attributes:
+        cfg (CONFIG): Configuration object
+        _lock (RLock): Thread synchronization for all state access
+        _state (PumpState): Current state machine state
+        _timers (Dict[str, Timer]): Active timer threads
+        _engine_start_time (float): When engine started (for runtime limit)
+        _refill_complete (bool): Whether refill cycle is complete
+        _total_runtime (float): Cumulative runtime for maintenance tracking
+        
+    Hardware Control:
+        All GPIO operations go through _set_pin() which includes retry logic
+        and handles both real hardware and simulation mode transparently.
+        
+    MQTT Integration:
+        - Receives commands on fire/trigger and fire/emergency topics
+        - Publishes detailed telemetry including state, sensors, and warnings
+        - Sets last will testament for disconnection detection
+        
+    Thread Safety:
+        All public methods acquire self._lock before accessing state.
+        Timer callbacks and monitor threads also use proper locking.
+        The single RLock pattern prevents deadlocks and ensures consistency.
+        
+    Error Handling:
+        - Transient errors: Retry with backoff
+        - Critical failures: Transition to ERROR state
+        - Emergency recovery: Aggressive retry procedures
+        - Safe failure: ERROR state requires manual reset
+    """
+    
     def __init__(self):
         self.cfg = CONFIG
         self._lock = threading.RLock()
@@ -377,7 +530,32 @@ class PumpController:
             logger.error(f"Failed to publish event: {e}")
     
     def _set_pin(self, pin_name: str, state: bool, max_retries: int = 3) -> bool:
-        """Set GPIO pin state with error handling and retry logic"""
+        """Set GPIO pin state with error handling and retry logic.
+        
+        This is the central hardware control method that all GPIO operations
+        go through. It provides consistent error handling, retry logic, and
+        works transparently with both real hardware and simulation mode.
+        
+        Args:
+            pin_name: Configuration key for pin (e.g., 'MAIN_VALVE', 'ENGINE_START')
+            state: Desired state (True=HIGH, False=LOW)
+            max_retries: Number of retry attempts for transient failures
+            
+        Returns:
+            bool: True if successful, False if all retries failed
+            
+        Error Handling:
+            - Retries with progressive backoff: 0.1s, 0.5s, 2.0s
+            - Critical pins verified after setting
+            - Publishes failure events for monitoring
+            
+        Critical Pins:
+            MAIN_VALVE, IGN_ON, IGN_START are verified after setting
+            to ensure the hardware actually responded.
+            
+        Thread Safety:
+            Acquires lock during GPIO operations to prevent races
+        """
         pin = self.cfg[f'{pin_name}_PIN']
         retry_delays = [0.1, 0.5, 2.0]  # Progressive delays
         
@@ -555,7 +733,34 @@ class PumpController:
             logger.error(f"Error handling message: {e}")
     
     def handle_fire_trigger(self):
-        """Handle fire detection trigger"""
+        """Handle fire detection trigger with safety checks.
+        
+        This is the primary entry point when consensus is reached. It implements
+        the refill lockout safety system and handles triggers appropriately based
+        on current state.
+        
+        Safety Checks:
+            1. Refill Lockout: Ignores trigger if refill incomplete
+            2. State Validation: Only starts pump from appropriate states
+            3. Emergency Valve: Opens main valve immediately if closed
+            4. Timer Management: Resets shutdown timer if already running
+            
+        State Handling:
+            - IDLE/COOLDOWN: Start pump sequence
+            - RUNNING/PRIMING/STARTING: Reset shutdown timer
+            - STOPPING: Cancel shutdown if possible
+            - REFILLING: Block trigger (safety lockout active)
+            - ERROR: Ignore trigger (manual reset required)
+            
+        Side Effects:
+            - Updates _last_trigger_time for telemetry
+            - May start pump sequence or modify timers
+            - Publishes events for all decisions
+            - Opens main valve as emergency measure
+            
+        Thread Safety:
+            Acquires lock for entire operation
+        """
         with self._lock:
             self._last_trigger_time = time.time()
             

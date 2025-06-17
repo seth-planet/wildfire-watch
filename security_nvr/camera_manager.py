@@ -1,7 +1,81 @@
 #!/usr/bin/env python3
-"""
-Camera Manager for Frigate NVR
-Integrates with camera_detector service and manages Frigate configuration
+"""Camera configuration manager for Frigate NVR integration.
+
+This module bridges the gap between dynamic camera discovery (via camera_detector)
+and Frigate's static YAML configuration. It subscribes to MQTT camera discovery
+events and automatically generates Frigate configurations, allowing the system
+to adapt to changing camera environments without manual intervention.
+
+The service solves a fundamental mismatch: camera_detector discovers cameras
+dynamically, but Frigate requires a static YAML config file. This manager
+continuously synchronizes the two, ensuring Frigate always has an up-to-date
+view of available cameras.
+
+Configuration Sources (in priority order):
+    1. Custom cameras (user-defined in custom_cameras.yml) - highest priority
+    2. Detected cameras (from camera_detector via MQTT)
+    3. Base configuration template (frigate_base.yml)
+
+Communication Flow:
+    1. Subscribes to camera/discovery/+ for individual camera updates
+    2. Subscribes to frigate/config/cameras for bulk camera updates
+    3. Merges discovered cameras with custom overrides
+    4. Generates frigate.yml with environment variable substitution
+    5. Optionally filters cameras for multi-node deployments
+
+MQTT Topics:
+    Subscribed:
+        - camera/discovery/+: Individual camera discovery events
+        - frigate/config/cameras: Bulk camera configuration updates
+    
+    Published:
+        - None (configuration written to filesystem)
+
+Configuration Files:
+    - /config/frigate_base.yml: Template with detector and system settings
+    - /config/custom_cameras.yml: User-defined camera overrides
+    - /config/detected_cameras.json: Persistent cache of discovered cameras
+    - /config/frigate.yml: Generated output for Frigate NVR
+
+Environment Variables:
+    The service performs custom substitution for flexibility beyond Frigate's
+    native {FRIGATE_*} support. Variables are substituted using string.replace()
+    on the YAML output. This is brittle but allows non-FRIGATE_ prefixed vars.
+    
+    WARNING: If environment values contain YAML special characters (: { } [ ] ")
+    the generated config may be corrupted. Consider using Frigate's native
+    {FRIGATE_*} variables where possible.
+
+Known Issues:
+    1. Configuration Churn: Every camera discovery triggers full regeneration,
+       potentially causing Frigate restarts. Debouncing is recommended.
+    2. State Persistence: Single camera updates don't persist to disk, only
+       bulk updates do. This can cause state loss on restart.
+    3. YAML Injection: Environment variable substitution via string.replace()
+       can corrupt YAML if values contain special characters.
+    4. Non-Atomic Writes: Config file writes are not atomic, risking corruption
+       if the process is interrupted.
+
+Thread Safety:
+    This service is single-threaded with MQTT callbacks. No explicit locking
+    is required as all operations occur sequentially in the main thread.
+
+Example:
+    Run as standalone service:
+        $ python camera_manager.py generate-config
+        
+    List discovered cameras:
+        $ python camera_manager.py list
+        
+    Test specific camera:
+        $ python camera_manager.py test camera_01
+
+Note:
+    For production deployments, consider implementing:
+    - Debounced configuration generation
+    - Atomic file writes with rename
+    - Recursive dictionary-based substitution
+    - Unified state persistence for all updates
 """
 import os
 import sys
@@ -17,7 +91,47 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 class CameraManager:
+    """Manages camera configuration synchronization between detector and Frigate.
+    
+    This class maintains the camera inventory by listening to MQTT discovery
+    events and generating Frigate configurations. It handles merging of multiple
+    configuration sources and applies environment variable substitutions.
+    
+    The manager operates reactively - any camera discovery event triggers a
+    full configuration regeneration. While simple, this can cause configuration
+    churn in environments with unstable cameras or network issues.
+    
+    Attributes:
+        config_path (str): Output path for generated Frigate config
+        base_config_path (str): Template config with system settings
+        custom_cameras_path (str): User-defined camera overrides
+        detected_cameras_path (str): Persistent cache of discovered cameras
+        cameras (Dict[str, Dict]): In-memory camera inventory (camera_id -> config)
+        mqtt_client (mqtt.Client): MQTT client for receiving updates
+        
+    Configuration Precedence:
+        1. Custom cameras override everything (user has full control)
+        2. Detected cameras fill in the gaps
+        3. Base config provides system-wide settings
+        
+    Side Effects:
+        - Writes to filesystem on every camera change
+        - May trigger Frigate service restarts via config changes
+        - Logs extensively for debugging camera discovery issues
+    """
+    
     def __init__(self):
+        """Initialize camera manager with config paths and MQTT connection.
+        
+        Sets up file paths, initializes empty camera inventory, configures
+        MQTT connection parameters from environment, and establishes the
+        MQTT client connection.
+        
+        Environment Variables:
+            FRIGATE_MQTT_HOST: MQTT broker hostname (default: mqtt_broker)
+            FRIGATE_MQTT_PORT: MQTT broker port (default: 8883)
+            FRIGATE_MQTT_TLS: Enable TLS encryption (default: true)
+        """
         self.config_path = "/config/frigate.yml"
         self.base_config_path = "/config/frigate_base.yml"
         self.custom_cameras_path = "/config/custom_cameras.yml"
@@ -67,7 +181,32 @@ class CameraManager:
             logger.error(f"MQTT connection failed with code {rc}")
             
     def _on_mqtt_message(self, client, userdata, msg):
-        """Handle camera discovery messages"""
+        """Handle camera discovery messages from detector service.
+        
+        Processes two types of messages:
+        1. Individual camera discoveries (camera/discovery/+)
+        2. Bulk camera updates (frigate/config/cameras)
+        
+        Both message types trigger immediate configuration regeneration,
+        which can cause excessive I/O and service restarts if cameras
+        appear/disappear frequently.
+        
+        Args:
+            client: MQTT client instance
+            userdata: User data (unused)
+            msg: MQTT message with topic and payload
+            
+        Side Effects:
+            - Updates in-memory camera inventory
+            - Triggers full configuration regeneration
+            - Writes to detected_cameras.json (bulk updates only)
+            - May cause Frigate service restart
+            
+        Known Issues:
+            - No debouncing: rapid discoveries cause config churn
+            - Asymmetric persistence: single updates not saved to disk
+            - No validation of camera data structure
+        """
         try:
             if msg.topic.startswith("camera/discovery/"):
                 data = json.loads(msg.payload)
@@ -132,7 +271,43 @@ class CameraManager:
         return cameras
         
     def generate_frigate_config(self):
-        """Generate complete Frigate configuration"""
+        """Generate complete Frigate configuration from all sources.
+        
+        This is the core method that merges configuration sources and produces
+        the final Frigate YAML. It's called on every camera discovery event,
+        potentially causing frequent file I/O and service restarts.
+        
+        Configuration Flow:
+            1. Load base template (system-wide settings)
+            2. Load all cameras (detected + custom)
+            3. Convert detected cameras to Frigate format
+            4. Apply environment variable substitutions
+            5. Filter cameras for multi-node assignment
+            6. Write final configuration to disk
+            
+        Returns:
+            dict: The final configuration dictionary
+            
+        Side Effects:
+            - Reads from multiple config files
+            - Writes to /config/frigate.yml (non-atomically)
+            - May trigger Frigate restart if watched by supervisor
+            - Logs configuration summary
+            
+        Known Issues:
+            1. No debouncing - called on every camera event
+            2. Non-atomic writes - corruption risk if interrupted
+            3. String-based env var substitution - YAML injection risk
+            4. No validation of generated configuration
+            5. No error recovery if base config is missing/invalid
+            
+        Recommendations for Production:
+            - Implement debouncing with configurable delay
+            - Use atomic write-and-rename pattern
+            - Validate configuration before writing
+            - Add try-finally for cleanup on errors
+            - Consider configuration versioning/rollback
+        """
         # Load base configuration
         with open(self.base_config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -239,7 +414,36 @@ class CameraManager:
         return config
         
     def _substitute_env_vars(self, config_str: str) -> str:
-        """Substitute environment variables in config"""
+        """Substitute environment variables in YAML configuration string.
+        
+        Performs simple string replacement for placeholder variables in the
+        YAML output. This approach allows flexibility beyond Frigate's native
+        {FRIGATE_*} support but is vulnerable to YAML injection.
+        
+        Args:
+            config_str: YAML configuration as a string
+            
+        Returns:
+            str: YAML with placeholders replaced by environment values
+            
+        Environment Variables:
+            All variables listed in the replacements dict can be overridden.
+            Variables without FRIGATE_ prefix are custom to this service.
+            
+        Security Warning:
+            This method uses string.replace() on serialized YAML, which can
+            corrupt the configuration if environment values contain special
+            YAML characters like ':', '{', '}', '[', ']', or quotes.
+            
+            Example of corruption:
+                HWACCEL_ARGS="preset: fast" would create invalid YAML
+                
+        Recommendations:
+            1. Use Frigate's native {FRIGATE_*} variables where possible
+            2. Implement dictionary-based substitution before YAML serialization
+            3. Validate environment values don't contain YAML special chars
+            4. Consider using YAML tags or anchors for complex values
+        """
         replacements = {
             '{FRIGATE_MQTT_HOST}': os.environ.get('FRIGATE_MQTT_HOST', 'mqtt_broker'),
             '{FRIGATE_MQTT_PORT}': os.environ.get('FRIGATE_MQTT_PORT', '8883'),
@@ -321,6 +525,40 @@ class CameraManager:
             return False
 
 def main():
+    """Command-line interface for camera configuration management.
+    
+    Provides utility commands for managing the camera inventory and
+    generating Frigate configurations. Can be run as a one-shot command
+    or as a persistent service (when no command is specified).
+    
+    Commands:
+        generate-config: Generate Frigate configuration and exit
+        list: Display all configured cameras with status
+        test <camera_id>: Test RTSP connectivity for specific camera
+        (no command): Run as service, listening for MQTT updates
+        
+    Exit Codes:
+        0: Success
+        1: Camera test failed or invalid command
+        
+    Examples:
+        Generate configuration once:
+            $ python camera_manager.py generate-config
+            
+        List all cameras:
+            $ python camera_manager.py list
+            
+        Test specific camera:
+            $ python camera_manager.py test camera_01
+            
+        Run as persistent service:
+            $ python camera_manager.py
+            
+    Note:
+        When run without arguments, the service stays alive listening
+        for MQTT camera discovery events. This is the normal production
+        mode when deployed in Docker.
+    """
     manager = CameraManager()
     
     if len(sys.argv) > 1:
