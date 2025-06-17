@@ -45,7 +45,7 @@ logging.basicConfig(
 # ─────────────────────────────────────────────────────────────
 #  MQTT setup with LWT
 # ─────────────────────────────────────────────────────────────
-client = mqtt.Client(client_id=CAMERA_ID, clean_session=True)
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=CAMERA_ID, clean_session=True)
 client.will_set(
     LWT_TOPIC,
     payload=json.dumps({
@@ -60,7 +60,9 @@ client.will_set(
 def mqtt_connect(retry_count=0, max_retries=None):
     """Connect to MQTT broker with optional retry limit"""
     try:
-        client.connect(MQTT_BROKER, 1883, keepalive=60)
+        # Use MQTT_PORT environment variable if available, otherwise default to 1883
+        port = int(os.getenv("MQTT_PORT", "1883"))
+        client.connect(MQTT_BROKER, port, keepalive=60)
         client.loop_start()
         logging.info(f"Connected to MQTT broker at {MQTT_BROKER}")
     except Exception as e:
@@ -77,17 +79,29 @@ mqtt_connect()
 #  System Metrics
 # ─────────────────────────────────────────────────────────────
 def get_system_metrics():
+    """Get system metrics, structured for compatibility with tests"""
     metrics = {}
     if psutil:
         try:
             du = psutil.disk_usage("/")
-            metrics["free_disk_mb"] = round(du.free / 1024 / 1024, 2)
-            metrics["total_disk_mb"] = round(du.total / 1024 / 1024, 2)
             vm = psutil.virtual_memory()
-            metrics["memory_percent"] = vm.percent
-            metrics["cpu_percent"] = psutil.cpu_percent(interval=None)
-            uptime = time.time() - psutil.boot_time()
-            metrics["uptime_seconds"] = int(uptime)
+            
+            # Structure metrics for test compatibility
+            metrics = {
+                "cpu_percent": psutil.cpu_percent(interval=None),
+                "memory_percent": vm.percent,
+                "disk_usage": {
+                    "free": du.free,
+                    "total": du.total,
+                    "used": du.used,
+                    "percent": round((du.used / du.total) * 100, 1)
+                },
+                "uptime_hours": round((time.time() - psutil.boot_time()) / 3600, 2),
+                # Legacy fields for backward compatibility
+                "free_disk_mb": round(du.free / 1024 / 1024, 2),
+                "total_disk_mb": round(du.total / 1024 / 1024, 2),
+                "uptime_seconds": int(time.time() - psutil.boot_time())
+            }
         except Exception as e:
             logging.error(f"Error collecting system metrics: {e}")
     return metrics
@@ -97,6 +111,10 @@ def get_system_metrics():
 # ─────────────────────────────────────────────────────────────
 def publish_telemetry():
     timestamp = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    
+    # Get system metrics
+    system_metrics = get_system_metrics()
+    
     payload = {
         "camera_id": CAMERA_ID,
         "timestamp": timestamp,
@@ -107,7 +125,14 @@ def publish_telemetry():
             "model_path": MODEL_PATH
         }
     }
-    payload.update(get_system_metrics())
+    
+    # Add system metrics both as structured field and top-level for compatibility
+    if system_metrics:
+        payload["system_metrics"] = system_metrics
+        # Also add some metrics at top level for backward compatibility
+        for key in ["cpu_percent", "memory_percent", "free_disk_mb", "total_disk_mb", "uptime_seconds"]:
+            if key in system_metrics:
+                payload[key] = system_metrics[key]
 
     try:
         client.publish(TOPIC_INFO, json.dumps(payload), qos=1, retain=False)

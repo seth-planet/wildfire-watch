@@ -6,6 +6,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Wildfire Watch is an automated fire detection and suppression system that runs on edge devices. It uses AI-powered cameras with multi-camera consensus to detect fires and automatically activates sprinkler systems via GPIO control.
 
+## Tool Usage Guidelines
+
+### Parallel Tool Execution
+When performing multiple independent operations, use parallel tool calls in a single message for optimal performance:
+
+```python
+# ✅ Good: Parallel tool execution
+# Use multiple tool calls in one message
+bash_tool.run("git status")
+bash_tool.run("git diff") 
+read_tool.read("file1.py")
+read_tool.read("file2.py")
+
+# ❌ Bad: Sequential messages
+# Multiple separate messages with single tool calls
+```
+
+**Use parallel tools for:**
+- Running multiple bash commands simultaneously
+- Reading multiple files for analysis
+- Performing independent grep/glob searches
+- Creating multiple test scripts or output files
+
+**Benefits:**
+- Faster execution and analysis
+- More efficient workflow
+- Better performance for complex tasks
+
 ## Development Commands
 
 ### Build and Deployment
@@ -227,21 +255,30 @@ When fixing failing tests, follow these principles:
    - ✅ Good: Actually instantiate and use `FireConsensus` class
 
 2. **Only mock external dependencies**:
-   - ✅ Mock: `RPi.GPIO`, `paho.mqtt.client`, `docker`, `requests`
+   - ✅ Mock: `RPi.GPIO`, `docker`, `requests`
    - ✅ Mock: File I/O, network calls, hardware interfaces
    - ✅ Mock: Time delays (`time.sleep`) for faster tests
+   - ❌ **DO NOT Mock: `paho.mqtt.client`** - Use real MQTT broker for testing
 
-3. **Test real interactions**:
+3. **MQTT Integration Testing Requirements**:
+   - **Always use real MQTT broker** - Start and teardown actual MQTT server for proper integration testing
+   - Use `TestMQTTBroker` class from `tests/mqtt_test_broker.py` for broker lifecycle management
+   - Test actual MQTT message flow between components with real pub/sub
+   - Verify real MQTT connection handling, reconnection logic, and message delivery
+   - **Never mock MQTT client** - This prevents testing the actual communication layer
+
+4. **Test real interactions**:
    - Test actual MQTT message flow between components
    - Test real state transitions and validation logic
    - Test actual configuration loading and parsing
 
-4. **Use test fixtures properly**:
+5. **Use test fixtures properly**:
    - Create real instances of classes under test
-   - Set up proper test environments (temp dirs, mock MQTT broker)
+   - Set up proper test environments (temp dirs, real MQTT broker)
+   - Use `test_mqtt_broker` fixture to provide actual MQTT server
    - Clean up resources properly after tests
 
-5. **Integration test examples**:
+6. **Integration test examples**:
    ```python
    # Good: Testing real consensus logic
    consensus = FireConsensus()  # Real instance

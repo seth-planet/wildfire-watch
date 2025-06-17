@@ -71,8 +71,7 @@ CONFIG = {
     'RELAY_FEEDBACK_PINS': os.getenv('RELAY_FEEDBACK_PINS', '').split(',') if os.getenv('RELAY_FEEDBACK_PINS') else [],
     'HARDWARE_CHECK_INTERVAL': float(os.getenv('HARDWARE_CHECK_INTERVAL', '30')),
     
-    # Dry Run Protection
-    'DRY_RUN_PROTECTION_ENABLED': os.getenv('DRY_RUN_PROTECTION_ENABLED', 'true').lower() == 'true',
+    # Dry Run Protection (Always enabled for safety)
     'MAX_DRY_RUN_TIME': float(os.getenv('MAX_DRY_RUN_TIME', '300')),  # 5 minutes default
     'FLOW_SENSOR_PIN': int(os.getenv('FLOW_SENSOR_PIN', '')) if os.getenv('FLOW_SENSOR_PIN') else None,
     
@@ -274,7 +273,7 @@ class PumpController:
     
     def _setup_mqtt(self):
         """Setup MQTT client with TLS if configured"""
-        self.client = mqtt.Client(clean_session=True)
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, clean_session=True)
         
         # Set callbacks
         self.client.on_connect = self._on_connect
@@ -308,7 +307,7 @@ class PumpController:
         retry_count = 0
         while not self._shutdown:
             try:
-                port = 8883 if self.cfg['MQTT_TLS'] else 1883
+                port = 8883 if self.cfg['MQTT_TLS'] else self.cfg['MQTT_PORT']
                 self.client.connect(self.cfg['MQTT_BROKER'], port, keepalive=60)
                 self.client.loop_start()
                 logger.info(f"MQTT client connected to {self.cfg['MQTT_BROKER']}:{port}")
@@ -492,9 +491,8 @@ class PumpController:
         if self.cfg['HARDWARE_VALIDATION_ENABLED']:
             self._schedule_timer('hardware_check', self._validate_hardware, self.cfg['HARDWARE_CHECK_INTERVAL'])
         
-        # Start dry run protection monitoring if enabled
-        if self.cfg['DRY_RUN_PROTECTION_ENABLED']:
-            threading.Thread(target=self._monitor_dry_run_protection, daemon=True).start()
+        # Start dry run protection monitoring (always enabled for safety)
+        threading.Thread(target=self._monitor_dry_run_protection, daemon=True).start()
         
         # Start emergency button monitoring if configured
         if self.cfg['EMERGENCY_BUTTON_PIN']:
@@ -520,10 +518,10 @@ class PumpController:
             # Sleep with shutdown check
             for _ in range(10):
                 if self._shutdown:
-                    break
+                    return  # Exit immediately
                 time.sleep(0.1)
     
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback"""
         if rc == 0:
             client.subscribe([
@@ -538,7 +536,7 @@ class PumpController:
             # Just log the issue and let the retry mechanism handle it
             self._publish_event('mqtt_connection_failed', {'rc': rc})
     
-    def _on_disconnect(self, client, userdata, rc):
+    def _on_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """MQTT disconnection callback"""
         logger.warning(f"MQTT disconnected with code {rc}")
         if rc != 0:
@@ -1195,7 +1193,7 @@ class PumpController:
             # Sleep with shutdown check
             for _ in range(10):
                 if self._shutdown:
-                    break
+                    return  # Exit immediately
                 time.sleep(0.1)
     
     def _monitor_emergency_button(self):
@@ -1250,17 +1248,16 @@ class PumpController:
                     'hardware_status': self._hardware_status.copy(),
                 }
                 
-                # Dry run protection status
-                if self.cfg['DRY_RUN_PROTECTION_ENABLED']:
-                    health_data['dry_run_protection'] = {
-                        'enabled': True,
-                        'pump_running': self._pump_start_time is not None,
-                        'water_flow_detected': self._water_flow_detected,
-                        'dry_run_warnings': self._dry_run_warnings,
-                        'max_dry_run_time': self.cfg['MAX_DRY_RUN_TIME'],
-                    }
-                    if self._pump_start_time:
-                        health_data['dry_run_protection']['current_runtime'] = time.time() - self._pump_start_time
+                # Dry run protection status (always enabled)
+                health_data['dry_run_protection'] = {
+                    'enabled': True,
+                    'pump_running': self._pump_start_time is not None,
+                    'water_flow_detected': self._water_flow_detected,
+                    'dry_run_warnings': self._dry_run_warnings,
+                    'max_dry_run_time': self.cfg['MAX_DRY_RUN_TIME'],
+                }
+                if self._pump_start_time:
+                    health_data['dry_run_protection']['current_runtime'] = time.time() - self._pump_start_time
                 
                 # Safety feature status
                 health_data['safety_features'] = {

@@ -34,52 +34,54 @@ load_dotenv()
 # Configuration
 # ─────────────────────────────────────────────────────────────
 class Config:
-    # MQTT Settings
-    MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt_broker")
-    MQTT_PORT = max(1, min(65535, int(os.getenv("MQTT_PORT", "1883"))))
-    MQTT_TLS = os.getenv("MQTT_TLS", "false").lower() == "true"
-    TLS_CA_PATH = os.getenv("TLS_CA_PATH", "/mnt/data/certs/ca.crt")
-    
-    # Discovery Settings  
-    DISCOVERY_INTERVAL = max(30, int(os.getenv("DISCOVERY_INTERVAL", "300")))  # Minimum 30 seconds
-    RTSP_TIMEOUT = max(1, min(60, int(os.getenv("RTSP_TIMEOUT", "10"))))  # 1-60 seconds
-    ONVIF_TIMEOUT = max(1, min(30, int(os.getenv("ONVIF_TIMEOUT", "5"))))  # 1-30 seconds
-    MAC_TRACKING_ENABLED = os.getenv("MAC_TRACKING_ENABLED", "true").lower() == "true"
-    
-    # Smart Discovery Settings
-    SMART_DISCOVERY_ENABLED = os.getenv("SMART_DISCOVERY_ENABLED", "true").lower() == "true"
-    INITIAL_DISCOVERY_COUNT = int(os.getenv("INITIAL_DISCOVERY_COUNT", "3"))  # Aggressive scans at startup
-    STEADY_STATE_INTERVAL = max(300, int(os.getenv("STEADY_STATE_INTERVAL", "1800")))  # 30 min in steady state
-    QUICK_CHECK_INTERVAL = max(30, int(os.getenv("QUICK_CHECK_INTERVAL", "60")))  # Quick health checks
-    
-    # Camera Settings
-    DEFAULT_USERNAME = os.getenv("CAMERA_USERNAME", "admin")
-    DEFAULT_PASSWORD = os.getenv("CAMERA_PASSWORD", "")
-    RTSP_PORT = int(os.getenv("RTSP_PORT", "554"))
-    ONVIF_PORT = int(os.getenv("ONVIF_PORT", "80"))
-    HTTP_PORT = int(os.getenv("HTTP_PORT", "80"))
-    
-    # Camera credentials (comma-separated user:pass pairs)
-    CAMERA_CREDENTIALS = os.getenv("CAMERA_CREDENTIALS", "admin:,admin:admin,admin:12345")
-    
-    # Health Monitoring
-    HEALTH_CHECK_INTERVAL = max(10, int(os.getenv("HEALTH_CHECK_INTERVAL", "60")))  # Minimum 10 seconds
-    OFFLINE_THRESHOLD = max(60, int(os.getenv("OFFLINE_THRESHOLD", "180")))  # Minimum 1 minute
-    
-    # Frigate Integration
-    FRIGATE_CONFIG_PATH = os.getenv("FRIGATE_CONFIG_PATH", "/config/frigate/cameras.yml")
-    FRIGATE_UPDATE_ENABLED = os.getenv("FRIGATE_UPDATE_ENABLED", "true").lower() == "true"
-    FRIGATE_RELOAD_TOPIC = os.getenv("FRIGATE_RELOAD_TOPIC", "frigate/config/reload")
-    
-    # Node Identity
-    NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
-    SERVICE_ID = f"camera-detector-{NODE_ID}"
-    
-    # Topics
-    TOPIC_DISCOVERY = "camera/discovery"
-    TOPIC_STATUS = "camera/status"
-    TOPIC_HEALTH = "system/camera_detector_health"
-    TOPIC_FRIGATE_CONFIG = "frigate/config/cameras"
+    def __init__(self):
+        """Initialize configuration with current environment variables"""
+        # MQTT Settings
+        self.MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt_broker")
+        self.MQTT_PORT = max(1, min(65535, int(os.getenv("MQTT_PORT", "1883"))))
+        self.MQTT_TLS = os.getenv("MQTT_TLS", "false").lower() == "true"
+        self.TLS_CA_PATH = os.getenv("TLS_CA_PATH", "/mnt/data/certs/ca.crt")
+        
+        # Discovery Settings  
+        self.DISCOVERY_INTERVAL = max(30, int(os.getenv("DISCOVERY_INTERVAL", "300")))  # Minimum 30 seconds
+        self.RTSP_TIMEOUT = max(1, min(60, int(os.getenv("RTSP_TIMEOUT", "10"))))  # 1-60 seconds
+        self.ONVIF_TIMEOUT = max(1, min(30, int(os.getenv("ONVIF_TIMEOUT", "5"))))  # 1-30 seconds
+        self.MAC_TRACKING_ENABLED = os.getenv("MAC_TRACKING_ENABLED", "true").lower() == "true"
+        
+        # Smart Discovery Settings
+        self.SMART_DISCOVERY_ENABLED = os.getenv("SMART_DISCOVERY_ENABLED", "true").lower() == "true"
+        self.INITIAL_DISCOVERY_COUNT = int(os.getenv("INITIAL_DISCOVERY_COUNT", "3"))  # Aggressive scans at startup
+        self.STEADY_STATE_INTERVAL = max(300, int(os.getenv("STEADY_STATE_INTERVAL", "1800")))  # 30 min in steady state
+        self.QUICK_CHECK_INTERVAL = max(30, int(os.getenv("QUICK_CHECK_INTERVAL", "60")))  # Quick health checks
+        
+        # Camera Settings
+        self.DEFAULT_USERNAME = os.getenv("CAMERA_USERNAME", "admin")
+        self.DEFAULT_PASSWORD = os.getenv("CAMERA_PASSWORD", "")
+        self.RTSP_PORT = int(os.getenv("RTSP_PORT", "554"))
+        self.ONVIF_PORT = int(os.getenv("ONVIF_PORT", "80"))
+        self.HTTP_PORT = int(os.getenv("HTTP_PORT", "80"))
+        
+        # Camera credentials (comma-separated user:pass pairs)
+        self.CAMERA_CREDENTIALS = os.getenv("CAMERA_CREDENTIALS", "admin:,admin:admin,admin:12345")
+        
+        # Health Monitoring
+        self.HEALTH_CHECK_INTERVAL = max(10, int(os.getenv("HEALTH_CHECK_INTERVAL", "60")))  # Minimum 10 seconds
+        self.OFFLINE_THRESHOLD = max(60, int(os.getenv("OFFLINE_THRESHOLD", "180")))  # Minimum 1 minute
+        
+        # Frigate Integration
+        self.FRIGATE_CONFIG_PATH = os.getenv("FRIGATE_CONFIG_PATH", "/config/frigate/cameras.yml")
+        self.FRIGATE_UPDATE_ENABLED = os.getenv("FRIGATE_UPDATE_ENABLED", "true").lower() == "true"
+        self.FRIGATE_RELOAD_TOPIC = os.getenv("FRIGATE_RELOAD_TOPIC", "frigate/config/reload")
+        
+        # Node Identity
+        self.NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
+        self.SERVICE_ID = f"camera-detector-{self.NODE_ID}"
+        
+        # Topics
+        self.TOPIC_DISCOVERY = "camera/discovery"
+        self.TOPIC_STATUS = "camera/status"
+        self.TOPIC_HEALTH = "system/camera_detector_health"
+        self.TOPIC_FRIGATE_CONFIG = "frigate/config/cameras"
 
 # ─────────────────────────────────────────────────────────────
 # Logging Setup
@@ -405,6 +407,7 @@ class CameraDetector:
     def _setup_mqtt(self):
         """Setup MQTT client with resilient connection"""
         self.mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.config.SERVICE_ID,
             clean_session=False
         )
@@ -461,7 +464,7 @@ class CameraDetector:
                 logger.info(f"Retrying in {delay}s...")
                 time.sleep(delay)
     
-    def _on_mqtt_connect(self, client, userdata, flags, rc):
+    def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback"""
         if rc == 0:
             self.mqtt_connected = True
@@ -471,7 +474,7 @@ class CameraDetector:
             self.mqtt_connected = False
             logger.error(f"MQTT connection failed with code {rc}")
     
-    def _on_mqtt_disconnect(self, client, userdata, rc):
+    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """MQTT disconnection callback"""
         self.mqtt_connected = False
         logger.warning(f"MQTT disconnected with code {rc}")

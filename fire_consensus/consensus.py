@@ -26,50 +26,52 @@ load_dotenv()
 # Configuration
 # ─────────────────────────────────────────────────────────────
 class Config:
-    # MQTT Settings
-    MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt_broker")
-    MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-    MQTT_TLS = os.getenv("MQTT_TLS", "false").lower() == "true"
-    TLS_CA_PATH = os.getenv("TLS_CA_PATH", "/mnt/data/certs/ca.crt")
+    def __init__(self):
+        """Initialize configuration with current environment variables"""
+        # MQTT Settings
+        self.MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt_broker")
+        self.MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+        self.MQTT_TLS = os.getenv("MQTT_TLS", "false").lower() == "true"
+        self.TLS_CA_PATH = os.getenv("TLS_CA_PATH", "/mnt/data/certs/ca.crt")
+        
+        # Consensus Parameters
+        self.CONSENSUS_THRESHOLD = int(os.getenv("CONSENSUS_THRESHOLD", "2"))
+        self.DETECTION_WINDOW = float(os.getenv("CAMERA_WINDOW", "10"))
+        self.INCREASE_COUNT = int(os.getenv("INCREASE_COUNT", "3"))
+        self.COOLDOWN_PERIOD = float(os.getenv("COOLDOWN_PERIOD", "30"))
+        self.SINGLE_CAMERA_TRIGGER = os.getenv("SINGLE_CAMERA_TRIGGER", "false").lower() == "true"
+        
+        # Advanced Detection Parameters
+        self.MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.7"))
+        self.MIN_AREA_RATIO = float(os.getenv("MIN_AREA_RATIO", "0.001"))
+        self.MAX_AREA_RATIO = float(os.getenv("MAX_AREA_RATIO", "0.5"))
+        self.AREA_INCREASE_RATIO = float(os.getenv("AREA_INCREASE_RATIO", "1.2"))
+        self.MOVING_AVERAGE_WINDOW = int(os.getenv("MOVING_AVERAGE_WINDOW", "3"))
+        
+        # Timing and Health
+        self.HEALTH_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "60"))
+        self.MEMORY_CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", "300"))
+        self.CAMERA_TIMEOUT = float(os.getenv("CAMERA_TIMEOUT", "120"))
     
-    # Consensus Parameters
-    CONSENSUS_THRESHOLD = int(os.getenv("CONSENSUS_THRESHOLD", "2"))
-    DETECTION_WINDOW = float(os.getenv("CAMERA_WINDOW", "10"))
-    INCREASE_COUNT = int(os.getenv("INCREASE_COUNT", "3"))
-    COOLDOWN_PERIOD = float(os.getenv("COOLDOWN_PERIOD", "30"))
-    SINGLE_CAMERA_TRIGGER = os.getenv("SINGLE_CAMERA_TRIGGER", "false").lower() == "true"
-    
-    # Advanced Detection Parameters
-    MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.7"))
-    MIN_AREA_RATIO = float(os.getenv("MIN_AREA_RATIO", "0.001"))
-    MAX_AREA_RATIO = float(os.getenv("MAX_AREA_RATIO", "0.5"))
-    AREA_INCREASE_RATIO = float(os.getenv("AREA_INCREASE_RATIO", "1.2"))
-    MOVING_AVERAGE_WINDOW = int(os.getenv("MOVING_AVERAGE_WINDOW", "3"))
-    
-    # Timing and Health
-    HEALTH_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "60"))
-    MEMORY_CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", "300"))
-    CAMERA_TIMEOUT = float(os.getenv("CAMERA_TIMEOUT", "120"))
-    
-    # Node Identity
-    NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
-    SERVICE_ID = f"consensus-{NODE_ID}"
-    
-    # Topics
-    TOPIC_DETECTION = os.getenv("DETECTION_TOPIC", "fire/detection")
-    TOPIC_TRIGGER = os.getenv("TRIGGER_TOPIC", "fire/trigger")
-    TOPIC_HEALTH = os.getenv("CONSENSUS_HEALTH_TOPIC", "system/consensus_telemetry")
-    TOPIC_FRIGATE = os.getenv("FRIGATE_EVENTS_TOPIC", "frigate/events")
-    TOPIC_CAMERA_TELEMETRY = os.getenv("CAMERA_TELEMETRY_TOPIC", "system/camera_telemetry")
-    
-    # Zone-based activation
-    ZONE_MAPPING = json.loads(os.getenv("ZONE_MAPPING", "{}"))  # Camera ID -> Zone mapping
-    ZONE_ACTIVATION = os.getenv("ZONE_ACTIVATION", "false").lower() == "true"
-    
-    # Resilience Settings
-    MQTT_RECONNECT_DELAY = 5
-    MQTT_KEEPALIVE = 60
-    MAX_RECONNECT_ATTEMPTS = -1  # Infinite
+        # Node Identity
+        self.NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
+        self.SERVICE_ID = f"consensus-{self.NODE_ID}"
+        
+        # Topics
+        self.TOPIC_DETECTION = os.getenv("DETECTION_TOPIC", "fire/detection")
+        self.TOPIC_TRIGGER = os.getenv("TRIGGER_TOPIC", "fire/trigger")
+        self.TOPIC_HEALTH = os.getenv("CONSENSUS_HEALTH_TOPIC", "system/consensus_telemetry")
+        self.TOPIC_FRIGATE = os.getenv("FRIGATE_EVENTS_TOPIC", "frigate/events")
+        self.TOPIC_CAMERA_TELEMETRY = os.getenv("CAMERA_TELEMETRY_TOPIC", "system/camera_telemetry")
+        
+        # Zone-based activation
+        self.ZONE_MAPPING = json.loads(os.getenv("ZONE_MAPPING", "{}"))  # Camera ID -> Zone mapping
+        self.ZONE_ACTIVATION = os.getenv("ZONE_ACTIVATION", "false").lower() == "true"
+        
+        # Resilience Settings
+        self.MQTT_RECONNECT_DELAY = 5
+        self.MQTT_KEEPALIVE = 60
+        self.MAX_RECONNECT_ATTEMPTS = -1  # Infinite
 
 # ─────────────────────────────────────────────────────────────
 # Logging Setup
@@ -113,8 +115,9 @@ class Detection:
 
 class CameraState:
     """Tracks state for a single camera"""
-    def __init__(self, camera_id: str):
+    def __init__(self, camera_id: str, config: 'Config'):
         self.camera_id = camera_id
+        self.config = config
         self.last_seen = time.time()
         self.last_telemetry = time.time()
         self.detections = deque(maxlen=100)  # Recent detections
@@ -140,7 +143,7 @@ class CameraState:
         """Remove stale object tracks"""
         stale_objects = []
         for obj_id, detections in self.fire_objects.items():
-            if detections and current_time - detections[-1].timestamp > Config.DETECTION_WINDOW * 2:
+            if detections and current_time - detections[-1].timestamp > self.config.DETECTION_WINDOW * 2:
                 stale_objects.append(obj_id)
         
         for obj_id in stale_objects:
@@ -152,21 +155,21 @@ class CameraState:
         
         for obj_id, detections in self.fire_objects.items():
             # Need enough detections for meaningful moving average comparison
-            min_detections = Config.MOVING_AVERAGE_WINDOW * 2
+            min_detections = self.config.MOVING_AVERAGE_WINDOW * 2
             if len(detections) < min_detections:
                 continue
             
             # Get recent detections within window
             recent = [d for d in detections
-                     if current_time - d.timestamp <= Config.DETECTION_WINDOW]
+                     if current_time - d.timestamp <= self.config.DETECTION_WINDOW]
             
             if len(recent) >= min_detections:
                 # Calculate moving averages to reduce noise
                 areas = [d.area for d in recent]
-                moving_averages = self._calculate_moving_averages(areas, Config.MOVING_AVERAGE_WINDOW)
+                moving_averages = self._calculate_moving_averages(areas, self.config.MOVING_AVERAGE_WINDOW)
                 
                 # Check if moving averages show growth trend
-                if self._check_growth_trend(moving_averages, Config.AREA_INCREASE_RATIO):
+                if self._check_growth_trend(moving_averages, self.config.AREA_INCREASE_RATIO):
                     growing_fires.append(obj_id)
         
         return growing_fires
@@ -213,7 +216,7 @@ class CameraState:
     
     def is_online(self, current_time: float) -> bool:
         """Check if camera is online based on telemetry"""
-        return current_time - self.last_telemetry < Config.CAMERA_TIMEOUT
+        return current_time - self.last_telemetry < self.config.CAMERA_TIMEOUT
 
 # ─────────────────────────────────────────────────────────────
 # Fire Consensus Engine
@@ -242,7 +245,7 @@ class FireConsensus:
         self.mqtt_client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.config.SERVICE_ID,
-            clean_session=False  # Preserve subscriptions across reconnects
+            clean_session=True  # Clean sessions for better test compatibility
         )
         
         # Set callbacks
@@ -277,7 +280,7 @@ class FireConsensus:
         attempt = 0
         while True:
             try:
-                port = 8883 if self.config.MQTT_TLS else 1883
+                port = 8883 if self.config.MQTT_TLS else self.config.MQTT_PORT
                 self.mqtt_client.connect(
                     self.config.MQTT_BROKER,
                     port,
@@ -317,7 +320,7 @@ class FireConsensus:
             self.mqtt_connected = False
             logger.error(f"MQTT connection failed with code {rc}")
     
-    def _on_mqtt_disconnect(self, client, userdata, rc):
+    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """MQTT disconnection callback"""
         self.mqtt_connected = False
         logger.warning(f"MQTT disconnected with code {rc}")
@@ -446,7 +449,7 @@ class FireConsensus:
             if camera_id:
                 with self.lock:
                     if camera_id not in self.cameras:
-                        self.cameras[camera_id] = CameraState(camera_id)
+                        self.cameras[camera_id] = CameraState(camera_id, self.config)
                     self.cameras[camera_id].last_telemetry = time.time()
                     
         except Exception as e:
@@ -516,7 +519,7 @@ class FireConsensus:
         with self.lock:
             # Ensure camera state exists
             if detection.camera_id not in self.cameras:
-                self.cameras[detection.camera_id] = CameraState(detection.camera_id)
+                self.cameras[detection.camera_id] = CameraState(detection.camera_id, self.config)
             
             # Add detection to camera
             camera = self.cameras[detection.camera_id]

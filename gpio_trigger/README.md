@@ -556,7 +556,7 @@ Always install these physical controls:
 
 ## Enhanced Safety Features
 
-### Dry Run Protection (Enabled by Default)
+### Dry Run Protection (Always Enabled)
 
 Protects pumps from damage by monitoring for water flow during operation:
 
