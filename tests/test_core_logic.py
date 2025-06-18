@@ -18,6 +18,20 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'fire_consensus'))
 from consensus import Detection, CameraState, Config
 
 
+# Create mock config for CameraState
+mock_config = Mock(spec=Config)
+mock_config.CONSENSUS_THRESHOLD = 2
+mock_config.TIME_WINDOW = 30.0
+mock_config.MIN_CONFIDENCE = 0.7
+mock_config.MIN_AREA_RATIO = 0.0001
+mock_config.MAX_AREA_RATIO = 0.5
+mock_config.COOLDOWN_PERIOD = 60.0
+mock_config.SINGLE_CAMERA_TRIGGER = False
+mock_config.DETECTION_WINDOW = 30.0
+mock_config.MOVING_AVERAGE_WINDOW = 3
+mock_config.AREA_INCREASE_RATIO = 1.2
+mock_config.CAMERA_TIMEOUT = 300.0
+
 class TestCoreLogic:
     """Test core logic without external dependencies"""
     
@@ -70,7 +84,7 @@ class TestCoreLogic:
     
     def test_camera_state_detection_tracking(self):
         """Test camera state detection tracking"""
-        camera = CameraState("test_cam")
+        camera = CameraState("test_cam", mock_config)
         current_time = time.time()
         
         # Add detections
@@ -103,7 +117,7 @@ class TestCoreLogic:
     
     def test_growing_fire_detection_algorithm(self):
         """Test growing fire detection algorithm"""
-        camera = CameraState("test_cam")
+        camera = CameraState("test_cam", mock_config)
         current_time = time.time()
         
         # Create detections with growing area
@@ -128,7 +142,7 @@ class TestCoreLogic:
     
     def test_shrinking_fire_not_detected(self):
         """Test shrinking fires are not detected as growing"""
-        camera = CameraState("test_cam")
+        camera = CameraState("test_cam", mock_config)
         current_time = time.time()
         
         # Create detections with shrinking area
@@ -151,7 +165,7 @@ class TestCoreLogic:
     
     def test_moving_average_calculation(self):
         """Test moving average calculation"""
-        camera = CameraState("test_cam")
+        camera = CameraState("test_cam", mock_config)
         
         # Test moving average calculation
         areas = [1.0, 2.0, 3.0, 4.0, 5.0]
@@ -165,7 +179,7 @@ class TestCoreLogic:
     
     def test_growth_trend_detection(self):
         """Test growth trend detection logic"""
-        camera = CameraState("test_cam")
+        camera = CameraState("test_cam", mock_config)
         
         # Test clear growth trend
         growing_averages = [1.0, 1.2, 1.5, 1.8, 2.0]
@@ -184,7 +198,7 @@ class TestCoreLogic:
     
     def test_detection_object_cleanup(self):
         """Test old detection object cleanup"""
-        camera = CameraState("test_cam")
+        camera = CameraState("test_cam", mock_config)
         current_time = time.time()
         
         # Add old detection

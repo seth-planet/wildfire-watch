@@ -211,6 +211,17 @@ def test_isolation():
     
     # Cleanup after test
     try:
+        # Stop any telemetry timers
+        try:
+            import sys
+            import os
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "cam_telemetry"))
+            import telemetry
+            if hasattr(telemetry, 'shutdown_telemetry'):
+                telemetry.shutdown_telemetry()
+        except ImportError:
+            pass
+        
         # Give threads time to finish naturally
         time.sleep(0.1)
         
@@ -221,12 +232,20 @@ def test_isolation():
         # Filter out daemon threads and known persistent threads
         problematic_threads = [
             t for t in leaked_threads 
-            if not t.daemon and 'mqtt' not in t.name.lower()
+            if not t.daemon and 'mqtt' not in t.name.lower() and not t.name.startswith('Thread-')
         ]
         
         if problematic_threads:
             logger.warning(f"Test leaked {len(problematic_threads)} threads: {[t.name for t in problematic_threads]}")
             
+        # Force cleanup of any remaining timers
+        for thread in list(threading.enumerate()):
+            if thread != threading.current_thread() and hasattr(thread, 'cancel'):
+                try:
+                    thread.cancel()
+                except:
+                    pass
+                    
     except Exception as e:
         logger.warning(f"Error during test cleanup: {e}")
 

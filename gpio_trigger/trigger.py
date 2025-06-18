@@ -458,7 +458,11 @@ class PumpController:
     def _mqtt_connect_with_retry(self, max_retries=None):
         """Connect to MQTT with retry logic"""
         retry_count = 0
-        while not self._shutdown:
+        # Default to 10 retries if not specified
+        if max_retries is None:
+            max_retries = 10
+            
+        while not self._shutdown and retry_count < max_retries:
             try:
                 port = 8883 if self.cfg['MQTT_TLS'] else self.cfg['MQTT_PORT']
                 self.client.connect(self.cfg['MQTT_BROKER'], port, keepalive=60)
@@ -467,7 +471,7 @@ class PumpController:
                 break
             except Exception as e:
                 retry_count += 1
-                if max_retries is not None and retry_count >= max_retries:
+                if retry_count >= max_retries:
                     logger.error(f"MQTT connection failed after {max_retries} attempts: {e}")
                     raise
                 logger.error(f"MQTT connection failed (attempt {retry_count}): {e}")

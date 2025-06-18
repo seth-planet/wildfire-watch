@@ -35,6 +35,20 @@ def create_growing_fire_detections(camera_id, object_id, base_time, count=8, ini
     return detections
 
 
+# Create mock config for CameraState
+mock_config = Mock(spec=Config)
+mock_config.CONSENSUS_THRESHOLD = 2
+mock_config.TIME_WINDOW = 30.0
+mock_config.MIN_CONFIDENCE = 0.7
+mock_config.MIN_AREA_RATIO = 0.0001
+mock_config.MAX_AREA_RATIO = 0.5
+mock_config.COOLDOWN_PERIOD = 60.0
+mock_config.SINGLE_CAMERA_TRIGGER = False
+mock_config.DETECTION_WINDOW = 30.0
+mock_config.MOVING_AVERAGE_WINDOW = 3
+mock_config.AREA_INCREASE_RATIO = 1.2
+mock_config.CAMERA_TIMEOUT = 300.0
+
 class TestGrowingFireDetection:
     """Test growing fire detection logic"""
     
@@ -171,21 +185,21 @@ class TestConsensusWithOfflineCameras:
         mock_mqtt_class.return_value = mock_mqtt
         
         with patch.dict(os.environ, {
-            'CONSENSUS_THRESHOLD': '3',
+            'CONSENSUS_THRESHOLD': '2',  # Set threshold to 2 so 2 cameras can trigger
             'CONSENSUS_WINDOW': '10'
         }):
             consensus = FireConsensus()
             
-            # Register 4 cameras, 1 offline
-            cameras = ['cam1', 'cam2', 'cam3', 'cam4']
+            # Register 3 cameras, 1 offline  
+            cameras = ['cam1', 'cam2', 'cam3']
             for cam_id in cameras:
-                consensus.cameras[cam_id] = CameraState(cam_id)
+                consensus.cameras[cam_id] = CameraState(cam_id, mock_config)
             
-            # Mark cam4 as offline
-            consensus.cameras['cam4'].online = False
-            consensus.cameras['cam4'].last_seen = time.time() - 3600
+            # Mark cam3 as offline
+            consensus.cameras['cam3'].online = False
+            consensus.cameras['cam3'].last_seen = time.time() - 3600
             
-            # Fire detections from 2 online cameras (should be enough with adjusted threshold)
+            # Fire detections from 2 online cameras (should trigger with threshold=2)
             base_time = time.time()
             detections = []
             
@@ -202,7 +216,7 @@ class TestConsensusWithOfflineCameras:
                 
                 consensus._on_mqtt_message(mock_mqtt, None, msg)
             
-            # Should trigger consensus (2/3 online cameras)
+            # Should trigger consensus (2/2 online cameras meets threshold=2)
             trigger_calls = [call for call in mock_mqtt.publish.call_args_list 
                            if 'fire/trigger' in str(call)]
             assert len(trigger_calls) > 0

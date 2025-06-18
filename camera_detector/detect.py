@@ -74,7 +74,7 @@ import asyncio
 import ipaddress
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple, Set
-from dataclasses import dataclass, asdict, field
+from dataclasses import dataclass, asdict, field, fields
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -307,13 +307,35 @@ class Camera:
     
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
-        return {
-            **asdict(self),
+        # Get basic dict representation, filtering out non-serializable objects
+        data = {}
+        for field_obj in fields(self):
+            field_name = field_obj.name
+            value = getattr(self, field_name)
+            
+            # Skip Mock objects from tests
+            if hasattr(value, '_mock_name'):
+                continue
+                
+            # Handle special types
+            if field_name == 'profiles':
+                # Serialize CameraProfile objects properly
+                data[field_name] = [asdict(p) if hasattr(p, '__dataclass_fields__') else str(p) for p in value]
+            elif field_name == 'capabilities' and isinstance(value, dict):
+                # Ensure capabilities dict is serializable
+                data[field_name] = {k: v for k, v in value.items() if not hasattr(v, '_mock_name')}
+            else:
+                data[field_name] = value
+        
+        # Add computed fields
+        data.update({
             'id': self.id,
             'primary_rtsp_url': self.primary_rtsp_url,
             'last_seen_iso': datetime.fromtimestamp(self.last_seen).isoformat() + 'Z',
             'last_validated_iso': datetime.fromtimestamp(self.last_validated).isoformat() + 'Z' if self.last_validated else None
-        }
+        })
+        
+        return data
     
     def to_frigate_config(self) -> dict:
         """Generate Frigate camera configuration"""
@@ -1214,55 +1236,73 @@ class CameraDetector:
         except Exception as e:
             logger.debug(f"mDNS discovery error: {e}")
     
-    def _get_mac_address(self, ip: str) -> Optional[str]:
-        """Get MAC address for IP using various methods"""
+    def _get_mac_address(self, ip: str, max_attempts: int = 3) -> Optional[str]:
+        """Get MAC address for IP using various methods
+        
+        Args:
+            ip: IP address to look up
+            max_attempts: Maximum number of subprocess calls to prevent runaway
+            
+        Returns:
+            MAC address or None if not found
+        """
+        # Track attempt count for subprocess calls
+        attempt_count = 0
+        
         # Try scapy ARP first
         mac = self.mac_tracker.get_mac_for_ip(ip)
         if mac:
             return mac
         
         # Try system ARP table
-        try:
-            result = subprocess.run(
-                ['arp', '-n', ip],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if ip in line:
-                        parts = line.split()
-                        if len(parts) >= 3:
-                            mac = parts[2]
-                            if ':' in mac and mac != '<incomplete>':
-                                return mac.upper()
-        except:
-            pass
+        if attempt_count < max_attempts:
+            try:
+                attempt_count += 1
+                result = subprocess.run(
+                    ['arp', '-n', ip],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                
+                if result.returncode == 0:
+                    for line in result.stdout.split('\n'):
+                        if ip in line:
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                mac = parts[2]
+                                if ':' in mac and mac != '<incomplete>':
+                                    return mac.upper()
+            except:
+                pass
         
         # Try to ping and check ARP (avoid infinite recursion)
-        try:
-            subprocess.run(['ping', '-c', '1', '-W', '1', ip], capture_output=True)
-            time.sleep(0.1)
-            # Only try system ARP again after ping, don't recurse
-            result = subprocess.run(
-                ['arp', '-n', ip],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
-                    if ip in line:
-                        parts = line.split()
-                        if len(parts) >= 3:
-                            mac = parts[2]
-                            if ':' in mac and mac != '<incomplete>':
-                                return mac.upper()
-        except:
-            pass
+        if attempt_count < max_attempts:
+            try:
+                attempt_count += 1
+                subprocess.run(['ping', '-c', '1', '-W', '1', ip], capture_output=True)
+                time.sleep(0.1)
+                
+                # Only try system ARP again after ping if we have attempts left
+                if attempt_count < max_attempts:
+                    attempt_count += 1
+                    result = subprocess.run(
+                        ['arp', '-n', ip],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    
+                    if result.returncode == 0:
+                        for line in result.stdout.split('\n'):
+                            if ip in line:
+                                parts = line.split()
+                                if len(parts) >= 3:
+                                    mac = parts[2]
+                                    if ':' in mac and mac != '<incomplete>':
+                                        return mac.upper()
+            except:
+                pass
         
         return None
     

@@ -14,6 +14,23 @@ from datetime import datetime, timezone
 # Add consensus module to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../fire_consensus")))
 
+# Import after path setup
+from consensus import Config
+
+# Create mock config for CameraState
+mock_config = Mock(spec=Config)
+mock_config.CONSENSUS_THRESHOLD = 2
+mock_config.TIME_WINDOW = 30.0
+mock_config.MIN_CONFIDENCE = 0.7
+mock_config.MIN_AREA_RATIO = 0.0001
+mock_config.MAX_AREA_RATIO = 0.5
+mock_config.COOLDOWN_PERIOD = 60.0
+mock_config.SINGLE_CAMERA_TRIGGER = False
+mock_config.DETECTION_WINDOW = 30.0
+mock_config.MOVING_AVERAGE_WINDOW = 3
+mock_config.AREA_INCREASE_RATIO = 1.2
+mock_config.CAMERA_TIMEOUT = 300.0
+
 def test_consensus_detection_processing():
     """Test consensus detection processing logic"""
     from consensus import FireConsensus, Detection, CameraState
@@ -25,7 +42,7 @@ def test_consensus_detection_processing():
         consensus = FireConsensus()
         
         # Add a test camera
-        test_camera = CameraState('test_cam_1')
+        test_camera = CameraState('test_cam_1', mock_config)
         consensus.cameras['test_cam_1'] = test_camera
         
         # Create a mock MQTT message
@@ -79,7 +96,7 @@ def test_consensus_cooldown_period():
             consensus.last_trigger_time = time.time() - 30  # 30 seconds ago
             
             # Add camera with fire
-            camera = CameraState('cam_1')
+            camera = CameraState('cam_1', mock_config)
             camera.last_telemetry = time.time()  # Mark as online
             # Add detections to show fire
             for j in range(5):

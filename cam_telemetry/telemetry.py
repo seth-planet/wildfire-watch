@@ -104,6 +104,12 @@ logging.basicConfig(
 )
 
 # ─────────────────────────────────────────────────────────────
+#  Global state
+# ─────────────────────────────────────────────────────────────
+active_timer = None
+_shutdown_flag = False
+
+# ─────────────────────────────────────────────────────────────
 #  MQTT setup with LWT
 # ─────────────────────────────────────────────────────────────
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=CAMERA_ID, clean_session=True)
@@ -141,6 +147,11 @@ def mqtt_connect(retry_count=0, max_retries=None):
         during testing. Production deployments typically use infinite retry
         to handle temporary network issues.
     """
+    global _shutdown_flag
+    if _shutdown_flag:
+        logging.info("Telemetry shutdown flag set, skipping MQTT connection")
+        return
+        
     try:
         # Use MQTT_PORT environment variable if available, otherwise default to 1883
         port = int(os.getenv("MQTT_PORT", "1883"))
@@ -152,10 +163,13 @@ def mqtt_connect(retry_count=0, max_retries=None):
         if max_retries is not None and retry_count >= max_retries:
             logging.error(f"Max retries ({max_retries}) reached, giving up")
             raise
-        time.sleep(5)
-        mqtt_connect(retry_count + 1, max_retries)
+        if not _shutdown_flag:  # Check again before sleeping
+            time.sleep(5)
+            mqtt_connect(retry_count + 1, max_retries)
 
-mqtt_connect()
+# Only connect if not in testing mode
+if not any('pytest' in arg for arg in sys.argv):
+    mqtt_connect()
 
 # ─────────────────────────────────────────────────────────────
 #  System Metrics
@@ -298,9 +312,10 @@ def publish_telemetry():
         logging.error(f"Failed to publish telemetry: {e}")
 
     # Schedule next telemetry
-    timer = threading.Timer(TELEMETRY_INT, publish_telemetry)
-    timer.daemon = True
-    timer.start()
+    global active_timer
+    active_timer = threading.Timer(TELEMETRY_INT, publish_telemetry)
+    active_timer.daemon = True
+    active_timer.start()
 
 # ─────────────────────────────────────────────────────────────
 #  Main Loop
@@ -341,8 +356,38 @@ def main():
     except KeyboardInterrupt:
         logging.info("Telemetry service interrupted, shutting down...")
     finally:
+        # Cancel active timer if running
+        global active_timer
+        if active_timer and active_timer.is_alive():
+            active_timer.cancel()
         client.loop_stop()
         client.disconnect()
+
+def shutdown_telemetry():
+    """Shutdown telemetry service and cleanup resources."""
+    global active_timer, _shutdown_flag
+    
+    # Set shutdown flag to prevent further MQTT connections
+    _shutdown_flag = True
+    
+    # Cancel active timer
+    if active_timer and active_timer.is_alive():
+        active_timer.cancel()
+        active_timer = None
+    
+    # Disconnect MQTT client
+    try:
+        client.loop_stop()
+        client.disconnect()
+    except:
+        pass  # Ignore errors during shutdown
+    
+    # Stop any background threads gracefully
+    import threading
+    for thread in threading.enumerate():
+        if thread != threading.current_thread() and thread.name.startswith('Thread-'):
+            if hasattr(thread, 'cancel'):
+                thread.cancel()
 
 if __name__ == "__main__":
     main()

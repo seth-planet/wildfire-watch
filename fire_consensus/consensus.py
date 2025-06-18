@@ -679,9 +679,10 @@ class FireConsensus:
     def _calculate_area(self, bbox: List[float], camera_resolution: Optional[Tuple[int, int]] = None) -> float:
         """Calculate normalized area from bounding box.
         
-        Handles two formats:
+        Handles three formats:
         1. Direct detections: [x, y, width, height] where values are normalized (0-1)
-        2. Frigate events: [x1, y1, x2, y2] where values are pixel coordinates
+        2. Normalized box coordinates: [x1, y1, x2, y2] where values are normalized (0-1)
+        3. Frigate events: [x1, y1, x2, y2] where values are pixel coordinates (>1)
         
         Args:
             bbox: Bounding box coordinates
@@ -736,9 +737,21 @@ class FireConsensus:
                 return 0
             return area
         else:
-            # Direct detection format: [x, y, width, height] normalized coordinates
-            width = bbox[2]
-            height = bbox[3]
+            # Normalized coordinates (0-1)
+            # Need to distinguish between [x, y, width, height] and [x1, y1, x2, y2]
+            # If bbox[2] > bbox[0] and bbox[3] > bbox[1], it's likely [x1, y1, x2, y2]
+            # Otherwise, it's [x, y, width, height]
+            
+            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+                # Normalized [x1, y1, x2, y2] format
+                x1, y1, x2, y2 = bbox
+                width = abs(x2 - x1)
+                height = abs(y2 - y1)
+            else:
+                # Direct detection format: [x, y, width, height]
+                width = bbox[2]
+                height = bbox[3]
+            
             area = width * height
             
             # Check for invalid result
@@ -1012,6 +1025,11 @@ class FireConsensus:
             self._health_timer.cancel()
         if self._cleanup_timer and self._cleanup_timer.is_alive():
             self._cleanup_timer.cancel()
+        
+        # Wait for threads to finish with timeout
+        for timer in [self._health_timer, self._cleanup_timer]:
+            if timer and timer.is_alive():
+                timer.join(timeout=1.0)
         
         # Publish offline status
         try:
