@@ -86,7 +86,7 @@ def cleanup_after_test():
 # MockMQTTClient removed - now using real MQTT broker for testing
 
 class MockONVIFCamera:
-    """Mock ONVIF camera"""
+    """Mock ONVIF camera that returns realistic data structures instead of Mock objects"""
     def __init__(self, host, port, user, passwd, wsdl_dir=None):
         self.host = host
         self.port = port
@@ -95,51 +95,68 @@ class MockONVIFCamera:
         self.devicemgmt = Mock()
         self.media = Mock()
         
-        # Mock device info
-        device_info = Mock()
-        device_info.Manufacturer = "Test"
-        device_info.Model = "Camera-1000"
-        device_info.SerialNumber = "12345"
-        device_info.FirmwareVersion = "1.0.0"
-        self.devicemgmt.GetDeviceInformation.return_value = device_info
+        # Create realistic device info object
+        class DeviceInfo:
+            def __init__(self):
+                self.Manufacturer = "Test"
+                self.Model = "Camera-1000"
+                self.SerialNumber = "12345"
+                self.FirmwareVersion = "1.0.0"
         
-        # Mock capabilities
-        capabilities = Mock()
-        capabilities.Media = True
-        capabilities.PTZ = False
-        self.devicemgmt.GetCapabilities.return_value = capabilities
+        self.devicemgmt.GetDeviceInformation.return_value = DeviceInfo()
+        
+        # Create realistic capabilities object
+        class Capabilities:
+            def __init__(self):
+                self.Media = True
+                self.PTZ = False
+                self.Analytics = False
+                self.Events = True
+                self.Imaging = True
+        
+        self.devicemgmt.GetCapabilities.return_value = Capabilities()
     
     def create_media_service(self):
         media_service = Mock()
         
-        # Mock profiles
-        profile1 = Mock()
-        profile1.Name = "Main"
-        profile1.token = "profile_1"
-        profile1.VideoEncoderConfiguration = Mock()
-        profile1.VideoEncoderConfiguration.Resolution = Mock()
-        profile1.VideoEncoderConfiguration.Resolution.Width = 1920
-        profile1.VideoEncoderConfiguration.Resolution.Height = 1080
-        profile1.VideoEncoderConfiguration.RateControl = Mock()
-        profile1.VideoEncoderConfiguration.RateControl.FrameRateLimit = 30
-        profile1.VideoEncoderConfiguration.Encoding = "H264"
+        # Create realistic profile objects
+        class Resolution:
+            def __init__(self, width, height):
+                self.Width = width
+                self.Height = height
         
-        profile2 = Mock()
-        profile2.Name = "Sub"
-        profile2.token = "profile_2"
-        profile2.VideoEncoderConfiguration = Mock()
-        profile2.VideoEncoderConfiguration.Resolution = Mock()
-        profile2.VideoEncoderConfiguration.Resolution.Width = 640
-        profile2.VideoEncoderConfiguration.Resolution.Height = 480
-        profile2.VideoEncoderConfiguration.RateControl = None  # No RateControl on sub
-        profile2.VideoEncoderConfiguration.Encoding = "H264"
+        class RateControl:
+            def __init__(self, framerate):
+                self.FrameRateLimit = framerate
+        
+        class VideoEncoderConfiguration:
+            def __init__(self, width, height, framerate, encoding):
+                self.Resolution = Resolution(width, height)
+                # Only create RateControl if framerate is provided
+                if framerate is not None:
+                    self.RateControl = RateControl(framerate)
+                else:
+                    self.RateControl = None
+                self.Encoding = encoding
+        
+        class Profile:
+            def __init__(self, name, token, width, height, framerate, encoding):
+                self.Name = name
+                self.token = token
+                self.VideoEncoderConfiguration = VideoEncoderConfiguration(width, height, framerate, encoding)
+        
+        # Create realistic profile objects
+        profile1 = Profile("Main", "profile_1", 1920, 1080, 30, "H264")
+        profile2 = Profile("Sub", "profile_2", 640, 480, None, "H264")
         
         media_service.GetProfiles.return_value = [profile1, profile2]
         
-        # Mock stream URI
-        uri_response = Mock()
-        uri_response.Uri = f"rtsp://{self.host}:554/stream1"
-        media_service.GetStreamUri.return_value = uri_response
+        # Create realistic URI response
+        class UriResponse:
+            def __init__(self, uri):
+                self.Uri = uri
+        
+        media_service.GetStreamUri.return_value = UriResponse(f"rtsp://{self.host}:554/stream1")
         
         return media_service
 

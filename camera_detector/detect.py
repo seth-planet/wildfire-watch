@@ -1355,7 +1355,7 @@ class CameraDetector:
                         vec = profile.VideoEncoderConfiguration
                         if hasattr(vec, 'Resolution'):
                             profile_obj.resolution = (vec.Resolution.Width, vec.Resolution.Height)
-                        if hasattr(vec, 'RateControl'):
+                        if hasattr(vec, 'RateControl') and vec.RateControl is not None:
                             profile_obj.framerate = vec.RateControl.FrameRateLimit
                         if hasattr(vec, 'Encoding'):
                             profile_obj.encoding = vec.Encoding
