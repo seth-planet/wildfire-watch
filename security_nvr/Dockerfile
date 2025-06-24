@@ -1,46 +1,29 @@
-FROM ghcr.io/blakeblackshear/frigate:stable
+# Use an ARG to receive the version from docker-compose.yml
+ARG FRIGATE_VERSION=stable
+FROM ghcr.io/blakeblackshear/frigate:${FRIGATE_VERSION}
 
-# Install additional dependencies for wildfire detection and hardware support
+# Set the working directory for clarity
+WORKDIR /
+
+# Add the root directory to Python's path to find /utils
+ENV PYTHONPATH=/
+
+# Install additional dependencies if needed
+# Most tools are already in the Frigate base image
 USER root
-
-# Install system packages
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        # Hardware detection
+        jq \
         pciutils \
         usbutils \
-        v4l-utils \
-        vainfo \
-        intel-gpu-tools \
-        # Storage management
-        udev \
-        e2fsprogs \
-        # Monitoring tools
-        iotop \
-        htop \
-        # Python packages for custom scripts
-        python3-pip \
-        python3-numpy \
-        python3-opencv \
-        # Build tools for TensorRT
-        build-essential \
-        cmake \
-        # Network tools
-        iputils-ping \
-        net-tools \
-        && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* || true
 
-# Install Python packages for custom functionality
-RUN pip3 install --no-cache-dir \
-    # For model management
+# Install Python packages in a single layer
+RUN python3 -m pip install --no-cache-dir \
     onnx \
     onnxruntime \
-    # For hardware detection
     pyudev \
     psutil \
-    # For power management
-    pySMART \
-    # For USB management
     pyusb
 
 # Create directories for custom models and scripts
@@ -50,40 +33,24 @@ RUN mkdir -p \
     /config/custom \
     /var/log/frigate
 
-# Copy custom scripts
-COPY scripts/hardware_detector.py /scripts/
-COPY scripts/usb_manager.py /scripts/
-COPY scripts/model_selector.py /scripts/
-COPY scripts/power_manager.py /scripts/
-COPY scripts/camera_manager.py /scripts/
-COPY scripts/event_search.py /scripts/
-COPY scripts/entrypoint.sh /scripts/
+# Copy custom scripts and shared utils from the correct context
+# The paths are now relative to the project root (the build context)
+COPY security_nvr/hardware_detector.py /scripts/
+COPY security_nvr/usb_manager.py /scripts/
+COPY security_nvr/storage_manager.py /scripts/
+COPY security_nvr/camera_manager.py /scripts/
+COPY security_nvr/entrypoint.sh /scripts/
+COPY security_nvr/nvr_base_config.yml /config/
 
-# Copy wildfire detection models
-# Note: Coral TPU models (.tflite) require Python 3.8 runtime
-COPY models/wildfire_coral_lite.tflite /models/wildfire/
-COPY models/wildfire_coral_full.tflite /models/wildfire/
-COPY models/wildfire_hailo8.hef /models/wildfire/
-COPY models/wildfire_hailo8l.hef /models/wildfire/
-COPY models/wildfire_tensorrt.onnx /models/wildfire/
-COPY models/wildfire_openvino.xml /models/wildfire/
-COPY models/wildfire_openvino.bin /models/wildfire/
-COPY models/wildfire_cpu.tflite /models/wildfire/
-COPY models/labels.txt /models/wildfire/
-
-# Copy configuration templates
-COPY config/frigate_base.yml /config/
-COPY config/hardware_profiles.yml /config/
-COPY config/power_profiles.yml /config/
+# Copy the shared utils module
+COPY utils /utils
 
 # Make scripts executable
 RUN chmod +x /scripts/*.sh /scripts/*.py
 
 # Create symlinks for easy access
 RUN ln -s /scripts/hardware_detector.py /usr/local/bin/check-hardware && \
-    ln -s /scripts/event_search.py /usr/local/bin/find-events && \
-    ln -s /scripts/camera_manager.py /usr/local/bin/test-camera && \
-    ln -s /scripts/model_selector.py /usr/local/bin/test-model
+    ln -s /scripts/camera_manager.py /usr/local/bin/test-camera
 
 # Set up health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -104,16 +71,17 @@ ENV FRIGATE_RTSP_PASSWORD="" \
     DETECTION_THRESHOLD="0.7" \
     LOG_LEVEL="info"
 
-# Create non-root user for Frigate
+# Create non-root user and set permissions for all custom/mounted files
+# This now correctly includes /utils
 RUN useradd -m -s /bin/bash frigate && \
     usermod -aG video,audio,plugdev frigate && \
-    chown -R frigate:frigate /config /models /scripts
+    chown -R frigate:frigate /config /models /scripts /utils /var/log/frigate
 
 # Volume for persistent data
 VOLUME ["/media/frigate", "/config", "/var/log/frigate"]
 
-# Switch back to frigate user
-USER frigate
+# Switch back to the default user (root for s6)
+USER root
 
+# Our custom entrypoint wraps the default Frigate startup
 ENTRYPOINT ["/scripts/entrypoint.sh"]
-CMD ["python3", "-m", "frigate"]

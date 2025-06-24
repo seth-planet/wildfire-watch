@@ -27,27 +27,30 @@ class TestCameraDetectorConfig:
     
     def test_config_from_environment(self):
         """Test Config loads from environment variables"""
-        # Config class uses environment variables at class definition time
-        # Test that Config class attributes exist and have expected types
-        assert hasattr(Config, 'MQTT_BROKER')
-        assert hasattr(Config, 'MQTT_PORT')
-        assert hasattr(Config, 'MQTT_TLS')
-        assert hasattr(Config, 'DISCOVERY_INTERVAL')
+        # Config class uses environment variables at initialization time
+        # Test that Config instance has expected attributes and types
+        config = Config()
+        
+        assert hasattr(config, 'MQTT_BROKER')
+        assert hasattr(config, 'MQTT_PORT')
+        assert hasattr(config, 'MQTT_TLS')
+        assert hasattr(config, 'DISCOVERY_INTERVAL')
         
         # Test types
-        assert isinstance(Config.MQTT_BROKER, str)
-        assert isinstance(Config.MQTT_PORT, int)
-        assert isinstance(Config.MQTT_TLS, bool)
-        assert isinstance(Config.DISCOVERY_INTERVAL, int)
+        assert isinstance(config.MQTT_BROKER, str)
+        assert isinstance(config.MQTT_PORT, int)
+        assert isinstance(config.MQTT_TLS, bool)
+        assert isinstance(config.DISCOVERY_INTERVAL, int)
     
     def test_config_defaults(self):
         """Test Config uses proper defaults"""
-        # Config is a class with class attributes, not instance attributes
-        assert Config.MQTT_PORT == 1883
-        assert hasattr(Config, 'RTSP_TIMEOUT')
-        assert hasattr(Config, 'ONVIF_TIMEOUT')
-        assert Config.MAC_TRACKING_ENABLED is True
-        assert Config.SMART_DISCOVERY_ENABLED is True
+        # Config uses instance attributes populated from environment
+        config = Config()
+        assert config.MQTT_PORT == 1883
+        assert hasattr(config, 'RTSP_TIMEOUT')
+        assert hasattr(config, 'ONVIF_TIMEOUT')
+        assert config.MAC_TRACKING_ENABLED is True
+        assert config.SMART_DISCOVERY_ENABLED is True
 
 
 class TestCameraModel:
@@ -205,23 +208,35 @@ class TestCameraDiscovery:
                 assert '192.168.1.0/24' in networks
     
     @patch('detect.mqtt.Client')
-    @patch('detect.cv2.VideoCapture')
-    def test_rtsp_stream_validation(self, mock_capture, mock_mqtt_class):
+    @patch('detect.ProcessPoolExecutor')
+    def test_rtsp_stream_validation(self, mock_executor_class, mock_mqtt_class):
         """Test RTSP stream validation"""
         mock_mqtt = MagicMock()
         mock_mqtt_class.return_value = mock_mqtt
         
-        # Mock successful RTSP connection
-        mock_cap = Mock()
-        mock_cap.isOpened.return_value = True
-        mock_cap.read.return_value = (True, Mock())  # Success, frame
-        mock_capture.return_value = mock_cap
+        # Mock ProcessPoolExecutor and future
+        mock_executor = MagicMock()
+        mock_future = MagicMock()
+        mock_future.result.return_value = True  # Successful validation
+        mock_executor.__enter__.return_value = mock_executor
+        mock_executor.submit.return_value = mock_future
+        mock_executor_class.return_value = mock_executor
         
         detector = CameraDetector()
         result = detector._validate_rtsp_stream("rtsp://192.168.1.100:554/stream1")
         
         assert result is True
-        mock_cap.release.assert_called_once()
+        # Verify executor was used correctly
+        # The actual code uses min(4, cpu_count) for max_workers
+        import os
+        cpu_count = os.cpu_count() or 4
+        expected_workers = min(4, cpu_count)
+        mock_executor_class.assert_called_once_with(max_workers=expected_workers)
+        mock_executor.submit.assert_called_once()
+        # Verify the worker function and URL were passed
+        call_args = mock_executor.submit.call_args[0]
+        assert call_args[1] == "rtsp://192.168.1.100:554/stream1"  # rtsp_url
+        assert call_args[2] >= 1000  # timeout_ms should be at least 1000
 
 
 class TestCameraDetectorTLS:

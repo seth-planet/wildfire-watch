@@ -101,6 +101,28 @@ python3.12 -m pytest tests/ -v --timeout=0
 # See docs/timeout_configuration.md for timeout handling details
 ```
 
+### Test Timeout Configuration
+All pytest configuration files are pre-configured with appropriate timeouts:
+- **pytest.ini** (general): 1 hour per test, 2 hour session timeout
+- **pytest-python312.ini**: 1 hour per test, 2 hour session timeout  
+- **pytest-python310.ini**: 2 hours per test, 4 hour session timeout (for training tests)
+- **pytest-python38.ini**: 2 hours per test, 4 hour session timeout (for model conversion)
+
+These timeouts ensure:
+- Infrastructure-heavy tests (MQTT setup, Docker containers) complete successfully
+- Model conversion and training tests have sufficient time
+- Tests don't hang indefinitely on failures
+- Proper cleanup after test completion
+
+For individual test runs that may need extended timeouts:
+```bash
+# Run with explicit timeout override
+python3.12 -m pytest tests/test_trigger.py --timeout=600
+
+# Run all tests with extended timeout
+python3.12 -m pytest tests/ --timeout=3600
+```
+
 ### Python Version
 This project requires Python 3.12. All commands should use `python3.12` and `pip3.12`.
 

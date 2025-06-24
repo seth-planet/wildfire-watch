@@ -45,25 +45,6 @@ with patch('paho.mqtt.client.Client', TempMockClient):
 original_mqtt_connect = getattr(telemetry, 'mqtt_connect', None)
 
 @pytest.fixture
-def test_mqtt_broker():
-    """Setup and teardown real MQTT broker for testing"""
-    from mqtt_test_broker import TestMQTTBroker
-    
-    broker = TestMQTTBroker()
-    broker.start()
-    
-    # Wait for broker to be ready
-    time.sleep(1.0)
-    
-    # Verify broker is running
-    assert broker.is_running(), "Test MQTT broker must be running"
-    
-    yield broker
-    
-    # Cleanup
-    broker.stop()
-
-@pytest.fixture
 def mqtt_monitor(test_mqtt_broker):
     """Create MQTT subscriber to monitor published messages"""
     conn_params = test_mqtt_broker.get_connection_params()
@@ -82,9 +63,19 @@ def mqtt_monitor(test_mqtt_broker):
                 self.messages.append((msg.topic, msg.payload.decode(), msg.qos, msg.retain))
                 
         def connect_and_subscribe(self, topic):
-            self.client.connect(conn_params['host'], conn_params['port'], 60)
-            self.client.subscribe(topic, qos=1)
-            self.client.loop_start()
+            try:
+                self.client.connect(conn_params['host'], conn_params['port'], 60)
+                self.client.subscribe(topic, qos=1)
+                self.client.loop_start()
+                
+                # Wait for connection
+                start_time = time.time()
+                while not self.client.is_connected() and time.time() - start_time < 5:
+                    time.sleep(0.1)
+                    
+                assert self.client.is_connected(), "MQTT monitor failed to connect to test broker"
+            except Exception as e:
+                pytest.fail(f"MQTT monitor connection failed: {e}")
             
         def disconnect(self):
             self.client.loop_stop()
@@ -130,16 +121,20 @@ def telemetry_service(test_mqtt_broker, monkeypatch):
         retain=True
     )
     
-    # Connect to test broker
-    telemetry.client.connect(conn_params['host'], conn_params['port'], 60)
-    telemetry.client.loop_start()
-    
-    # Wait for connection
-    start_time = time.time()
-    while not telemetry.client.is_connected() and time.time() - start_time < 5:
-        time.sleep(0.1)
-    
-    assert telemetry.client.is_connected(), "Telemetry service must connect to test MQTT broker"
+    # Try to connect to test broker
+    try:
+        telemetry.client.connect(conn_params['host'], conn_params['port'], 60)
+        telemetry.client.loop_start()
+        
+        # Wait for connection
+        start_time = time.time()
+        while not telemetry.client.is_connected() and time.time() - start_time < 5:
+            time.sleep(0.1)
+        
+        # FAIL LOUDLY if connection fails
+        assert telemetry.client.is_connected(), "FATAL: Telemetry service client failed to connect to the test broker."
+    except Exception as e:
+        pytest.fail(f"FATAL: Exception during telemetry service client connection: {e}")
     
     yield telemetry
     
@@ -190,14 +185,12 @@ def test_lwt_is_set(telemetry_service, mqtt_monitor):
     mqtt_monitor.connect_and_subscribe(telemetry_service.LWT_TOPIC)
     time.sleep(0.5)  # Wait for subscription
     
+    # Ensure client is connected before trying to disconnect it
+    assert telemetry_service.client.is_connected(), "Client must be connected to test LWT"
+    
     # Simulate ungraceful disconnect to trigger LWT
-    # Force socket close to trigger LWT (ungraceful disconnect)
-    try:
-        telemetry_service.client._sock.close()
-    except:
-        # Alternative method if _sock is not accessible
-        telemetry_service.client.loop_stop()
-        telemetry_service.client._sock = None
+    # Force socket close. This is the correct way to simulate a network failure.
+    telemetry_service.client._sock.close()
     time.sleep(2.0)  # Wait for LWT message
     
     # Check that LWT message was published

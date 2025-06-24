@@ -138,25 +138,6 @@ def mock_gpio():
         GPIO._state.clear()
 
 @pytest.fixture
-def test_mqtt_broker():
-    """Setup and teardown real MQTT broker for testing"""
-    from mqtt_test_broker import TestMQTTBroker
-    
-    broker = TestMQTTBroker()
-    broker.start()
-    
-    # Wait for broker to be ready
-    time.sleep(1.0)
-    
-    # Verify broker is running
-    assert broker.is_running(), "Test MQTT broker must be running"
-    
-    yield broker
-    
-    # Cleanup
-    broker.stop()
-
-@pytest.fixture
 def controller(mock_gpio, monkeypatch, test_mqtt_broker):
     """Create controller with real MQTT broker and fast test timings"""
     # Get connection parameters from the test broker
@@ -244,36 +225,54 @@ def controller(mock_gpio, monkeypatch, test_mqtt_broker):
         for i, reason in enumerate(controller._error_reasons, 1):
             print(f"  {i}. {reason}")
     
-    # Enhanced cleanup
-    try:
-        # Signal all monitoring threads to stop
-        controller._shutdown = True
-        
-        # Cancel all timers first
-        with controller._lock:
-            for timer_name in list(controller._timers.keys()):
-                controller._cancel_timer(timer_name)
-        
-        # Stop MQTT client
-        if hasattr(controller, 'client'):
-            try:
-                controller.client.loop_stop()
-                controller.client.disconnect()
-            except:
-                pass
-        
-        # Give threads time to exit
-        time.sleep(0.3)
-        
-        # Final cleanup
-        controller.cleanup()
-        
-        # Clear module reference
-        if hasattr(trigger, 'controller'):
-            trigger.controller = None
+    # Enhanced cleanup with timeout protection
+    import threading
+    cleanup_completed = threading.Event()
+    
+    def cleanup_with_timeout():
+        try:
+            # Signal all monitoring threads to stop
+            controller._shutdown = True
             
-    except Exception as e:
-        print(f"Cleanup error: {e}")
+            # Cancel all timers first
+            with controller._lock:
+                for timer_name in list(controller._timers.keys()):
+                    controller._cancel_timer(timer_name)
+            
+            # Stop MQTT client
+            if hasattr(controller, 'client'):
+                try:
+                    controller.client.loop_stop()
+                    controller.client.disconnect()
+                except:
+                    pass
+            
+            # Give threads time to exit
+            time.sleep(0.3)
+            
+            # Final cleanup
+            controller.cleanup()
+            
+            # Clear module reference
+            if hasattr(trigger, 'controller'):
+                trigger.controller = None
+                
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+        finally:
+            cleanup_completed.set()
+    
+    # Run cleanup in a thread with timeout
+    cleanup_thread = threading.Thread(target=cleanup_with_timeout)
+    cleanup_thread.start()
+    
+    # Wait up to 5 seconds for cleanup
+    if not cleanup_completed.wait(timeout=5.0):
+        print("WARNING: Controller cleanup timed out after 5 seconds")
+        # Force shutdown flags
+        controller._shutdown = True
+        if hasattr(controller, '_cleanup_mode'):
+            controller._cleanup_mode = True
 
 def wait_for_state(controller, state, timeout=5):
     """Wait for controller to reach specific state"""
@@ -627,17 +626,24 @@ class TestConcurrency:
 class TestErrorHandling:
     def test_gpio_failure_handling(self, controller, monkeypatch):
         """Test handling of GPIO failures"""
+        # Track original GPIO.output for cleanup
+        original_output = GPIO.output
+        
         # Make GPIO.output raise exception
         def failing_output(pin, value):
             raise Exception("GPIO Error")
         
         monkeypatch.setattr(GPIO, 'output', failing_output)
         
-        # Try to start pump
-        controller.handle_fire_trigger()
-        
-        # Should enter error state
-        assert controller._state == PumpState.ERROR
+        try:
+            # Try to start pump
+            controller.handle_fire_trigger()
+            
+            # Should enter error state
+            assert controller._state == PumpState.ERROR
+        finally:
+            # Restore GPIO.output before cleanup to avoid hanging
+            monkeypatch.setattr(GPIO, 'output', original_output)
     
     def test_error_state_ignores_triggers(self, controller):
         """Test error state ignores fire triggers"""

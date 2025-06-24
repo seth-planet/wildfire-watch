@@ -199,18 +199,53 @@ class EnhancedModelConverter:
         logger.info(f"Detected hardware: {self.hardware}")
     
     def _parse_model_sizes(self, size_input: Union[int, str, Tuple[int, int], List]) -> List[Tuple[int, int]]:
-        """Parse and validate model sizes input"""
+        """Parse and validate model sizes input
+        
+        Supports:
+        - Single int: 640
+        - Single string: "640" or "640x480"
+        - Comma-separated: "640,320" or "640x480,320"
+        - Range: "640-320" (generates sizes in steps of 32)
+        - Tuple: (640, 480)
+        - List: [640, 320] or [(640, 480), 320]
+        """
         sizes = []
         
-        # Handle different input types
-        if isinstance(size_input, (int, str)):
-            # Single size: 640 or "640" or "640x480"
-            if isinstance(size_input, str) and 'x' in size_input:
+        # Handle string inputs with special syntax
+        if isinstance(size_input, str):
+            # Check for comma-separated values first
+            if ',' in size_input:
+                # Parse each comma-separated part
+                for part in size_input.split(','):
+                    part = part.strip()
+                    if 'x' in part:
+                        w, h = map(int, part.split('x'))
+                        sizes.append((w, h))
+                    else:
+                        s = int(part)
+                        sizes.append((s, s))
+            # Check for range notation (e.g., "640-320")
+            elif '-' in size_input and 'x' not in size_input:
+                parts = size_input.split('-')
+                if len(parts) == 2:
+                    start = int(parts[0])
+                    end = int(parts[1])
+                    # Generate sizes in steps of 32
+                    current = start
+                    while current >= end:
+                        sizes.append((current, current))
+                        current -= 32
+            # Single size with 'x'
+            elif 'x' in size_input:
                 w, h = map(int, size_input.split('x'))
                 sizes.append((w, h))
+            # Single numeric string
             else:
                 s = int(size_input)
                 sizes.append((s, s))
+        elif isinstance(size_input, int):
+            # Single int
+            sizes.append((size_input, size_input))
         elif isinstance(size_input, tuple):
             # Single tuple: (640, 480)
             sizes.append(size_input)
@@ -1107,6 +1142,7 @@ except Exception as e:
         script = f'''
 try:
     import onnx
+    from onnx import StringStringEntryProto
     import numpy as np
     
     # Load model
@@ -1114,7 +1150,7 @@ try:
     
     # Ensure input is named correctly for Frigate
     for input in model.graph.input:
-        if input.name not in {FRIGATE_INPUT_NAMES}:
+        if input.name not in {{FRIGATE_INPUT_NAMES}}:
             # Find the most likely input tensor
             if len(model.graph.input) == 1:
                 input.name = 'images'  # Frigate preferred name
@@ -1125,13 +1161,20 @@ try:
         if i < len(output_names):
             output.name = output_names[i]
     
-    # Add metadata for Frigate
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='framework', value='YOLO')
-    )
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='task', value='detection')
-    )
+    # Add metadata for Frigate (ensure uniqueness)
+    # Convert existing metadata to dict
+    existing_metadata = {{prop.key: prop.value for prop in model.metadata_props}}
+    
+    # Update with new metadata
+    existing_metadata['framework'] = 'YOLO'
+    existing_metadata['task'] = 'detection'
+    
+    # Clear and repopulate metadata_props
+    del model.metadata_props[:]
+    for key, value in existing_metadata.items():
+        model.metadata_props.append(
+            StringStringEntryProto(key=key, value=value)
+        )
     
     # Save optimized model
     onnx.save(model, '{onnx_path}')
@@ -1148,8 +1191,8 @@ except Exception as e:
         script = f'''
 try:
     import onnx
+    from onnx import StringStringEntryProto, numpy_helper
     import numpy as np
-    from onnx import numpy_helper
     
     # Load model
     model = onnx.load('{onnx_path}')
@@ -1159,18 +1202,21 @@ try:
     # 2. Optimize activation functions for quantization
     # 3. Add calibration metadata
     
-    # Add quantization metadata
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='quantization', value='qat_optimized')
-    )
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='quantization_method', value='symmetric')
-    )
+    # Add quantization metadata (ensure uniqueness)
+    # Convert existing metadata to dict
+    existing_metadata = {{prop.key: prop.value for prop in model.metadata_props}}
     
-    # Mark model as INT8 compatible
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='int8_compatible', value='true')
-    )
+    # Update with new metadata
+    existing_metadata['quantization'] = 'qat_optimized'
+    existing_metadata['quantization_method'] = 'symmetric'
+    existing_metadata['int8_compatible'] = 'true'
+    
+    # Clear and repopulate metadata_props
+    del model.metadata_props[:]
+    for key, value in existing_metadata.items():
+        model.metadata_props.append(
+            StringStringEntryProto(key=key, value=value)
+        )
     
     # Optimize graph for quantization
     # This is a simplified version - real QAT would modify the graph structure
@@ -1200,6 +1246,7 @@ except Exception as e:
         script = f'''
 try:
     import onnx
+    from onnx import StringStringEntryProto
     import onnx.helper as helper
     import numpy as np
     
@@ -1219,13 +1266,20 @@ try:
                 helper.make_attribute('plugin_version', '1')
             )
     
-    # Add INT8 calibration hints
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='tensorrt_precision', value='int8')
-    )
-    model.metadata_props.append(
-        onnx.StringStringEntryProto(key='tensorrt_calibration', value='entropy')
-    )
+    # Add INT8 calibration hints (ensure uniqueness)
+    # Convert existing metadata to dict
+    existing_metadata = {{prop.key: prop.value for prop in model.metadata_props}}
+    
+    # Update with new metadata
+    existing_metadata['tensorrt_precision'] = 'int8'
+    existing_metadata['tensorrt_calibration'] = 'entropy'
+    
+    # Clear and repopulate metadata_props
+    del model.metadata_props[:]
+    for key, value in existing_metadata.items():
+        model.metadata_props.append(
+            StringStringEntryProto(key=key, value=value)
+        )
     
     # Save TensorRT-optimized model
     onnx.save(model, '{trt_onnx_path}')

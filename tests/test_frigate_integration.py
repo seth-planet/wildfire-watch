@@ -30,8 +30,14 @@ class FrigateConfigurationTests(unittest.TestCase):
     
     def tearDown(self):
         """Clean up"""
+        import gc
         if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
+            try:
+                shutil.rmtree(self.test_dir)
+            except Exception as e:
+                print(f"Warning: Failed to cleanup {self.test_dir}: {e}")
+        # Force garbage collection to release file handles
+        gc.collect()
     
     def test_all_32_classes_in_labelmap(self):
         """Test that all 32 trained classes are included in Frigate labelmap"""
@@ -169,7 +175,7 @@ class FrigateConfigurationTests(unittest.TestCase):
                 'camera_1': {
                     'ffmpeg': {
                         'inputs': [{
-                            'path': 'rtsp://admin:password@192.168.1.100:554/stream',
+                            'path': 'rtsp://admin:password@192.0.2.100:554/stream',
                             'roles': ['detect', 'record']
                         }]
                     },
@@ -205,6 +211,21 @@ class FrigateConfigurationTests(unittest.TestCase):
 
 class FrigateModelDeploymentTests(unittest.TestCase):
     """Test model deployment to Frigate"""
+    
+    def setUp(self):
+        """Set up test environment"""
+        self.test_dir = Path(tempfile.mkdtemp(prefix='frigate_deploy_test_'))
+    
+    def tearDown(self):
+        """Clean up"""
+        import gc
+        if self.test_dir.exists():
+            try:
+                shutil.rmtree(self.test_dir)
+            except Exception as e:
+                print(f"Warning: Failed to cleanup {self.test_dir}: {e}")
+        # Force garbage collection to release file handles
+        gc.collect()
     
     def test_tflite_model_format(self):
         """Test TFLite model is in correct format for Frigate"""
@@ -447,7 +468,11 @@ class FrigatePerformanceTests(unittest.TestCase):
         for method, config in hwaccel_configs.items():
             with self.subTest(method=method):
                 self.assertIn('-hwaccel', config['hwaccel_args'])
-                self.assertIn(method, config['hwaccel_args'])
+                # For nvidia, check for 'cuda' instead of 'nvidia'
+                if method == 'nvidia':
+                    self.assertIn('cuda', config['hwaccel_args'])
+                else:
+                    self.assertIn(method, config['hwaccel_args'])
 
 
 class FrigateIntegrationValidationTests(unittest.TestCase):

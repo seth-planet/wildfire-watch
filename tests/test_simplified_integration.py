@@ -20,29 +20,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'gpio_trigger'))
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Import test MQTT broker infrastructure
-from mqtt_test_broker import TestMQTTBroker
+from mqtt_test_broker import MQTTTestBroker
 
-# Import services after path setup
+# Import consensus which doesn't depend on environment setup
 from consensus import FireConsensus, Detection, CameraState
-from trigger import PumpController
-
-
-@pytest.fixture
-def test_mqtt_broker():
-    """Setup and teardown real MQTT broker for testing"""
-    broker = TestMQTTBroker()
-    broker.start()
-    
-    # Wait for broker to be ready
-    time.sleep(1.0)
-    
-    # Verify broker is running
-    assert broker.is_running(), "Test MQTT broker must be running"
-    
-    yield broker
-    
-    # Cleanup
-    broker.stop()
+# Note: PumpController must be imported AFTER environment setup in tests
 
 @pytest.fixture
 def mqtt_monitor(test_mqtt_broker):
@@ -145,7 +127,6 @@ def cleanup_after_test():
         if threading.active_count() <= initial_threads:
             break
         time.sleep(0.1)
-
 
 class TestRealIntegration:
     """Real integration tests using actual services with real MQTT broker"""
@@ -260,6 +241,13 @@ class TestRealIntegration:
         monkeypatch.setenv("RESERVOIR_FLOAT_PIN", "")  # Disable reservoir monitoring
         monkeypatch.setenv("EMERGENCY_BUTTON_PIN", "")  # Disable emergency button
         
+        # Force reload of trigger module to pick up new environment variables
+        if 'trigger' in sys.modules:
+            del sys.modules['trigger']
+        
+        # Import trigger module AFTER environment setup
+        from trigger import PumpController
+        
         # Mock threading.Timer to prevent background tasks
         with patch('trigger.threading.Timer'):
             # Create real PumpController
@@ -308,9 +296,10 @@ class TestRealIntegration:
             # Verify main valve was opened
             assert GPIO.input(trigger.cfg['MAIN_VALVE_PIN']), "Main valve should be opened"
             
-            # Check for status messages in real MQTT traffic
-            status_messages = mqtt_monitor.get_messages_for_topic("gpio/status")
-            assert len(status_messages) > 0, "Status messages should be published"
+            # Check for telemetry messages in real MQTT traffic
+            # The trigger service publishes to system/trigger_telemetry, not gpio/status
+            telemetry_messages = mqtt_monitor.get_messages_for_topic("system/trigger_telemetry")
+            assert len(telemetry_messages) > 0, "Telemetry messages should be published"
             
             # Cleanup
             publisher.loop_stop()
@@ -423,7 +412,6 @@ class TestRealIntegration:
         shrinking_fires = camera2.get_growing_fires(current_time + 10)
         assert len(shrinking_fires) == 0, "Should not detect shrinking fire"
 
-
 class TestRealTelemetryReporting:
     """Test telemetry reporting functionality with real MQTT"""
     
@@ -441,6 +429,13 @@ class TestRealTelemetryReporting:
         monkeypatch.setenv("HARDWARE_VALIDATION_ENABLED", "false")
         monkeypatch.setenv("RESERVOIR_FLOAT_PIN", "")  # Disable reservoir monitoring
         monkeypatch.setenv("EMERGENCY_BUTTON_PIN", "")  # Disable emergency button
+        
+        # Force reload of trigger module to pick up new environment variables
+        if 'trigger' in sys.modules:
+            del sys.modules['trigger']
+        
+        # Import trigger module AFTER environment setup
+        from trigger import PumpController
         
         # Mock threading.Timer to prevent background tasks
         with patch('trigger.threading.Timer'):
@@ -473,7 +468,6 @@ class TestRealTelemetryReporting:
             
             # Clean up
             trigger.cleanup()
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

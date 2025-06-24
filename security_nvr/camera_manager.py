@@ -87,6 +87,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import paho.mqtt.client as mqtt
 
+# Import centralized command runner
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.command_runner import run_command, CommandError
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -139,9 +143,12 @@ class CameraManager:
         self.cameras = {}
         
         # MQTT settings
-        self.mqtt_host = os.environ.get('FRIGATE_MQTT_HOST', 'mqtt_broker')
-        self.mqtt_port = int(os.environ.get('FRIGATE_MQTT_PORT', '8883'))
-        self.mqtt_tls = os.environ.get('FRIGATE_MQTT_TLS', 'true').lower() == 'true'
+        self.mqtt_host = os.environ.get('FRIGATE_MQTT_HOST', os.environ.get('MQTT_BROKER', 'mqtt_broker'))
+        # Check both MQTT_TLS and FRIGATE_MQTT_TLS, with MQTT_TLS taking precedence
+        self.mqtt_tls = os.environ.get('MQTT_TLS', os.environ.get('FRIGATE_MQTT_TLS', 'true')).lower() == 'true'
+        # Default port based on TLS setting
+        default_port = '8883' if self.mqtt_tls else '1883'
+        self.mqtt_port = int(os.environ.get('FRIGATE_MQTT_PORT', os.environ.get('MQTT_PORT', default_port)))
         
         # Setup MQTT client
         self._setup_mqtt()
@@ -329,19 +336,23 @@ class CameraManager:
                     
         config['cameras'] = frigate_cameras
         
-        # Apply environment variable substitutions
-        config_str = yaml.dump(config, default_flow_style=False)
-        config_str = self._substitute_env_vars(config_str)
-        
-        # Parse back to validate
-        final_config = yaml.safe_load(config_str)
+        # Apply environment variable substitutions on the dictionary
+        final_config = self._substitute_env_vars_safe(config)
         
         # Adjust based on assigned cameras (for multi-node)
         final_config = self._filter_assigned_cameras(final_config)
         
-        # Write final configuration
-        with open(self.config_path, 'w') as f:
-            yaml.dump(final_config, f, default_flow_style=False)
+        # Write final configuration atomically
+        temp_path = self.config_path + ".tmp"
+        try:
+            with open(temp_path, 'w') as f:
+                yaml.dump(final_config, f, default_flow_style=False)
+            os.rename(temp_path, self.config_path)
+        except Exception as e:
+            logger.error(f"Failed to write frigate config: {e}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            raise
             
         logger.info(f"Generated Frigate config with {len(final_config['cameras'])} cameras")
         return final_config
@@ -413,37 +424,21 @@ class CameraManager:
                 
         return config
         
-    def _substitute_env_vars(self, config_str: str) -> str:
-        """Substitute environment variables in YAML configuration string.
+    def _substitute_env_vars_safe(self, config: Dict) -> Dict:
+        """Safely substitute environment variables in configuration dictionary.
         
-        Performs simple string replacement for placeholder variables in the
-        YAML output. This approach allows flexibility beyond Frigate's native
-        {FRIGATE_*} support but is vulnerable to YAML injection.
+        Performs variable substitution on the dictionary before YAML serialization
+        to avoid YAML injection vulnerabilities.
         
         Args:
-            config_str: YAML configuration as a string
+            config: Configuration dictionary
             
         Returns:
-            str: YAML with placeholders replaced by environment values
-            
-        Environment Variables:
-            All variables listed in the replacements dict can be overridden.
-            Variables without FRIGATE_ prefix are custom to this service.
-            
-        Security Warning:
-            This method uses string.replace() on serialized YAML, which can
-            corrupt the configuration if environment values contain special
-            YAML characters like ':', '{', '}', '[', ']', or quotes.
-            
-            Example of corruption:
-                HWACCEL_ARGS="preset: fast" would create invalid YAML
-                
-        Recommendations:
-            1. Use Frigate's native {FRIGATE_*} variables where possible
-            2. Implement dictionary-based substitution before YAML serialization
-            3. Validate environment values don't contain YAML special chars
-            4. Consider using YAML tags or anchors for complex values
+            Dict: Configuration with variables substituted
         """
+        # Convert to JSON string for safe substitution
+        config_str = json.dumps(config)
+        
         replacements = {
             '{FRIGATE_MQTT_HOST}': os.environ.get('FRIGATE_MQTT_HOST', 'mqtt_broker'),
             '{FRIGATE_MQTT_PORT}': os.environ.get('FRIGATE_MQTT_PORT', '8883'),
@@ -461,9 +456,10 @@ class CameraManager:
         }
         
         for key, value in replacements.items():
-            config_str = config_str.replace(key, str(value))
+            config_str = config_str.replace(key, json.dumps(value).strip('"'))
             
-        return config_str
+        return json.loads(config_str)
+        
         
     def _filter_assigned_cameras(self, config: Dict) -> Dict:
         """Filter cameras based on assignment for multi-node setup"""
@@ -503,24 +499,24 @@ class CameraManager:
         
         # Test with ffprobe
         try:
-            result = subprocess.run(
+            return_code, stdout, stderr = run_command(
                 ['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type', rtsp_url],
-                capture_output=True,
-                text=True,
-                timeout=10
+                timeout=10,
+                check=False,
+                retries=2  # Retry once for transient network issues
             )
             
-            if result.returncode == 0 and 'video' in result.stdout:
+            if return_code == 0 and 'video' in stdout:
                 logger.info(f"Camera {camera_id} test successful")
                 return True
             else:
-                logger.error(f"Camera {camera_id} test failed: {result.stderr}")
+                logger.error(f"Camera {camera_id} test failed: {stderr}")
                 return False
                 
-        except subprocess.TimeoutExpired:
-            logger.error(f"Camera {camera_id} test timed out")
+        except FileNotFoundError:
+            logger.error("ffprobe not found. Please install ffmpeg package.")
             return False
-        except Exception as e:
+        except (CommandError, PermissionError) as e:
             logger.error(f"Camera {camera_id} test error: {e}")
             return False
 

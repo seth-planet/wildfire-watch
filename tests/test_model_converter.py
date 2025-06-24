@@ -69,13 +69,20 @@ class ValidationIntegrationTests(unittest.TestCase):
     
     def tearDown(self):
         """Clean up after each test"""
+        import gc
         for dir_path in [self.output_dir, self.calibration_dir]:
             if dir_path.exists():
-                shutil.rmtree(dir_path)
+                try:
+                    shutil.rmtree(dir_path)
+                except Exception as e:
+                    print(f"Warning: Failed to cleanup {dir_path}: {e}")
+        # Force garbage collection to release file handles
+        gc.collect()
     
     def _create_calibration_data(self):
         """Create minimal calibration data"""
-        for i in range(20):
+        # Reduced from 20 to 5 for faster tests and less resource usage
+        for i in range(5):
             (self.calibration_dir / f"calib_{i}.jpg").touch()
     
     def test_validation_runs_automatically(self):
@@ -548,27 +555,30 @@ class EndToEndValidationTests(unittest.TestCase):
             import numpy as np
             from PIL import Image
             
-            for i in range(50):
-                # Create varied images
+            # Reduced from 50 to 10 images to prevent file descriptor exhaustion
+            for i in range(10):
+                # Create smaller images (320x320 instead of 640x640)
                 if i % 3 == 0:
                     # Random noise
-                    img_array = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+                    img_array = np.random.randint(0, 255, (320, 320, 3), dtype=np.uint8)
                 elif i % 3 == 1:
                     # Gradient
-                    img_array = np.zeros((640, 640, 3), dtype=np.uint8)
-                    for y in range(640):
-                        img_array[y, :] = int(255 * y / 640)
+                    img_array = np.zeros((320, 320, 3), dtype=np.uint8)
+                    for y in range(320):
+                        img_array[y, :] = int(255 * y / 320)
                 else:
                     # Solid color
                     color = np.random.randint(0, 255, 3)
-                    img_array = np.full((640, 640, 3), color, dtype=np.uint8)
+                    img_array = np.full((320, 320, 3), color, dtype=np.uint8)
                 
                 img = Image.fromarray(img_array)
                 img.save(self.calibration_dir / f'calib_{i:04d}.jpg')
+                # Explicitly close the image to free resources
+                img.close()
                 
         except ImportError:
-            # Fallback to dummy files
-            for i in range(50):
+            # Fallback to dummy files - reduced count
+            for i in range(10):
                 (self.calibration_dir / f'calib_{i:04d}.jpg').touch()
     
     @unittest.skipIf(not HAS_TORCH, "torch not available")

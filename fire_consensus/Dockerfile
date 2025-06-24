@@ -14,8 +14,8 @@ COPY nsswitch.conf /etc/nsswitch.conf
 
 # Create non-root user for security
 RUN useradd -m -s /bin/bash consensus && \
-    mkdir -p /var/run/dbus && \
-    chown consensus:consensus /var/run/dbus
+    mkdir -p /var/run/dbus /var/run/avahi-daemon && \
+    chown consensus:consensus /var/run/dbus /var/run/avahi-daemon
 
 WORKDIR /app
 

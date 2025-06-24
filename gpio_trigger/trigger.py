@@ -93,6 +93,17 @@ from typing import Optional, Dict, Any, Callable
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 
+# Import safety wrappers
+try:
+    from gpio_safety import SafeGPIO, ThreadSafeStateMachine, SafeTimerManager, HardwareError, GPIOVerificationError
+except ImportError:
+    # Fallback if gpio_safety not available (for backwards compatibility)
+    SafeGPIO = None
+    ThreadSafeStateMachine = object
+    SafeTimerManager = None
+    HardwareError = Exception
+    GPIOVerificationError = Exception
+
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
@@ -282,7 +293,7 @@ class PumpState(Enum):
 # ─────────────────────────────────────────────────────────────
 # PumpController Class
 # ─────────────────────────────────────────────────────────────
-class PumpController:
+class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not object else object):
     """Thread-safe pump controller with comprehensive safety systems.
     
     This class implements the complete control logic for a fire suppression pump
@@ -337,10 +348,33 @@ class PumpController:
     """
     
     def __init__(self):
+        # Initialize parent class if using ThreadSafeStateMachine
+        if ThreadSafeStateMachine is not object:
+            super().__init__()
+        
         self.cfg = CONFIG
         self._lock = threading.RLock()
+        
+        # Initialize safety wrappers if available
+        if SafeGPIO:
+            self.gpio = SafeGPIO(GPIO, simulation_mode=not GPIO_AVAILABLE)
+            logger.info("Using SafeGPIO wrapper for enhanced hardware safety")
+        else:
+            self.gpio = None
+            logger.warning("SafeGPIO not available - using direct GPIO access")
+            
+        if SafeTimerManager:
+            self.timer_manager = SafeTimerManager()
+            logger.info("Using SafeTimerManager for thread-safe timer operations")
+        else:
+            self.timer_manager = None
+            logger.warning("SafeTimerManager not available - using direct timers")
+        
         self._state = PumpState.IDLE
-        self._timers: Dict[str, threading.Timer] = {}
+        
+        # Only create _timers dict if not using SafeTimerManager
+        if not self.timer_manager:
+            self._internal_timers: Dict[str, threading.Timer] = {}
         self._last_trigger_time = 0
         self._engine_start_time: Optional[float] = None
         self._total_runtime = 0
@@ -497,7 +531,7 @@ class PumpController:
                 'current_runtime': self._current_runtime,
                 'shutting_down': self._shutting_down,
                 'refill_complete': self._refill_complete,
-                'active_timers': list(self._timers.keys()),
+                'active_timers': self.timer_manager.get_active_timers() if self.timer_manager else (list(self._internal_timers.keys()) if hasattr(self, '_internal_timers') else []),
             }
             
             # Add monitoring status if available
@@ -560,6 +594,47 @@ class PumpController:
         Thread Safety:
             Acquires lock during GPIO operations to prevent races
         """
+        # Use SafeGPIO if available
+        if self.gpio:
+            try:
+                pin = self.cfg[f'{pin_name}_PIN']
+                result = self.gpio.safe_write(pin, state, pin_name=pin_name, retries=max_retries)
+                
+                if result:
+                    logger.debug(f"SafeGPIO: Set {pin_name} (pin {pin}) to {'HIGH' if state else 'LOW'}")
+                else:
+                    self._publish_event('gpio_failure_final', {
+                        'pin': pin_name, 
+                        'attempts': max_retries,
+                        'error': 'SafeGPIO write failed'
+                    })
+                
+                return result
+                
+            except GPIOVerificationError as e:
+                logger.critical(f"Critical GPIO verification failure for {pin_name}: {e}")
+                self._publish_event('gpio_critical_failure', {
+                    'pin': pin_name,
+                    'error': str(e),
+                    'type': 'verification_failure'
+                })
+                # Critical pins failing verification may require ERROR state
+                if pin_name in ['MAIN_VALVE', 'IGN_ON']:
+                    self._enter_error_state(f"Critical GPIO {pin_name} verification failed")
+                return False
+                
+            except HardwareError as e:
+                logger.error(f"Hardware error for {pin_name}: {e}")
+                self._publish_event('gpio_hardware_error', {
+                    'pin': pin_name,
+                    'error': str(e)
+                })
+                # Critical pins failing with hardware error require ERROR state
+                if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START']:
+                    self._enter_error_state(f"Critical GPIO {pin_name} hardware failure: {e}")
+                return False
+        
+        # Fallback to original implementation if SafeGPIO not available
         pin = self.cfg[f'{pin_name}_PIN']
         retry_delays = [0.1, 0.5, 2.0]  # Progressive delays
         
@@ -634,34 +709,95 @@ class PumpController:
     
     def _schedule_timer(self, name: str, func: Callable, delay: float):
         """Schedule a timer, canceling any existing timer with same name"""
-        self._cancel_timer(name)
+        # Define critical timers that must transition to ERROR on failure
+        critical_timers = {'start_engine', 'emergency_stop', 'ignition_off'}
         
-        def wrapped_func():
-            with self._lock:
-                self._timers.pop(name, None)
-                try:
-                    func()
-                except Exception as e:
-                    logger.error(f"Timer {name} failed: {e}")
-                    self._publish_event('timer_error', {'timer': name, 'error': str(e)})
-        
-        timer = threading.Timer(delay, wrapped_func)
-        timer.daemon = True
-        timer.start()
-        self._timers[name] = timer
-        logger.debug(f"Scheduled timer '{name}' for {delay}s")
+        if self.timer_manager:
+            # Use SafeTimerManager for thread-safe timer operations
+            def error_handler(timer_name: str, error: Exception):
+                logger.error(f"Timer {timer_name} failed: {error}")
+                self._publish_event('timer_error', {'timer': timer_name, 'error': str(error)})
+                # CRITICAL: If a timer function (especially one related to GPIO)
+                # raises a hardware error, enter ERROR state.
+                if isinstance(error, (HardwareError, GPIOVerificationError)):
+                    self._enter_error_state(f"Critical timer '{timer_name}' failed: {str(error)}")
+                elif timer_name in critical_timers:
+                    # Any exception in critical timers should cause ERROR state
+                    self._enter_error_state(f"Critical timer '{timer_name}' failed: {str(error)}")
+            
+            self.timer_manager.schedule(name, func, delay, error_handler)
+        else:
+            # Fallback to original implementation
+            self._cancel_timer(name)
+            
+            def wrapped_func():
+                with self._lock:
+                    self._internal_timers.pop(name, None)
+                    try:
+                        func()
+                    except Exception as e:
+                        logger.error(f"Timer {name} failed: {e}")
+                        self._publish_event('timer_error', {'timer': name, 'error': str(e)})
+                        # CRITICAL: Same logic for internal timers
+                        if isinstance(e, (HardwareError, GPIOVerificationError)):
+                            self._enter_error_state(f"Critical timer '{name}' failed: {str(e)}")
+                        elif name in critical_timers:
+                            # Any exception in critical timers should cause ERROR state
+                            self._enter_error_state(f"Critical timer '{name}' failed: {str(e)}")
+            
+            timer = threading.Timer(delay, wrapped_func)
+            timer.daemon = True
+            timer.start()
+            self._internal_timers[name] = timer
+            logger.debug(f"Scheduled timer '{name}' for {delay}s")
     
     def _cancel_timer(self, name: str):
         """Cancel a timer if it exists"""
-        timer = self._timers.pop(name, None)
-        if timer and timer.is_alive():
-            timer.cancel()
-            logger.debug(f"Cancelled timer '{name}'")
+        if self.timer_manager:
+            self.timer_manager.cancel(name)
+        else:
+            timer = self._internal_timers.pop(name, None)
+            if timer and timer.is_alive():
+                timer.cancel()
+                logger.debug(f"Cancelled timer '{name}'")
     
     def _cancel_all_timers(self):
         """Cancel all active timers"""
-        for name in list(self._timers.keys()):
-            self._cancel_timer(name)
+        if self.timer_manager:
+            self.timer_manager.cancel_all()
+        else:
+            for name in list(self._internal_timers.keys()):
+                self._cancel_timer(name)
+    
+    def _has_timer(self, name: str) -> bool:
+        """Check if a timer with given name is scheduled"""
+        if self.timer_manager:
+            return name in self.timer_manager.get_active_timers()
+        else:
+            return name in self._internal_timers and self._internal_timers[name].is_alive()
+    
+    @property
+    def _timers(self):
+        """Property for backward compatibility with tests"""
+        if self.timer_manager:
+            # Return a dict-like object that supports 'in' operator
+            class TimerDict:
+                def __init__(self, timer_manager):
+                    self.timer_manager = timer_manager
+                
+                def __contains__(self, key):
+                    return key in self.timer_manager.get_active_timers()
+                
+                def __iter__(self):
+                    return iter(self.timer_manager.get_active_timers())
+                
+                def keys(self):
+                    return self.timer_manager.get_active_timers()
+            
+            return TimerDict(self.timer_manager)
+        else:
+            # Return actual _timers dict if it exists
+            return getattr(self, '_internal_timers', {})
     
     def _start_monitoring_tasks(self):
         """Start background monitoring tasks"""
@@ -867,22 +1003,47 @@ class PumpController:
         """Emergency stop - immediate shutdown"""
         logger.warning("EMERGENCY STOP - Immediate pump shutdown")
         
-        # Cancel all timers
-        for timer_name in list(self._timers.keys()):
-            self._cancel_timer(timer_name)
+        # Cancel all timers first
+        self._cancel_all_timers()
         
-        # Turn off all control pins immediately
-        self._set_pin('IGN_START', False)
-        self._set_pin('IGN_ON', False) 
-        self._set_pin('IGN_OFF', True)  # Active stop signal
-        time.sleep(0.5)
-        self._set_pin('IGN_OFF', False)
-        
-        # Close main valve
-        self._set_pin('MAIN_VALVE', False)
-        self._set_pin('REFILL_VALVE', False)
-        self._set_pin('PRIMING_VALVE', False)
-        self._set_pin('RPM_REDUCE', False)
+        # Use SafeGPIO emergency shutdown if available
+        if self.gpio:
+            # Build pin configuration for emergency shutdown
+            pin_config = {
+                'IGN_START': self.cfg['IGN_START_PIN'],
+                'IGN_ON': self.cfg['IGN_ON_PIN'],
+                'IGN_OFF': self.cfg['IGN_OFF_PIN'],
+                'MAIN_VALVE': self.cfg['MAIN_VALVE_PIN'],
+                'REFILL_VALVE': self.cfg['REFILL_VALVE_PIN'],
+                'PRIMING_VALVE': self.cfg['PRIMING_VALVE_PIN'],
+                'RPM_REDUCE': self.cfg['RPM_REDUCE_PIN'],
+            }
+            
+            # Execute emergency shutdown
+            results = self.gpio.emergency_all_off(pin_config)
+            
+            # Log results
+            failed_pins = [pin for pin, success in results.items() if not success]
+            if failed_pins:
+                logger.critical(f"Emergency stop failed for pins: {failed_pins}")
+                self._publish_event('emergency_stop_partial', {'failed_pins': failed_pins})
+            else:
+                logger.info("Emergency stop successful - all pins controlled")
+                
+        else:
+            # Fallback to original implementation
+            # Turn off all control pins immediately
+            self._set_pin('IGN_START', False)
+            self._set_pin('IGN_ON', False) 
+            self._set_pin('IGN_OFF', True)  # Active stop signal
+            time.sleep(0.5)
+            self._set_pin('IGN_OFF', False)
+            
+            # Close main valve
+            self._set_pin('MAIN_VALVE', False)
+            self._set_pin('REFILL_VALVE', False)
+            self._set_pin('PRIMING_VALVE', False)
+            self._set_pin('RPM_REDUCE', False)
         
         # Set to cooldown state
         self._state = PumpState.COOLDOWN
@@ -908,8 +1069,7 @@ class PumpController:
         self._refill_complete = True
         
         # Cancel all timers
-        for timer_name in list(self._timers.keys()):
-            self._cancel_timer(timer_name)
+        self._cancel_all_timers()
         
         self._publish_event('emergency_reset')
     
@@ -1274,12 +1434,23 @@ class PumpController:
     def _enter_error_state(self, reason: str):
         """Enter error state requiring manual intervention"""
         with self._lock:
+            # Prevent recursive error state entry
+            if self._state == PumpState.ERROR:
+                logger.debug(f"Already in ERROR state, ignoring: {reason}")
+                return
+                
             logger.error(f"Entering ERROR state: {reason}")
             self._state = PumpState.ERROR
             
-            # Ensure pump is off for safety
-            self._set_pin('IGN_ON', False)
-            self._set_pin('IGN_START', False)
+            # Best effort to ensure pump is off for safety (don't recurse on failure)
+            try:
+                # Temporarily disable error state transitions during cleanup
+                original_state = self._state
+                self._set_pin('IGN_ON', False)
+                self._set_pin('IGN_START', False)
+                self._state = original_state  # Ensure we stay in ERROR
+            except Exception as e:
+                logger.error(f"Failed to turn off pins during error state entry: {e}")
             
             # Keep valves in current state
             

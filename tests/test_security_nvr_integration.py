@@ -203,7 +203,7 @@ class TestSecurityNVRIntegration:
             camera_data = {
                 "camera_id": "test_cam_001",
                 "ip": "192.168.1.100",
-                "rtsp_url": "rtsp://admin:password@192.168.1.100:554/stream1",
+                "rtsp_url": "rtsp://admin:password@192.0.2.100:554/stream1",
                 "manufacturer": "TestCam",
                 "model": "TC-1000",
                 "mac_address": "00:11:22:33:44:55",

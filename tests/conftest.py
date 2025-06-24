@@ -19,13 +19,35 @@ import signal
 from typing import Generator, Dict, Any
 from unittest.mock import Mock, patch
 
-# Configure logging for test infrastructure
+# Configure logging for test infrastructure with proper cleanup handling
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)8s] conftest: %(message)s',
-    datefmt='%H:%M:%S'
+    datefmt='%H:%M:%S',
+    force=True  # Force reconfiguration to avoid conflicts
 )
 logger = logging.getLogger(__name__)
+
+# Add a null handler as fallback to prevent I/O errors during cleanup
+null_handler = logging.NullHandler()
+logger.addHandler(null_handler)
+
+# Import test isolation fixes and enhanced fixtures
+try:
+    from test_isolation_fixtures import (
+        thread_monitor, state_manager, mqtt_broker, mqtt_client_factory,
+        unique_id, mock_external_deps, fire_consensus_clean, camera_detector_clean,
+        isolate_tests, cleanup_telemetry
+    )
+    logger.info("Test isolation fixtures loaded successfully")
+except ImportError as e:
+    logger.warning(f"Test isolation fixtures not available: {e}")
+    
+try:
+    from enhanced_mqtt_broker import TestMQTTBroker
+    logger.info("Enhanced MQTT broker loaded successfully")
+except ImportError as e:
+    logger.warning(f"Enhanced MQTT broker not available: {e}")
 
 # ─────────────────────────────────────────────────────────────
 # Session Management and Performance Monitoring
@@ -35,7 +57,7 @@ logger = logging.getLogger(__name__)
 def session_performance_monitor():
     """Monitor and report test session performance."""
     session_start = time.time()
-    logger.info("=== Test Session Started ===")
+    safe_log("=== Test Session Started ===")
     
     # Track infrastructure setup times
     setup_times = {}
@@ -43,26 +65,34 @@ def session_performance_monitor():
     yield setup_times
     
     session_duration = time.time() - session_start
-    logger.info(f"=== Test Session Complete: {session_duration:.2f}s ===")
+    safe_log(f"=== Test Session Complete: {session_duration:.2f}s ===")
     
     # Report infrastructure timing if we have data
     if setup_times:
-        logger.info("Infrastructure Setup Times:")
+        safe_log("Infrastructure Setup Times:")
         for name, duration in setup_times.items():
-            logger.info(f"  {name}: {duration:.3f}s")
+            safe_log(f"  {name}: {duration:.3f}s")
 
 @pytest.fixture(scope="session", autouse=True)
 def handle_session_timeouts():
     """Handle session-level timeouts gracefully."""
     # Set up signal handlers for graceful shutdown
-    original_sigterm = signal.signal(signal.SIGTERM, lambda s, f: logger.warning("Received SIGTERM during test session"))
-    original_sigint = signal.signal(signal.SIGINT, lambda s, f: logger.warning("Received SIGINT during test session"))
+    original_sigterm = signal.signal(signal.SIGTERM, lambda s, f: safe_log("Received SIGTERM during test session"))
+    original_sigint = signal.signal(signal.SIGINT, lambda s, f: safe_log("Received SIGINT during test session"))
     
     yield
     
     # Restore original handlers
     signal.signal(signal.SIGTERM, original_sigterm)
     signal.signal(signal.SIGINT, original_sigint)
+
+def safe_log(message, level=logging.INFO):
+    """Safely log messages, catching I/O errors during teardown."""
+    try:
+        logger.log(level, message)
+    except (ValueError, OSError):
+        # Ignore logging errors during teardown
+        pass
 
 # ─────────────────────────────────────────────────────────────
 # Timeout-Aware Test Environment Setup
@@ -97,14 +127,14 @@ def long_timeout_environment():
     
     # Apply timeout environment
     os.environ.update(timeout_env)
-    logger.info("Applied long timeout environment configuration")
+    safe_log("Applied long timeout environment configuration")
     
     yield timeout_env
     
     # Restore original environment
     os.environ.clear()
     os.environ.update(original_env)
-    logger.info("Restored original environment configuration")
+    safe_log("Restored original environment configuration")
 
 # ─────────────────────────────────────────────────────────────
 # Enhanced MQTT Test Infrastructure
@@ -112,60 +142,169 @@ def long_timeout_environment():
 
 @pytest.fixture(scope="session")
 def session_mqtt_broker(session_performance_monitor):
-    """Session-scoped MQTT broker for all tests."""
+    """Session-scoped MQTT broker for all tests - ensures real broker is always available."""
     setup_start = time.time()
     logger.info("Setting up session MQTT broker...")
     
+    # Import here to avoid import errors
+    sys.path.insert(0, os.path.dirname(__file__))
+    from mqtt_test_broker import MQTTTestBroker
+    
+    # Create real broker instance
+    broker = MQTTTestBroker()
+    broker_started = False
+    
     try:
-        # Import here to avoid import errors in environments without mqtt_test_broker
-        from mqtt_test_broker import TestMQTTBroker
-        
-        broker = TestMQTTBroker()
+        # Start the broker
         broker.start()
         
-        # Wait for broker to be ready with timeout
-        broker_ready = broker.wait_for_ready(timeout=60)  # 1 minute timeout
+        # Wait for broker to be ready with retries
+        max_retries = 3
+        retry_delay = 2
         
-        if not broker_ready:
-            logger.error("MQTT broker failed to start within 60 seconds")
-            raise RuntimeError("MQTT broker startup timeout")
+        for attempt in range(max_retries):
+            logger.info(f"Waiting for MQTT broker to be ready (attempt {attempt + 1}/{max_retries})...")
+            
+            if broker.wait_for_ready(timeout=30):
+                broker_started = True
+                break
+            
+            if attempt < max_retries - 1:
+                logger.warning(f"MQTT broker not ready, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+        
+        if not broker_started:
+            # Fail the test session if we can't get a real broker
+            pytest.fail("MQTT broker failed to start after all retries - cannot run tests without real MQTT")
         
         setup_time = time.time() - setup_start
         session_performance_monitor['mqtt_broker_setup'] = setup_time
-        logger.info(f"Session MQTT broker ready in {setup_time:.3f}s")
+        safe_log(f"Session MQTT broker ready in {setup_time:.3f}s on port {broker.port}")
+        
+        # Verify broker is actually running
+        if not broker.is_running():
+            pytest.fail("MQTT broker reported as not running after successful start")
         
         yield broker
         
-    except ImportError:
-        logger.warning("mqtt_test_broker not available, using mock broker")
-        # Provide a mock broker for tests that don't need real MQTT
-        mock_broker = Mock()
-        mock_broker.host = 'localhost'
-        mock_broker.port = 1883
-        mock_broker.wait_for_ready = lambda timeout=30: True
-        yield mock_broker
-        
     except Exception as e:
-        logger.error(f"Failed to start session MQTT broker: {e}")
-        # Don't fail the entire session, provide a mock
-        mock_broker = Mock()
-        mock_broker.host = 'localhost'
-        mock_broker.port = 1883
-        yield mock_broker
+        safe_log(f"Failed to start session MQTT broker: {e}", logging.ERROR)
+        # Fail the test session - we need real MQTT for integration tests
+        pytest.fail(f"Cannot run tests without MQTT broker: {e}")
         
     finally:
         try:
-            if 'broker' in locals() and hasattr(broker, 'stop'):
-                broker.stop()
-                logger.info("Session MQTT broker stopped")
+            if broker_started and hasattr(broker, 'stop'):
+                safe_log("Stopping session MQTT broker...")
+                # Use a thread with timeout to prevent hanging
+                stop_thread = threading.Thread(target=broker.stop)
+                stop_thread.start()
+                stop_thread.join(timeout=5.0)  # 5 second timeout
+                
+                if stop_thread.is_alive():
+                    safe_log("MQTT broker stop timed out after 5 seconds", logging.WARNING)
+                else:
+                    safe_log("Session MQTT broker stopped")
         except Exception as e:
-            logger.warning(f"Error stopping MQTT broker: {e}")
+            safe_log(f"Error stopping MQTT broker: {e}", logging.WARNING)
 
 @pytest.fixture
 def test_mqtt_broker(session_mqtt_broker):
     """Per-test MQTT broker fixture that reuses session broker."""
     # Just return the session broker - it's designed to handle multiple concurrent connections
     return session_mqtt_broker
+
+# ─────────────────────────────────────────────────────────────
+# Topic Isolation Fixtures for Test Independence
+# ─────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def unique_topic_prefix():
+    """
+    Function-scoped fixture to generate a unique topic prefix for each test.
+    This is the key to test isolation when using a shared broker.
+    Example: 'test/abc123/fire/detection' -> 'test/def456/fire/detection'
+    """
+    import uuid
+    return f"test/{uuid.uuid4().hex[:8]}"
+
+@pytest.fixture
+def mqtt_topic_factory(unique_topic_prefix):
+    """
+    A factory fixture that creates full, unique topic strings.
+    This makes tests cleaner as they don't need to manually construct topics.
+    
+    Usage:
+        def test_something(mqtt_topic_factory):
+            control_topic = mqtt_topic_factory("control")
+            # control_topic is now "test/some_unique_id/control"
+    """
+    def _topic_factory(base_topic: str) -> str:
+        return f"{unique_topic_prefix}/{base_topic}"
+    
+    return _topic_factory
+
+# ─────────────────────────────────────────────────────────────
+# MQTT Client Management Fixtures
+# ─────────────────────────────────────────────────────────────
+
+@pytest.fixture
+def mqtt_client(session_mqtt_broker):
+    """
+    Function-scoped fixture providing a connected paho-mqtt client.
+    Uses threading.Event for robust connect/disconnect logic, ensuring
+    each test gets a clean, verified connection and that cleanup is graceful.
+    """
+    import paho.mqtt.client as mqtt
+    import uuid
+    
+    client_id = f"test_client_{uuid.uuid4().hex[:8]}"
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+
+    connected_event = threading.Event()
+    disconnected_event = threading.Event()
+
+    def on_connect(client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            logger.debug(f"Client {client_id} connected successfully.")
+            connected_event.set()
+        else:
+            logger.error(f"Client {client_id} failed to connect with reason code: {rc}")
+            # The wait timeout below will handle this failure.
+
+    def on_disconnect(client, userdata, rc, properties=None, reason_code=None):
+        logger.debug(f"Client {client_id} disconnected with reason code: {rc}.")
+        disconnected_event.set()
+
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+
+    try:
+        # Start the network loop. This is essential for callbacks to be processed.
+        client.loop_start()
+
+        # The connect call is non-blocking.
+        client.connect(session_mqtt_broker.host, session_mqtt_broker.port, 60)
+
+        # Wait for the on_connect callback to be fired.
+        # A 10-second timeout is generous but prevents tests from hanging.
+        if not connected_event.wait(timeout=10):
+            # If the event isn't set, the connection failed. Stop the loop.
+            client.loop_stop()
+            raise ConnectionError(f"MQTT client {client_id} failed to connect within the timeout period.")
+
+        yield client
+
+    finally:
+        # Graceful disconnect
+        if client.is_connected():
+            client.disconnect()
+            # Wait for the on_disconnect callback to confirm disconnection.
+            if not disconnected_event.wait(timeout=5):
+                logger.warning(f"Client {client_id} did not disconnect gracefully within timeout.")
+        
+        # Always ensure the loop is stopped.
+        client.loop_stop()
 
 # ─────────────────────────────────────────────────────────────
 # Timeout-Aware Test Markers and Fixtures
@@ -321,11 +460,14 @@ except ImportError:
 # Python Version Routing Plugin
 # ─────────────────────────────────────────────────────────────
 
-pytest_plugins = ["pytest_python_versions"]
+# Note: pytest_python_versions plugin is optional and not required
+# pytest_plugins = ["pytest_python_versions"]  # Commented out - not installed
 
 try:
     # Import Python version routing plugin
     import pytest_python_versions
+    # Only register the plugin if it's available
+    pytest_plugins = ["pytest_python_versions"]
     logger.info("Python version routing plugin loaded")
 except ImportError:
     logger.info("Python version routing plugin not available")

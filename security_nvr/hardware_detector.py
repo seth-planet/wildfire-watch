@@ -59,9 +59,14 @@ import os
 import sys
 import json
 import subprocess
+import time
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+# Import centralized command runner
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.command_runner import run_command, CommandError
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -113,33 +118,6 @@ class HardwareDetector:
             'platform': self._detect_platform(),
         }
         
-    def _run_command(self, cmd: List[str]) -> Optional[str]:
-        """Execute shell command and return stdout.
-        
-        Runs a command with timeout and returns its output. Designed to
-        handle missing tools and permission errors gracefully.
-        
-        Args:
-            cmd: Command and arguments as list (e.g., ['lspci', '-nn'])
-            
-        Returns:
-            Stripped stdout as string if successful, None otherwise
-            
-        Side Effects:
-            - Logs warnings for missing commands (FileNotFoundError)
-            - Logs debug messages for other failures
-            
-        Note:
-            Commands have a 5-second timeout to prevent hanging on
-            unresponsive hardware or drivers.
-        """
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                return result.stdout.strip()
-        except Exception as e:
-            logger.debug(f"Command {' '.join(cmd)} failed: {e}")
-        return None
     
     def _detect_cpu(self) -> Dict:
         """Detect CPU information"""
@@ -151,25 +129,48 @@ class HardwareDetector:
         }
         
         # Check CPU info
-        cpuinfo = self._run_command(['cat', '/proc/cpuinfo'])
-        if cpuinfo:
-            for line in cpuinfo.split('\n'):
-                if 'model name' in line:
-                    info['model'] = line.split(':')[1].strip()
-                elif 'vendor_id' in line:
-                    info['vendor'] = line.split(':')[1].strip()
+        try:
+            _, cpuinfo, _ = run_command(['cat', '/proc/cpuinfo'], check=False)
+            if cpuinfo:
+                for line in cpuinfo.split('\n'):
+                    if 'model name' in line:
+                        info['model'] = line.split(':')[1].strip()
+                    elif 'vendor_id' in line:
+                        info['vendor'] = line.split(':')[1].strip()
+        except (FileNotFoundError, PermissionError):
+            logger.warning("Could not read /proc/cpuinfo")
+        except CommandError as e:
+            logger.debug(f"Error reading cpuinfo: {e}")
                     
         # Check for Raspberry Pi
         if os.path.exists('/proc/device-tree/model'):
-            model = self._run_command(['cat', '/proc/device-tree/model'])
-            if model and 'Raspberry Pi' in model:
-                info['platform'] = 'raspberry_pi'
-                if 'Pi 5' in model:
-                    info['model'] = 'Raspberry Pi 5'
-                    info['has_v4l2'] = True
-                    info['has_h265_decode'] = True
+            try:
+                _, model, _ = run_command(['cat', '/proc/device-tree/model'], check=False)
+                if model and 'Raspberry Pi' in model:
+                    info['platform'] = 'raspberry_pi'
+                    if 'Pi 5' in model:
+                        info['model'] = 'Raspberry Pi 5'
+                        info['has_v4l2'] = True
+                        info['has_h265_decode'] = True
+            except (FileNotFoundError, PermissionError, CommandError):
+                pass
                     
         return info
+    
+    def _get_render_devices(self) -> List[str]:
+        """Get list of available DRM render devices.
+        
+        Returns:
+            List of render device paths (e.g., ['/dev/dri/renderD128', '/dev/dri/renderD129'])
+        """
+        render_devices = []
+        try:
+            import glob
+            devices = glob.glob('/dev/dri/renderD*')
+            render_devices = sorted(devices)  # Sort for consistency
+        except Exception as e:
+            logger.debug(f"Error listing render devices: {e}")
+        return render_devices
     
     def _detect_gpu(self) -> Dict:
         """Detect GPU capabilities for video decoding and AI inference.
@@ -205,10 +206,19 @@ class HardwareDetector:
             'driver': None,
             'decode': [],
             'encode': [],
+            'render_device': None,
         }
         
+        # Get available render devices
+        render_devices = self._get_render_devices()
+        if render_devices:
+            gpu['render_device'] = render_devices[0]  # Use first available device
+        
         # Check for Intel GPU
-        vainfo = self._run_command(['vainfo'])
+        try:
+            _, vainfo, _ = run_command(['vainfo'], check=False)
+        except (FileNotFoundError, PermissionError, CommandError):
+            vainfo = ""
         if vainfo and 'Intel' in vainfo:
             gpu['vendor'] = 'intel'
             gpu['driver'] = 'vaapi'
@@ -218,14 +228,20 @@ class HardwareDetector:
                 gpu['decode'].append('h265')
                 
         # Check for AMD GPU
-        if os.path.exists('/dev/dri/renderD128'):
-            gpu_info = self._run_command(['ls', '-la', '/dev/dri/'])
+        if render_devices:
+            try:
+                _, gpu_info, _ = run_command(['ls', '-la', '/dev/dri/'], check=False)
+            except (FileNotFoundError, PermissionError, CommandError):
+                gpu_info = ""
             if gpu_info and 'amdgpu' in gpu_info:
                 gpu['vendor'] = 'amd'
                 gpu['driver'] = 'vaapi'
                 
         # Check for NVIDIA GPU
-        nvidia_smi = self._run_command(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'])
+        try:
+            _, nvidia_smi, _ = run_command(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'], check=False)
+        except (FileNotFoundError, PermissionError, CommandError):
+            nvidia_smi = ""
         if nvidia_smi:
             gpu['vendor'] = 'nvidia'
             gpu['model'] = nvidia_smi
@@ -242,7 +258,10 @@ class HardwareDetector:
         }
         
         # Check USB Coral
-        lsusb = self._run_command(['lsusb'])
+        try:
+            _, lsusb, _ = run_command(['lsusb'], check=False)
+        except (FileNotFoundError, PermissionError, CommandError):
+            lsusb = ""
         if lsusb:
             # Global Unichip Corp (1a6e) or Google Inc (18d1)
             if '1a6e:089a' in lsusb or '18d1:9302' in lsusb:
@@ -253,7 +272,10 @@ class HardwareDetector:
                 })
                 
         # Check PCIe Coral
-        lspci = self._run_command(['lspci', '-nn'])
+        try:
+            _, lspci, _ = run_command(['lspci', '-nn'], check=False)
+        except (FileNotFoundError, PermissionError, CommandError):
+            lspci = ""
         if lspci and '089a' in lspci:
             coral['pcie'].append({
                 'name': 'Coral PCIe Accelerator',
@@ -277,7 +299,10 @@ class HardwareDetector:
             })
             
         # Check Hailo CLI
-        hailortcli = self._run_command(['hailortcli', 'scan'])
+        try:
+            _, hailortcli, _ = run_command(['hailortcli', 'scan'], check=False)
+        except (FileNotFoundError, PermissionError, CommandError):
+            hailortcli = ""
         if hailortcli:
             if 'Hailo-8L' in hailortcli:
                 hailo['devices'].append({
@@ -295,7 +320,10 @@ class HardwareDetector:
             'available_mb': 0,
         }
         
-        meminfo = self._run_command(['cat', '/proc/meminfo'])
+        try:
+            _, meminfo, _ = run_command(['cat', '/proc/meminfo'], check=False)
+        except (FileNotFoundError, PermissionError, CommandError):
+            meminfo = ""
         if meminfo:
             for line in meminfo.split('\n'):
                 if 'MemTotal:' in line:
@@ -383,6 +411,30 @@ class HardwareDetector:
         elif self.detected_hardware['coral']['usb'] or self.detected_hardware['coral']['pcie']:
             config['detector_type'] = 'edgetpu'
             config['model_path'] = '/models/wildfire/wildfire_coral_lite.tflite'
+
+        # Select best hardware acceleration for video
+        gpu = self.detected_hardware['gpu']
+        if gpu['vendor'] == 'nvidia' and 'nvdec' in gpu.get('driver', ''):
+            config['hwaccel_args'] = [
+                '-c:v',
+                'h264_cuvid',  # Or h265_cuvid depending on stream
+            ]
+        elif gpu['vendor'] in ['intel', 'amd'] and 'vaapi' in gpu.get('driver', ''):
+            # Use detected render device or fallback to default
+            render_device = gpu.get('render_device', '/dev/dri/renderD128')
+            config['hwaccel_args'] = [
+                '-hwaccel',
+                'vaapi',
+                '-hwaccel_device',
+                render_device,
+                '-hwaccel_output_format',
+                'yuv420p'
+            ]
+        elif self.detected_hardware.get('cpu', {}).get('platform') == 'raspberry_pi':
+            config['hwaccel_args'] = [
+                '-c:v',
+                'h264_v4l2m2m'
+            ]
 
         return config
 

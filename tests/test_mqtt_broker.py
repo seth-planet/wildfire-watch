@@ -42,14 +42,10 @@ listener 1883
 allow_anonymous true
 """
 
-@pytest.fixture
-def mock_mqtt_client():
-    """Mock MQTT client for testing"""
-    client = MagicMock(spec=mqtt.Client)
-    client.connect = MagicMock(return_value=(0, None))
-    client.subscribe = MagicMock(return_value=(0, None))
-    client.publish = MagicMock(return_value=(0, None))
-    return client
+# ─────────────────────────────────────────────────────────────────
+# Note: Following integration testing philosophy from CLAUDE.md
+# - No mocking of paho.mqtt.client - use real MQTT broker when needed
+# - Only mock external dependencies
 
 # ─────────────────────────────────────────────────────────────────
 # Configuration File Tests

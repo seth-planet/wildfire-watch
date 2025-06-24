@@ -446,6 +446,9 @@ class FireConsensus:
         self.consensus_events = deque(maxlen=1000)
         self.lock = threading.RLock()
         
+        # Initialize shutdown flag first
+        self._shutdown = False
+        
         # MQTT client
         self.mqtt_client = None
         self.mqtt_connected = False
@@ -454,7 +457,6 @@ class FireConsensus:
         # Background task timers (store for cleanup)
         self._health_timer = None
         self._cleanup_timer = None
-        self._shutdown = False
         
         # Start background tasks
         self._start_background_tasks()
@@ -499,7 +501,7 @@ class FireConsensus:
     def _mqtt_connect_with_retry(self):
         """Connect to MQTT with exponential backoff retry"""
         attempt = 0
-        while True:
+        while not self._shutdown:  # Check shutdown flag to prevent infinite retry during cleanup
             try:
                 port = 8883 if self.config.MQTT_TLS else self.config.MQTT_PORT
                 self.mqtt_client.connect(
@@ -511,11 +513,17 @@ class FireConsensus:
                 logger.info(f"MQTT connection initiated to {self.config.MQTT_BROKER}:{port}")
                 break
             except Exception as e:
+                if self._shutdown:
+                    break  # Exit if shutting down
                 attempt += 1
                 delay = min(self.config.MQTT_RECONNECT_DELAY * (2 ** attempt), 300)
                 logger.error(f"MQTT connection failed (attempt {attempt}): {e}")
                 logger.info(f"Retrying in {delay}s...")
-                time.sleep(delay)
+                # Use interruptible sleep
+                for _ in range(int(delay * 10)):
+                    if self._shutdown:
+                        break
+                    time.sleep(0.1)
     
     def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback"""
@@ -544,6 +552,11 @@ class FireConsensus:
     def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """MQTT disconnection callback"""
         self.mqtt_connected = False
+        
+        # Check if we're shutting down to avoid logging errors
+        if self._shutdown:
+            return
+            
         logger.warning(f"MQTT disconnected with code {rc}")
         
         if rc != 0:
@@ -671,7 +684,9 @@ class FireConsensus:
                 with self.lock:
                     if camera_id not in self.cameras:
                         self.cameras[camera_id] = CameraState(camera_id, self.config)
+                        logger.info(f"Created new camera state for {camera_id}")
                     self.cameras[camera_id].last_telemetry = time.time()
+                    logger.info(f"Updated telemetry for {camera_id}, now online")
                     
         except Exception as e:
             logger.error(f"Error processing telemetry: {e}")
@@ -801,16 +816,16 @@ class FireConsensus:
         fire_details = {}
         
         with self.lock:
-            logger.debug(f"Checking {len(self.cameras)} cameras")
+            logger.info(f"Checking {len(self.cameras)} cameras for consensus")
             for camera_id, camera in self.cameras.items():
                 # Skip offline cameras
                 if not camera.is_online(current_time):
-                    logger.debug(f"Camera {camera_id} is offline")
+                    logger.info(f"Camera {camera_id} is offline (last telemetry: {current_time - camera.last_telemetry:.1f}s ago)")
                     continue
                 
                 # Get growing fires for this camera
                 growing_fires = camera.get_growing_fires(current_time)
-                logger.debug(f"Camera {camera_id}: {len(growing_fires)} growing fires, {len(camera.detections)} detections")
+                logger.info(f"Camera {camera_id}: {len(growing_fires)} growing fires, {len(camera.detections)} total detections")
                 
                 if growing_fires:
                     cameras_with_fire.append(camera_id)
@@ -1015,7 +1030,11 @@ class FireConsensus:
     
     def cleanup(self):
         """Clean shutdown"""
-        logger.info("Cleaning up Fire Consensus Service")
+        try:
+            logger.info("Cleaning up Fire Consensus Service")
+        except (ValueError, OSError):
+            # Ignore logging errors during teardown
+            pass
         
         # Set shutdown flag to stop timer reschedules
         self._shutdown = True

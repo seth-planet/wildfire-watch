@@ -245,9 +245,31 @@ logger = trt.Logger(trt.Logger.WARNING)
 
 # Create builder
 builder = trt.Builder(logger)
-print(f"Max batch size: {builder.max_batch_size}")
-print(f"Platform has fast FP16: {builder.platform_has_fast_fp16}")
-print(f"Platform has fast INT8: {builder.platform_has_fast_int8}")
+print("TensorRT builder created successfully")
+
+# Create a network to test basic functionality
+network = builder.create_network(flags=1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+print("Network created successfully")
+
+# Create builder config
+config = builder.create_builder_config()
+print("Builder config created successfully")
+
+# Check available features without using deprecated attributes
+if hasattr(config, 'set_flag'):
+    # Check FP16 support
+    try:
+        config.set_flag(trt.BuilderFlag.FP16)
+        print("FP16 support: Available")
+    except:
+        print("FP16 support: Not available")
+    
+    # Check INT8 support
+    try:
+        config.set_flag(trt.BuilderFlag.INT8)
+        print("INT8 support: Available")
+    except:
+        print("INT8 support: Not available")
 
 # Would need ONNX model to test actual conversion
 print("TensorRT is available and functional!")
@@ -260,11 +282,13 @@ print("TensorRT is available and functional!")
         )
         
         print(result.stdout)
+        if result.stderr:
+            print("STDERR:", result.stderr)
         self.assertEqual(result.returncode, 0, "TensorRT test should succeed")
         self.assertIn("TensorRT version:", result.stdout)
     
     def test_model_sizes_parsing(self):
-        """Test the parse_size_list function with real values"""
+        """Test the model size parsing with real values"""
         print("\n=== Testing Size Parsing ===")
         
         test_script = self.test_dir / 'test_sizes.py'
@@ -272,28 +296,49 @@ print("TensorRT is available and functional!")
 import sys
 sys.path.insert(0, 'converted_models')
 
-from convert_model_minimal import parse_size_list
+from convert_model import EnhancedModelConverter
 
-# Test cases
+# Test cases - updated to match tuple output format and include non-square sizes
 test_cases = [
-    ("640", [640]),
-    ("640,320", [640, 320]),
-    ("640-320", [640, 608, 576, 544, 512, 480, 448, 416, 384, 352, 320]),
+    # Square sizes
+    ("640", [(640, 640)]),
+    ("640,320", [(640, 640), (320, 320)]),
+    ("640-320", [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]),
+    
+    # Non-square sizes
     ("640x480", [(640, 480)]),
-    ("640x480,320", [(640, 480), 320])
+    ("640x480,320", [(640, 480), (320, 320)]),
+    ("640x480,320x256", [(640, 480), (320, 256)]),
+    ("416x320", [(416, 320)]),
+    ("320x256,640x512", [(320, 256), (640, 512)]),
+    
+    # Additional test cases
+    (640, [(640, 640)]),  # Integer input
+    ((640, 480), [(640, 480)]),  # Tuple input
+    ([640, 320], [(640, 640), (320, 320)]),  # List input
+    ([(640, 480), 320], [(640, 480), (320, 320)]),  # Mixed list
 ]
 
 all_passed = True
-for input_str, expected in test_cases:
+# Use an existing model file for testing
+import os
+model_path = os.path.join(os.getcwd(), 'yolov8n.pt')
+if not os.path.exists(model_path):
+    # Fallback to another model if yolov8n.pt doesn't exist
+    model_path = os.path.join(os.getcwd(), 'yolov5s.pt')
+
+converter = EnhancedModelConverter(model_path)
+
+for input_val, expected in test_cases:
     try:
-        result = parse_size_list(input_str)
+        result = converter._parse_model_sizes(input_val)
         if result == expected:
-            print(f"✓ '{input_str}' -> {result}")
+            print(f"✓ {repr(input_val)} -> {result}")
         else:
-            print(f"✗ '{input_str}' -> {result} (expected {expected})")
+            print(f"✗ {repr(input_val)} -> {result} (expected {expected})")
             all_passed = False
     except Exception as e:
-        print(f"✗ '{input_str}' -> ERROR: {e}")
+        print(f"✗ {repr(input_val)} -> ERROR: {e}")
         all_passed = False
 
 if all_passed:
@@ -312,6 +357,8 @@ else:
         )
         
         print(result.stdout)
+        if result.stderr:
+            print("STDERR:", result.stderr)
         self.assertEqual(result.returncode, 0, "Size parsing tests should pass")
 
 

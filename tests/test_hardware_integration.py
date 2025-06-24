@@ -389,7 +389,14 @@ class TestFrigateIntegration(unittest.TestCase):
     def tearDown(self):
         """Clean up"""
         import shutil
-        shutil.rmtree(self.test_dir)
+        import gc
+        if hasattr(self, 'test_dir') and os.path.exists(self.test_dir):
+            try:
+                shutil.rmtree(self.test_dir)
+            except Exception as e:
+                print(f"Warning: Failed to cleanup {self.test_dir}: {e}")
+        # Force garbage collection to release file handles
+        gc.collect()
     
     @unittest.skipIf(not os.path.exists("docker-compose.yml"), "Docker compose file not found")
     def test_frigate_hardware_detection(self):

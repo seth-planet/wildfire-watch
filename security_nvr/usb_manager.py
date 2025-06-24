@@ -57,6 +57,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 import pyudev
 
+# Import centralized command runner
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.command_runner import run_command, CommandError
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,9 @@ class USBStorageManager:
         mount_path (str): Target mount point for USB storage
         context (pyudev.Context): udev context for device enumeration
         monitor (pyudev.Monitor): udev monitor for hot-plug events
+    
+    Class Attributes:
+        MIN_DRIVE_SIZE (int): Minimum drive size in bytes (500 GB)
         
     Mount Strategy:
         1. Detects all USB block devices with partitions
@@ -87,6 +94,9 @@ class USBStorageManager:
     Thread Safety:
         Not thread-safe. Use single instance per process.
     """
+    
+    # Minimum drive size in bytes (500 GB)
+    MIN_DRIVE_SIZE = 500 * 1024**3  # 500 GB
     
     def __init__(self, mount_path: str = "/media/frigate"):
         """Initialize USB storage manager.
@@ -152,16 +162,15 @@ class USBStorageManager:
     def _get_partition_size(self, device_path: str) -> Optional[int]:
         """Get partition size in bytes"""
         try:
-            result = subprocess.run(
+            _, output, _ = run_command(
                 ['blockdev', '--getsize64', device_path],
-                capture_output=True,
-                text=True
+                timeout=5,
+                check=True
             )
-            if result.returncode == 0:
-                return int(result.stdout.strip())
-        except:
-            pass
-        return None
+            return int(output)
+        except (CommandError, FileNotFoundError, PermissionError, ValueError) as e:
+            logger.error(f"Could not get size for {device_path}: {e}")
+            return None
     
     def _is_mounted(self, device_path: str) -> bool:
         """Check if device is mounted"""
@@ -251,15 +260,22 @@ class USBStorageManager:
             # Mount command
             mount_cmd = ['mount', '-t', filesystem, device, self.mount_path]
             
+            # Add security options for all filesystems
+            base_options = 'noexec,nosuid,nodev'
+            
             # Add filesystem-specific options
             if filesystem == 'ntfs':
-                mount_cmd.extend(['-o', 'permissions'])
-            elif filesystem in ['ext4', 'ext3']:
-                mount_cmd.extend(['-o', 'defaults,noatime'])
+                mount_cmd.extend(['-o', f'{base_options},permissions'])
+            elif filesystem in ['ext4', 'ext3', 'ext2']:
+                mount_cmd.extend(['-o', f'{base_options},noatime'])
+            elif filesystem in ['vfat', 'fat32']:
+                mount_cmd.extend(['-o', f'{base_options},umask=0022'])
+            else:
+                mount_cmd.extend(['-o', base_options])
                 
-            result = subprocess.run(mount_cmd, capture_output=True, text=True)
+            return_code, _, stderr = run_command(mount_cmd, timeout=15, check=False)
             
-            if result.returncode == 0:
+            if return_code == 0:
                 logger.info(f"Successfully mounted {device} to {self.mount_path}")
                 
                 # Set permissions
@@ -270,7 +286,7 @@ class USBStorageManager:
                 
                 return device
             else:
-                logger.error(f"Failed to mount: {result.stderr}")
+                logger.error(f"Failed to mount: {stderr}")
                 
         except Exception as e:
             logger.error(f"Mount error: {e}")
@@ -297,19 +313,19 @@ class USBStorageManager:
     def unmount_drive(self) -> bool:
         """Unmount the current drive"""
         try:
-            result = subprocess.run(
+            return_code, _, stderr = run_command(
                 ['umount', self.mount_path],
-                capture_output=True,
-                text=True
+                timeout=10,
+                check=False
             )
             
-            if result.returncode == 0:
+            if return_code == 0:
                 logger.info(f"Successfully unmounted {self.mount_path}")
                 return True
             else:
-                logger.error(f"Failed to unmount: {result.stderr}")
+                logger.error(f"Failed to unmount: {stderr}")
                 
-        except Exception as e:
+        except (CommandError, FileNotFoundError, PermissionError) as e:
             logger.error(f"Unmount error: {e}")
             
         return False
@@ -317,14 +333,14 @@ class USBStorageManager:
     def get_storage_stats(self) -> Optional[Dict]:
         """Get storage statistics"""
         try:
-            result = subprocess.run(
+            return_code, stdout, _ = run_command(
                 ['df', '-B1', self.mount_path],
-                capture_output=True,
-                text=True
+                timeout=5,
+                check=False
             )
             
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
+            if return_code == 0:
+                lines = stdout.strip().split('\n')
                 if len(lines) >= 2:
                     parts = lines[1].split()
                     if len(parts) >= 6:
@@ -343,7 +359,7 @@ class USBStorageManager:
                             'available_human': self._bytes_to_human(available),
                         }
                         
-        except Exception as e:
+        except (CommandError, FileNotFoundError, PermissionError, ValueError) as e:
             logger.error(f"Error getting storage stats: {e}")
             
         return None

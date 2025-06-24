@@ -1,16 +1,16 @@
-version: '3.8'
+version: '3.3'
 
 # Common environment variables
 x-common-variables: &common-variables
   MQTT_BROKER: ${MQTT_BROKER:-mqtt_broker}
-  MQTT_PORT: ${MQTT_PORT:-1883}
-  MQTT_TLS: ${MQTT_TLS:-false}
+  MQTT_PORT: ${MQTT_PORT:-8883}
+  MQTT_TLS: ${MQTT_TLS:-true}
   LOG_LEVEL: ${LOG_LEVEL:-info}
   NODE_ID: ${HOSTNAME:-${BALENA_DEVICE_UUID:-unknown}}
 
 # Common healthcheck for MQTT connectivity
 x-healthcheck-mqtt: &healthcheck-mqtt
-  test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${MQTT_BROKER:-mqtt_broker}', ${MQTT_PORT:-1883})); s.close()"]
+  test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${MQTT_BROKER:-mqtt_broker}', ${MQTT_PORT:-8883})); s.close()"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -110,7 +110,12 @@ services:
 
   # Frigate NVR - needs camera config
   security_nvr:
-    image: ghcr.io/blakeblackshear/frigate:${FRIGATE_VERSION:-stable}
+    build:
+      context: .
+      dockerfile: ./security_nvr/Dockerfile
+      args:
+        - FRIGATE_VERSION=${FRIGATE_VERSION:-stable}
+    image: wildfire-watch/security-nvr-extended:${VERSION:-latest}
     container_name: security-nvr
     hostname: security-nvr
     restart: unless-stopped

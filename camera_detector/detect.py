@@ -69,7 +69,6 @@ import yaml
 import socket
 import threading
 import logging
-import subprocess
 import asyncio
 import ipaddress
 from datetime import datetime, timedelta, timezone
@@ -77,6 +76,7 @@ from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass, asdict, field, fields
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
+import concurrent.futures
 from concurrent.futures import ProcessPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import paho.mqtt.client as mqtt
@@ -86,6 +86,10 @@ from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
 import netifaces
 import cv2
 from scapy.all import ARP, Ether, srp
+
+# Import centralized command runner
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.command_runner import run_command, CommandError
 
 load_dotenv()
 
@@ -196,6 +200,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Add a null handler as fallback to prevent I/O errors during cleanup
+null_handler = logging.NullHandler()
+logger.addHandler(null_handler)
+
+# ─────────────────────────────────────────────────────────────
+# Safe Logging Helper
+# ─────────────────────────────────────────────────────────────
+def safe_log(message, level=logging.INFO):
+    """Safely log messages, catching I/O errors during teardown."""
+    try:
+        logger.log(level, message)
+    except (ValueError, OSError, IOError):
+        # Ignore logging errors during teardown
+        pass
+    except Exception:
+        # Ignore any other logging errors
+        pass
+
 # ─────────────────────────────────────────────────────────────
 # Data Models
 # ─────────────────────────────────────────────────────────────
@@ -300,7 +322,7 @@ class Camera:
     def update_ip(self, new_ip: str):
         """Update IP address and track history"""
         if new_ip != self.ip:
-            logger.info(f"Camera {self.name} IP changed from {self.ip} to {new_ip}")
+            safe_log(f"Camera {self.name} IP changed from {self.ip} to {new_ip}")
             self.ip = new_ip
             if new_ip not in self.ip_history:
                 self.ip_history.append(new_ip)
@@ -522,7 +544,7 @@ class MACTracker:
             # Check if we have permission for raw sockets
             import os
             if os.geteuid() != 0:
-                logger.debug("ARP scan requires root privileges, skipping")
+                safe_log("ARP scan requires root privileges, skipping", logging.DEBUG)
                 return {}
             
             # Create ARP request
@@ -544,7 +566,7 @@ class MACTracker:
             return results
             
         except Exception as e:
-            logger.debug(f"ARP scan not available: {e}")
+            safe_log(f"ARP scan not available: {e}", logging.DEBUG)
             return {}
 
 # ─────────────────────────────────────────────────────────────
@@ -563,6 +585,25 @@ def _rtsp_validation_worker(rtsp_url: str, timeout_ms: int) -> bool:
     Returns:
         bool: True if stream is valid and accessible, False otherwise
     """
+    # Suppress OpenCV/FFMPEG warnings in worker process
+    import os
+    import warnings
+    
+    # Suppress all warnings
+    warnings.filterwarnings('ignore')
+    
+    # Set all possible environment variables to suppress OpenCV/FFMPEG output
+    os.environ['OPENCV_FFMPEG_LOGLEVEL'] = 'quiet'
+    os.environ['OPENCV_LOG_LEVEL'] = 'ERROR'  
+    os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'loglevel;quiet'
+    os.environ['OPENCV_VIDEOIO_DEBUG'] = '0'
+    
+    # Try to set OpenCV log level if available (OpenCV 4.x)
+    try:
+        cv2.setLogLevel(0)  # 0 = silent
+    except (AttributeError, NameError):
+        pass  # Older OpenCV versions don't have this
+    
     cap = None
     try:
         # Create video capture with timeout settings
@@ -663,6 +704,20 @@ class CameraDetector:
         self.last_full_discovery = 0
         self.known_camera_ips: Set[str] = set()
         
+        # Centralized executors for proper resource management
+        import multiprocessing
+        cpu_count = multiprocessing.cpu_count()
+        self._thread_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(32, cpu_count * 4),
+            thread_name_prefix='CameraDetector'
+        )
+        self._process_executor = ProcessPoolExecutor(
+            max_workers=min(4, cpu_count)
+        )
+        self._executor_lock = threading.Lock()
+        self._active_futures = set()
+        self._background_threads = []
+        
         # MQTT client
         self.mqtt_client = None
         self.mqtt_connected = False
@@ -671,7 +726,16 @@ class CameraDetector:
         # Start background tasks
         self._start_background_tasks()
         
-        logger.info(f"Camera Detector initialized: {self.config.SERVICE_ID}")
+        safe_log(f"Camera Detector initialized: {self.config.SERVICE_ID}")
+    
+    def __enter__(self):
+        """Context manager entry"""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensures cleanup"""
+        self.cleanup()
+        return False
     
     def _parse_credentials(self) -> List[Tuple[str, str]]:
         """Parse camera credentials from config"""
@@ -679,7 +743,7 @@ class CameraDetector:
         
         # If specific username/password are provided via environment, use ONLY those
         if self.config.DEFAULT_USERNAME and self.config.DEFAULT_PASSWORD:
-            logger.info(f"Using provided credentials for user: {self.config.DEFAULT_USERNAME}")
+            safe_log(f"Using provided credentials for user: {self.config.DEFAULT_USERNAME}")
             return [(self.config.DEFAULT_USERNAME, self.config.DEFAULT_PASSWORD)]
         
         try:
@@ -692,9 +756,9 @@ class CameraDetector:
                     # Validate credentials
                     if len(user) > 0:  # Username is required
                         creds.append((user, passwd))
-                        logger.debug(f"Added credential for user: {user}")
+                        safe_log(f"Added credential for user: {user}", logging.DEBUG)
         except Exception as e:
-            logger.error(f"Error parsing credentials: {e}")
+            safe_log(f"Error parsing credentials: {e}", logging.ERROR)
             # Fall back to default credentials
             creds = [("admin", ""), ("admin", "admin")]
         
@@ -752,51 +816,60 @@ class CameraDetector:
                     keepalive=60
                 )
                 self.mqtt_client.loop_start()
-                logger.info(f"MQTT connection initiated to {self.config.MQTT_BROKER}:{port}")
+                safe_log(f"MQTT connection initiated to {self.config.MQTT_BROKER}:{port}")
                 break
             except Exception as e:
                 attempt += 1
                 delay = min(5 * (2 ** attempt), 300)  # Exponential backoff, max 5 minutes
-                logger.error(f"MQTT connection failed (attempt {attempt}/{max_attempts}): {e}")
+                safe_log(f"MQTT connection failed (attempt {attempt}/{max_attempts}): {e}", logging.ERROR)
                 if attempt >= max_attempts:
-                    logger.error("Max MQTT connection attempts reached, service will run degraded")
+                    safe_log("Max MQTT connection attempts reached, service will run degraded", logging.ERROR)
                     break
-                logger.info(f"Retrying in {delay}s...")
+                safe_log(f"Retrying in {delay}s...")
                 time.sleep(delay)
     
     def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback"""
         if rc == 0:
             self.mqtt_connected = True
-            logger.info("MQTT connected successfully")
+            safe_log("MQTT connected successfully")
             self._publish_health()
         else:
             self.mqtt_connected = False
-            logger.error(f"MQTT connection failed with code {rc}")
+            safe_log(f"MQTT connection failed with code {rc}", logging.ERROR)
     
     def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """MQTT disconnection callback"""
         self.mqtt_connected = False
-        logger.warning(f"MQTT disconnected with code {rc}")
+        safe_log(f"MQTT disconnected with code {rc}", logging.WARNING)
     
     def _start_background_tasks(self):
         """Start background tasks"""
         # Discovery task
-        threading.Thread(target=self._discovery_loop, daemon=True).start()
+        t = threading.Thread(target=self._discovery_loop, daemon=True)
+        t.start()
+        self._background_threads.append(t)
         
         # Health check task
-        threading.Thread(target=self._health_check_loop, daemon=True).start()
+        t = threading.Thread(target=self._health_check_loop, daemon=True)
+        t.start()
+        self._background_threads.append(t)
         
         # MAC tracking task
         if self.config.MAC_TRACKING_ENABLED:
-            threading.Thread(target=self._mac_tracking_loop, daemon=True).start()
+            t = threading.Thread(target=self._mac_tracking_loop, daemon=True)
+            t.start()
+            self._background_threads.append(t)
         
-        # Periodic health reporting
-        threading.Timer(60, self._periodic_health_report).start()
+        # Periodic health reporting - will be handled in cleanup
+        self._health_report_timer = threading.Timer(60, self._periodic_health_report)
+        self._health_report_timer.start()
         
         # Network change detection
         if self.config.SMART_DISCOVERY_ENABLED:
-            threading.Thread(target=self._network_change_monitor, daemon=True).start()
+            t = threading.Thread(target=self._network_change_monitor, daemon=True)
+            t.start()
+            self._background_threads.append(t)
     
     def _get_local_networks(self) -> List[str]:
         """Get local network subnets"""
@@ -807,7 +880,7 @@ class CameraDetector:
             try:
                 addrs = netifaces.ifaddresses(iface)
             except (ValueError, OSError) as e:
-                logger.debug(f"Error getting addresses for interface {iface}: {e}")
+                safe_log(f"Error getting addresses for interface {iface}: {e}", logging.DEBUG)
                 continue
                 
             if netifaces.AF_INET in addrs:
@@ -825,9 +898,9 @@ class CameraDetector:
                             if network_str not in seen_networks:
                                 networks.append(network_str)
                                 seen_networks.add(network_str)
-                                logger.debug(f"Found network {network_str} on interface {iface}")
+                                safe_log(f"Found network {network_str} on interface {iface}", logging.DEBUG)
                         except Exception as e:
-                            logger.debug(f"Error processing network on {iface}: {e}")
+                            safe_log(f"Error processing network on {iface}: {e}", logging.DEBUG)
         
         # If we're on a /22 or larger network, also scan common camera subnets
         for network_str in list(networks):
@@ -844,9 +917,9 @@ class CameraDetector:
                         if subnet not in seen_networks:
                             networks.append(subnet)
                             seen_networks.add(subnet)
-                            logger.debug(f"Added adjacent subnet {subnet} for camera discovery")
+                            safe_log(f"Added adjacent subnet {subnet} for camera discovery")
             except Exception as e:
-                logger.debug(f"Error processing adjacent subnet: {e}")
+                safe_log(f"Error processing adjacent subnet: {e}")
         
         return networks
     
@@ -895,7 +968,7 @@ class CameraDetector:
                     
                     if self.discovery_count < self.config.INITIAL_DISCOVERY_COUNT:
                         # Initial aggressive discovery
-                        logger.info(f"Initial discovery scan {self.discovery_count + 1}/{self.config.INITIAL_DISCOVERY_COUNT}")
+                        safe_log(f"Initial discovery scan {self.discovery_count + 1}/{self.config.INITIAL_DISCOVERY_COUNT}")
                         self._run_full_discovery()
                         interval = self.config.DISCOVERY_INTERVAL
                     
@@ -905,7 +978,7 @@ class CameraDetector:
                             self.stable_count += 1
                             if self.stable_count >= 3:
                                 self.is_steady_state = True
-                                logger.info("Entering steady-state mode - reducing discovery frequency")
+                                safe_log("Entering steady-state mode - reducing discovery frequency")
                         else:
                             self.stable_count = 0
                         
@@ -918,12 +991,12 @@ class CameraDetector:
                         
                         if time_since_full >= self.config.STEADY_STATE_INTERVAL:
                             # Periodic full scan
-                            logger.info("Running periodic full discovery in steady state")
+                            safe_log("Running periodic full discovery in steady state")
                             self._run_full_discovery()
                             interval = self.config.STEADY_STATE_INTERVAL
                         else:
                             # Quick health check only
-                            logger.debug("Running quick health check")
+                            safe_log("Running quick health check")
                             self._run_quick_health_check()
                             interval = self.config.QUICK_CHECK_INTERVAL
                     
@@ -936,7 +1009,7 @@ class CameraDetector:
                     interval = self.config.DISCOVERY_INTERVAL
                 
             except Exception as e:
-                logger.error(f"Discovery error: {e}", exc_info=True)
+                safe_log(f"Discovery error: {e}", logging.ERROR)
                 interval = self.config.DISCOVERY_INTERVAL
             
             # Interruptible sleep
@@ -950,44 +1023,46 @@ class CameraDetector:
         if not self._running:
             return
             
-        logger.info("Starting full camera discovery...")
+        safe_log("Starting full camera discovery...")
         start_time = time.time()
         
-        # Run discovery methods in parallel
-        import concurrent.futures
+        # Run discovery methods in parallel using shared executor
+        futures = []
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-            futures = []
-            
+        with self._executor_lock:
             # Check if still running before submitting tasks
             if not self._running:
                 return
             
             # Update MAC mappings first if enabled
             if self.config.MAC_TRACKING_ENABLED and self._running:
-                futures.append(
-                    executor.submit(self._update_mac_mappings)
-                )
+                future = self._thread_executor.submit(self._update_mac_mappings)
+                futures.append(future)
+                self._active_futures.add(future)
             
             # Run discovery methods in parallel
             if self._running:
-                futures.extend([
-                    executor.submit(self._discover_onvif_cameras),
-                    executor.submit(self._discover_mdns_cameras),
-                    executor.submit(self._scan_rtsp_ports)
-                ])
-            
-            # Wait for all to complete
-            for future in concurrent.futures.as_completed(futures):
-                if not self._running:
-                    # Cancel remaining futures
+                for method in [self._discover_onvif_cameras, self._discover_mdns_cameras, self._scan_rtsp_ports]:
+                    future = self._thread_executor.submit(method)
+                    futures.append(future)
+                    self._active_futures.add(future)
+        
+        # Wait for all to complete
+        for future in concurrent.futures.as_completed(futures):
+            if not self._running:
+                # Cancel remaining futures
+                with self._executor_lock:
                     for f in futures:
                         f.cancel()
-                    break
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Discovery task error: {e}")
+                        self._active_futures.discard(f)
+                break
+            try:
+                future.result()
+            except Exception as e:
+                safe_log(f"Discovery task error: {e}", logging.ERROR)
+            finally:
+                with self._executor_lock:
+                    self._active_futures.discard(future)
         
         # Update Frigate config after discovery
         if self.config.FRIGATE_UPDATE_ENABLED:
@@ -999,7 +1074,7 @@ class CameraDetector:
         
         self.last_full_discovery = time.time()
         elapsed = time.time() - start_time
-        logger.info(f"Full discovery completed in {elapsed:.1f} seconds")
+        safe_log(f"Full discovery completed in {elapsed:.1f} seconds")
     
     def _run_quick_health_check(self):
         """Quick health check of known cameras without full network scan"""
@@ -1011,8 +1086,6 @@ class CameraDetector:
             cameras_to_check = list(self.cameras.values())
         
         # Check each known camera's availability
-        import concurrent.futures
-        
         def check_camera_health(camera):
             try:
                 # Quick TCP check on RTSP port
@@ -1026,19 +1099,31 @@ class CameraDetector:
                 
                 return camera.online
             except Exception as e:
-                logger.debug(f"Health check error for {camera.ip}: {e}")
+                safe_log(f"Health check error for {camera.ip}: {e}")
                 return False
         
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            futures = {executor.submit(check_camera_health, cam): cam for cam in cameras_to_check}
+        # Use shared executor
+        futures = {}
+        with self._executor_lock:
+            if not self._running:
+                return
             
-            for future in concurrent.futures.as_completed(futures):
+            for cam in cameras_to_check:
+                future = self._thread_executor.submit(check_camera_health, cam)
+                futures[future] = cam
+                self._active_futures.add(future)
+        
+        for future in concurrent.futures.as_completed(futures):
+            try:
                 checked += 1
                 if future.result():
                     online += 1
+            finally:
+                with self._executor_lock:
+                    self._active_futures.discard(future)
         
         elapsed = time.time() - start_time
-        logger.debug(f"Quick health check: {online}/{checked} cameras online in {elapsed:.1f}s")
+        safe_log(f"Quick health check: {online}/{checked} cameras online in {elapsed:.1f}s")
         
         # Check if any cameras went offline
         newly_offline = []
@@ -1058,7 +1143,7 @@ class CameraDetector:
             try:
                 self._update_mac_mappings()
             except Exception as e:
-                logger.error(f"MAC tracking error: {e}")
+                safe_log(f"MAC tracking error: {e}", logging.ERROR)
             
             time.sleep(60)  # Every minute
     
@@ -1073,7 +1158,7 @@ class CameraDetector:
                 current_networks = set(self._get_local_networks())
                 
                 if current_networks != last_networks:
-                    logger.info("Network change detected - triggering discovery")
+                    safe_log("Network change detected - triggering discovery")
                     # Reset steady state
                     self.is_steady_state = False
                     self.stable_count = 0
@@ -1083,7 +1168,7 @@ class CameraDetector:
                 last_networks = current_networks
                 
             except Exception as e:
-                logger.error(f"Network monitor error: {e}")
+                safe_log(f"Network monitor error: {e}", logging.ERROR)
                 time.sleep(60)
     
     def _update_mac_mappings(self):
@@ -1109,7 +1194,7 @@ class CameraDetector:
             wsd.start()
             
             services = wsd.searchServices(timeout=10)
-            logger.info(f"WS-Discovery found {len(services)} services")
+            safe_log(f"WS-Discovery found {len(services)} services")
             
             for service in services:
                 try:
@@ -1118,7 +1203,7 @@ class CameraDetector:
                     types = service.getTypes()
                     scopes = service.getScopes()
                     
-                    logger.debug(f"WS-Discovery service - XAddrs: {xaddrs}, Types: {types}, Scopes: {scopes}")
+                    safe_log(f"WS-Discovery service - XAddrs: {xaddrs}, Types: {types}, Scopes: {scopes}")
                     
                     if not xaddrs:
                         continue
@@ -1134,31 +1219,35 @@ class CameraDetector:
                     for keyword in camera_keywords:
                         if keyword in type_str or keyword in scope_str:
                             is_camera = True
-                            logger.debug(f"Found camera keyword '{keyword}' in service")
+                            safe_log(f"Found camera keyword '{keyword}' in service")
                             break
                     
                     if not is_camera:
-                        logger.debug(f"Service at {xaddrs[0] if xaddrs else 'unknown'} not identified as camera")
+                        safe_log(f"Service at {xaddrs[0] if xaddrs else 'unknown'} not identified as camera")
                         continue
                     
                     onvif_url = xaddrs[0]
-                    parsed = urlparse(onvif_url)
-                    ip = parsed.hostname
                     
                     # Handle malformed URLs like http://[]/onvif/device_service
-                    if not ip or ip == '[]':
-                        logger.debug(f"Malformed ONVIF URL: {onvif_url}")
+                    try:
+                        parsed = urlparse(onvif_url)
+                        ip = parsed.hostname
+                    except Exception as e:
+                        safe_log(f"Failed to parse URL {onvif_url}: {e}")
+                        continue
+                    
+                    if not ip or ip == '[]' or ip == '':
+                        safe_log(f"Malformed ONVIF URL with empty/invalid hostname: {onvif_url}")
                         
-                        # Try to extract IP from service source
-                        # The WS-Discovery response comes from somewhere
-                        try:
-                            # Get the source address from the service
-                            # This requires accessing the underlying socket info
-                            # For now, skip this service
-                            logger.debug(f"Skipping service with malformed URL: {onvif_url}")
-                            continue
-                        except Exception as e:
-                            logger.debug(f"Error parsing ONVIF service URL: {e}")
+                        # Try to extract IP from the URL string directly
+                        # Sometimes URLs come as http://192.168.1.100/onvif/device_service
+                        import re
+                        ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', onvif_url)
+                        if ip_match:
+                            ip = ip_match.group(1)
+                            safe_log(f"Extracted IP {ip} from malformed URL")
+                        else:
+                            safe_log(f"Skipping service with unparseable URL: {onvif_url}")
                             continue
                     
                     if not ip:
@@ -1198,10 +1287,10 @@ class CameraDetector:
                     self._publish_camera_discovery(camera)
                     
                 except Exception as e:
-                    logger.debug(f"Failed to process ONVIF service: {e}")
+                    safe_log(f"Failed to process ONVIF service: {e}")
             
         except Exception as e:
-            logger.error(f"ONVIF discovery error: {e}")
+            safe_log(f"ONVIF discovery error: {e}", logging.ERROR)
         finally:
             # Ensure WS-Discovery is properly stopped
             if wsd is not None:
@@ -1213,16 +1302,13 @@ class CameraDetector:
     def _discover_mdns_cameras(self):
         """Discover cameras via mDNS/Avahi"""
         try:
-            # Use avahi-browse to find RTSP services
-            result = subprocess.run(
+            return_code, stdout, stderr = run_command(
                 ['avahi-browse', '-ptr', '_rtsp._tcp'],
-                capture_output=True,
-                text=True,
-                timeout=10
+                timeout=10,
+                check=False
             )
-            
-            if result.returncode == 0:
-                for line in result.stdout.split('\n'):
+            if return_code == 0:
+                for line in stdout.split('\n'):
                     if line.startswith('='):
                         parts = line.split(';')
                         if len(parts) >= 10:
@@ -1232,78 +1318,44 @@ class CameraDetector:
                             
                             if ip and port:
                                 self._check_camera_at_ip(ip, f"mDNS: {name}")
-            
-        except Exception as e:
-            logger.debug(f"mDNS discovery error: {e}")
+            elif stderr:
+                safe_log(f"mDNS discovery failed: {stderr}")
+        except (FileNotFoundError, PermissionError) as e:
+            safe_log(f"mDNS discovery error: {e}")
     
-    def _get_mac_address(self, ip: str, max_attempts: int = 3) -> Optional[str]:
-        """Get MAC address for IP using various methods
+    def _get_mac_address(self, ip: str) -> Optional[str]:
+        """Get MAC address for an IP using the system ARP table.
         
         Args:
             ip: IP address to look up
-            max_attempts: Maximum number of subprocess calls to prevent runaway
             
         Returns:
             MAC address or None if not found
         """
-        # Track attempt count for subprocess calls
-        attempt_count = 0
-        
         # Try scapy ARP first
         mac = self.mac_tracker.get_mac_for_ip(ip)
         if mac:
             return mac
-        
-        # Try system ARP table
-        if attempt_count < max_attempts:
-            try:
-                attempt_count += 1
-                result = subprocess.run(
-                    ['arp', '-n', ip],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                
-                if result.returncode == 0:
-                    for line in result.stdout.split('\n'):
-                        if ip in line:
-                            parts = line.split()
-                            if len(parts) >= 3:
-                                mac = parts[2]
-                                if ':' in mac and mac != '<incomplete>':
-                                    return mac.upper()
-            except:
-                pass
-        
-        # Try to ping and check ARP (avoid infinite recursion)
-        if attempt_count < max_attempts:
-            try:
-                attempt_count += 1
-                subprocess.run(['ping', '-c', '1', '-W', '1', ip], capture_output=True)
-                time.sleep(0.1)
-                
-                # Only try system ARP again after ping if we have attempts left
-                if attempt_count < max_attempts:
-                    attempt_count += 1
-                    result = subprocess.run(
-                        ['arp', '-n', ip],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    
-                    if result.returncode == 0:
-                        for line in result.stdout.split('\n'):
-                            if ip in line:
-                                parts = line.split()
-                                if len(parts) >= 3:
-                                    mac = parts[2]
-                                    if ':' in mac and mac != '<incomplete>':
-                                        return mac.upper()
-            except:
-                pass
-        
+            
+        # First, try to ensure the IP is in the ARP cache by pinging it
+        try:
+            run_command(['ping', '-c', '1', '-W', '1', ip], timeout=2, check=True)
+        except (CommandError, FileNotFoundError, PermissionError) as e:
+            safe_log(f"Ping to {ip} failed, ARP entry may be stale. Error: {e}")
+
+        # Now, query the ARP table
+        try:
+            _, output, _ = run_command(['arp', '-n', ip], timeout=5, check=True)
+            for line in output.split('\n'):
+                if ip in line:
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        mac = parts[2]
+                        if ':' in mac and mac != '<incomplete>':
+                            return mac.upper()
+        except (CommandError, FileNotFoundError, PermissionError) as e:
+            safe_log(f"Could not get MAC for {ip} via arp command: {e}", logging.WARNING)
+
         return None
     
     def _get_onvif_details(self, camera: Camera):
@@ -1386,7 +1438,7 @@ class CameraDetector:
                             camera.rtsp_urls[profile_key] = rtsp_url
                             
                     except Exception as e:
-                        logger.debug(f"Failed to get RTSP URL for profile {profile.Name}: {e}")
+                        safe_log(f"Failed to get RTSP URL for profile {profile.Name}: {e}")
                 
                 # Store successful credentials
                 camera.username = username
@@ -1396,11 +1448,11 @@ class CameraDetector:
                 # Get HTTP URL
                 camera.http_url = f"http://{camera.ip}:{self.config.HTTP_PORT}"
                 
-                logger.info(f"ONVIF camera found: {camera.name} at {camera.ip} (MAC: {camera.mac})")
+                safe_log(f"ONVIF camera found: {camera.name} at {camera.ip} (MAC: {camera.mac})")
                 return True
                 
             except Exception as e:
-                logger.debug(f"Failed ONVIF connection to {camera.ip} with {username}: {e}")
+                safe_log(f"Failed ONVIF connection to {camera.ip} with {username}: {e}")
                 continue
         
         return False
@@ -1408,7 +1460,7 @@ class CameraDetector:
     def _check_camera_at_ip(self, ip: str, source: str = ""):
         """Check if there's a camera at the given IP"""
         try:
-            logger.debug(f"Checking camera at {ip} from {source}")
+            safe_log(f"Checking camera at {ip} from {source}")
             
             # Get or determine MAC
             mac = self.mac_tracker.get_mac_for_ip(ip)
@@ -1434,7 +1486,7 @@ class CameraDetector:
                     )
                     self.cameras[mac] = camera
             
-            logger.debug(f"Camera {mac} at {ip} - trying ONVIF...")
+            safe_log(f"Camera {mac} at {ip} - trying ONVIF...")
             
             # Try ONVIF first (with timeout protection)
             import threading
@@ -1445,7 +1497,7 @@ class CameraDetector:
                 try:
                     onvif_result[0] = self._get_onvif_details(camera)
                 except Exception as e:
-                    logger.debug(f"ONVIF error: {e}")
+                    safe_log(f"ONVIF error: {e}")
                 finally:
                     onvif_done.set()
             
@@ -1463,69 +1515,73 @@ class CameraDetector:
             if onvif_done_result:
                 if onvif_result[0]:
                     self._publish_camera_discovery(camera)
-                    logger.info(f"Camera discovered via ONVIF at {ip}")
+                    safe_log(f"Camera discovered via ONVIF at {ip}")
                     return
             else:
-                logger.debug(f"ONVIF timed out for {ip}")
+                safe_log(f"ONVIF timed out for {ip}")
             
-            logger.debug(f"Camera {mac} at {ip} - trying RTSP...")
+            safe_log(f"Camera {mac} at {ip} - trying RTSP...")
             
             # Try direct RTSP
             if self._check_rtsp_stream(camera):
                 self._publish_camera_discovery(camera)
-                logger.info(f"Camera discovered via RTSP at {ip}")
+                safe_log(f"Camera discovered via RTSP at {ip}")
                 return
             
-            logger.debug(f"No valid camera found at {ip}")
+            safe_log(f"No valid camera found at {ip}")
                 
         except Exception as e:
-            logger.error(f"Failed to check camera at {ip}: {e}", exc_info=True)
+            safe_log(f"Failed to check camera at {ip}: {e}", logging.ERROR)
     
     def _scan_rtsp_ports(self):
         """Scan network for RTSP ports"""
         try:
             networks = self._get_local_networks()
-            logger.info(f"Starting RTSP port scan on {len(networks)} networks: {networks}")
+            safe_log(f"Starting RTSP port scan on {len(networks)} networks: {networks}")
             
-            # Scan all networks in parallel for speed
-            import concurrent.futures
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(networks))) as executor:
-                futures = []
-                for network in networks:
-                    logger.debug(f"Submitting scan for network: {network}")
-                    future = executor.submit(self._scan_single_network, network)
-                    futures.append(future)
+            # Scan all networks in parallel using shared executor
+            futures = []
+            with self._executor_lock:
+                if not self._running:
+                    return
                 
-                # Wait for all scans to complete
-                completed = 0
-                for future in concurrent.futures.as_completed(futures):
-                    completed += 1
-                    try:
-                        future.result()
-                        logger.debug(f"Network scan completed ({completed}/{len(futures)})")
-                    except Exception as e:
-                        logger.error(f"Network scan error: {e}")
+                for network in networks:
+                    safe_log(f"Submitting scan for network: {network}")
+                    future = self._thread_executor.submit(self._scan_single_network, network)
+                    futures.append(future)
+                    self._active_futures.add(future)
+            
+            # Wait for all scans to complete
+            completed = 0
+            for future in concurrent.futures.as_completed(futures):
+                completed += 1
+                try:
+                    future.result()
+                    safe_log(f"Network scan completed ({completed}/{len(futures)})")
+                except Exception as e:
+                    safe_log(f"Network scan error: {e}", logging.ERROR)
+                finally:
+                    with self._executor_lock:
+                        self._active_futures.discard(future)
                     
         except Exception as e:
-            logger.error(f"RTSP port scan error: {e}", exc_info=True)
+            safe_log(f"RTSP port scan error: {e}", logging.ERROR)
     
     def _scan_single_network(self, network: str):
         """Scan a single network for RTSP ports"""
         # Try nmap first for faster scanning
         nmap_available = False
         try:
-            result = subprocess.run(
+            return_code, stdout, stderr = run_command(
                 ['nmap', '-p', str(self.config.RTSP_PORT), '--open', '-sS', network],
-                capture_output=True,
-                text=True,
-                timeout=30  # Reduced timeout per network
+                timeout=30,  # Reduced timeout per network
+                check=False  # Don't raise on non-zero return code
             )
             
-            if result.returncode == 0:
+            if return_code == 0:
                 nmap_available = True
                 current_ip = None
-                for line in result.stdout.split('\n'):
+                for line in stdout.split('\n'):
                     if 'Nmap scan report for' in line:
                         # Extract IP
                         parts = line.split()
@@ -1536,13 +1592,13 @@ class CameraDetector:
                         self._check_camera_at_ip(current_ip, "RTSP scan")
                         
         except FileNotFoundError:
-            logger.debug("nmap not found, falling back to socket scanning")
-        except Exception as e:
-            logger.debug(f"nmap scan failed for {network}: {e}")
+            safe_log("nmap not found, falling back to socket scanning")
+        except (CommandError, PermissionError) as e:
+            safe_log(f"nmap scan failed for {network}: {e}")
         
         # Fallback to socket scanning if nmap not available or failed
         if not nmap_available:
-            logger.info(f"Using socket scanning for network {network}")
+            safe_log(f"Using socket scanning for network {network}")
             self._socket_scan_network(network)
     
     def _socket_scan_network(self, network: str, target_range: Optional[Tuple[int, int]] = None):
@@ -1567,14 +1623,14 @@ class CameraDetector:
                     if target_range[0] <= last_octet <= target_range[1]:
                         filtered_hosts.append(host)
                 if filtered_hosts:
-                    logger.info(f"Targeted scan: {len(filtered_hosts)} IPs in range {target_range[0]}-{target_range[1]}")
+                    safe_log(f"Targeted scan: {len(filtered_hosts)} IPs in range {target_range[0]}-{target_range[1]}")
                     hosts = filtered_hosts
             
-            logger.info(f"Starting socket scan for network {network} with {len(hosts)} hosts")
+            safe_log(f"Starting socket scan for network {network} with {len(hosts)} hosts")
             
             # Skip very large networks (likely Docker/virtualization)
             if len(hosts) > 5000:
-                logger.info(f"Skipping very large network {network} (likely Docker/virtual)")
+                safe_log(f"Skipping very large network {network} (likely Docker/virtual)")
                 return
                 
             # In steady state, only scan for new IPs
@@ -1582,94 +1638,114 @@ class CameraDetector:
                 # Filter to only unknown IPs
                 unknown_hosts = [h for h in hosts if str(h) not in self.known_camera_ips]
                 if len(unknown_hosts) < len(hosts) / 2:
-                    logger.info(f"Steady state: scanning only {len(unknown_hosts)} new IPs (skipping {len(hosts) - len(unknown_hosts)} known)")
+                    safe_log(f"Steady state: scanning only {len(unknown_hosts)} new IPs (skipping {len(hosts) - len(unknown_hosts)} known)")
                     hosts = unknown_hosts
                     if not hosts:
                         return
                 
             # For large networks, prioritize common camera IP ranges
             if len(hosts) > 1000:
-                logger.info(f"Large network {network}, focusing on common camera IP ranges...")
+                safe_log(f"Large network {network}, focusing on common camera IP ranges...")
                 # Common IP endings for cameras
                 priority_endings = list(range(100, 255))
                 priority_hosts = [h for h in hosts if int(str(h).split('.')[-1]) in priority_endings]
                 other_hosts = [h for h in hosts if h not in priority_hosts]
                 hosts = priority_hosts + other_hosts[:100]  # Limit scan
             
-            logger.info(f"Socket scanning {len(hosts)} IPs on port {self.config.RTSP_PORT}...")
+            safe_log(f"Socket scanning {len(hosts)} IPs on port {self.config.RTSP_PORT}...")
             
             found_count = 0
             
             def scan_ip(ip_str):
+                sock = None
                 try:
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(0.2)  # Reduced timeout for faster scanning
                     result = sock.connect_ex((ip_str, self.config.RTSP_PORT))
-                    sock.close()
                     
                     if result == 0:
                         return ip_str
                 except:
                     pass
+                finally:
+                    # Ensure socket is always closed to prevent file descriptor leaks
+                    if sock:
+                        try:
+                            sock.close()
+                        except:
+                            pass
                 return None
             
             # Scan in parallel for speed - use more workers for faster scanning
             # Determine optimal worker count based on network size and available CPU cores
             import multiprocessing
             cpu_count = multiprocessing.cpu_count()
-            # Use more workers on multi-core systems (up to 500 for high-core systems)
-            base_workers = min(500, cpu_count * 50)
-            worker_count = min(base_workers, max(100, len(hosts) // 2))
-            logger.info(f"Using {worker_count} workers for scanning ({cpu_count} CPU cores detected)")
+            # Limit workers to prevent file descriptor exhaustion
+            # Each worker uses at least 1 file descriptor for the socket
+            # Conservative limit: 50 workers per CPU core, max 200 total
+            base_workers = min(200, cpu_count * 50)
+            worker_count = min(base_workers, max(50, len(hosts) // 4))
+            safe_log(f"Using {worker_count} workers for scanning ({cpu_count} CPU cores detected)")
             
             found_ips = []
             
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-                    # Submit all tasks
-                    future_to_ip = {}
+                # Use shared executor
+                future_to_ip = {}
+                with self._executor_lock:
+                    if not self._running:
+                        return
+                    
                     for ip in hosts:
-                        future = executor.submit(scan_ip, str(ip))
+                        future = self._thread_executor.submit(scan_ip, str(ip))
                         future_to_ip[future] = str(ip)
-                    
-                    # Wait for completion with timeout
-                    done, not_done = concurrent.futures.wait(
-                        future_to_ip.keys(), 
-                        timeout=len(hosts) * 0.3,  # 0.3s per host max
-                        return_when=concurrent.futures.ALL_COMPLETED
-                    )
-                    
-                    # Process completed futures
-                    for future in done:
-                        try:
-                            result = future.result()
-                            if result:
-                                found_count += 1
-                                found_ips.append(result)
-                                logger.info(f"Found open RTSP port at {result}")
-                        except Exception as e:
-                            logger.error(f"Error processing scan result: {e}")
-                    
-                    # Log any incomplete futures
-                    if not_done:
-                        logger.warning(f"{len(not_done)} scan tasks did not complete in time")
+                        self._active_futures.add(future)
+                
+                # Wait for completion with timeout
+                done, not_done = concurrent.futures.wait(
+                    future_to_ip.keys(), 
+                    timeout=len(hosts) * 0.3,  # 0.3s per host max
+                    return_when=concurrent.futures.ALL_COMPLETED
+                )
+                
+                # Process completed futures
+                for future in done:
+                    try:
+                        result = future.result()
+                        if result:
+                            found_count += 1
+                            found_ips.append(result)
+                            safe_log(f"Found open RTSP port at {result}")
+                    except Exception as e:
+                        safe_log(f"Error processing scan result: {e}", logging.ERROR)
+                    finally:
+                        with self._executor_lock:
+                            self._active_futures.discard(future)
+                
+                # Log any incomplete futures and clean them up
+                if not_done:
+                    safe_log(f"{len(not_done)} scan tasks did not complete in time", logging.WARNING)
+                    with self._executor_lock:
+                        for future in not_done:
+                            future.cancel()
+                            self._active_futures.discard(future)
                         
             except Exception as e:
-                logger.error(f"Error during concurrent scan: {e}")
+                safe_log(f"Error during concurrent scan: {e}", logging.ERROR)
             
             # Check cameras after scanning completes
-            logger.info(f"Port scan complete. Checking {len(found_ips)} cameras...")
+            safe_log(f"Port scan complete. Checking {len(found_ips)} cameras...")
             for ip in found_ips:
                 try:
                     self._check_camera_at_ip(ip, "Socket scan")
                 except Exception as e:
-                    logger.error(f"Error checking camera at {ip}: {e}")
+                    safe_log(f"Error checking camera at {ip}: {e}", logging.ERROR)
             
             if found_count > 0:
-                logger.info(f"Socket scan complete: found {found_count} cameras on {network}")
+                safe_log(f"Socket scan complete: found {found_count} cameras on {network}")
                         
         except Exception as e:
-            logger.error(f"Socket scan error: {e}")
+            safe_log(f"Socket scan error: {e}", logging.ERROR)
     
     def _check_rtsp_stream(self, camera: Camera) -> bool:
         """Check if camera has accessible RTSP stream"""
@@ -1725,14 +1801,23 @@ class CameraDetector:
         try:
             # Check if we're shutting down to avoid "cannot schedule new futures" error
             if not self._running:
-                logger.debug("Skipping RTSP stream check due to shutdown")
+                safe_log("Skipping RTSP stream check due to shutdown")
                 return False
+            
+            # Use shared executor
+            futures = []
+            with self._executor_lock:
+                if not self._running:
+                    return False
                 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-                try:
-                    futures = [executor.submit(test_rtsp_url, combo) for combo in test_combinations]
-                    
-                    for future in concurrent.futures.as_completed(futures):
+                for combo in test_combinations:
+                    future = self._thread_executor.submit(test_rtsp_url, combo)
+                    futures.append(future)
+                    self._active_futures.add(future)
+            
+            try:
+                for future in concurrent.futures.as_completed(futures):
+                    try:
                         result = future.result()
                         if result:
                             username, password, path, rtsp_url = result
@@ -1743,21 +1828,27 @@ class CameraDetector:
                             camera.stream_active = True
                             camera.last_validated = time.time()
                             
-                            logger.info(f"RTSP stream found at {camera.ip} (MAC: {camera.mac}) - {path}")
+                            safe_log(f"RTSP stream found at {camera.ip} (MAC: {camera.mac}) - {path}")
                             
                             # Cancel remaining futures
-                            for f in futures:
-                                f.cancel()
+                            with self._executor_lock:
+                                for f in futures:
+                                    f.cancel()
+                                    self._active_futures.discard(f)
                             
                             return True
-                except RuntimeError as e:
-                    if "cannot schedule new futures" in str(e):
-                        logger.debug("ThreadPoolExecutor shutdown during RTSP check")
-                        return False
-                    else:
-                        raise
+                    finally:
+                        with self._executor_lock:
+                            self._active_futures.discard(future)
+                            
+            except RuntimeError as e:
+                if "cannot schedule new futures" in str(e):
+                    safe_log("ThreadPoolExecutor shutdown during RTSP check")
+                    return False
+                else:
+                    raise
         except Exception as e:
-            logger.error(f"Error during parallel RTSP testing: {e}")
+            safe_log(f"Error during parallel RTSP testing: {e}", logging.ERROR)
             # Fall back to sequential testing
         
         # If first batch didn't work, try remaining paths sequentially
@@ -1775,7 +1866,7 @@ class CameraDetector:
                     camera.stream_active = True
                     camera.last_validated = time.time()
                     
-                    logger.info(f"RTSP stream found at {camera.ip} (MAC: {camera.mac}) - {path}")
+                    safe_log(f"RTSP stream found at {camera.ip} (MAC: {camera.mac}) - {path}")
                     return True
         
         return False
@@ -1800,47 +1891,53 @@ class CameraDetector:
             - Creates a temporary process for validation
             - Logs debug/warning messages
         """
-        logger.debug(f"Validating RTSP stream: {rtsp_url}")
+        safe_log(f"Validating RTSP stream: {rtsp_url}")
         
         # Convert timeout to milliseconds for OpenCV
         timeout_ms = max(self.config.RTSP_TIMEOUT * 1000, 1000)  # Minimum 1 second
         
-        # Use ProcessPoolExecutor for robust timeout handling
+        # Use shared ProcessPoolExecutor for robust timeout handling
         # This prevents hanging even if cv2.VideoCapture blocks indefinitely
         try:
-            with ProcessPoolExecutor(max_workers=1) as executor:
-                # Check if we're shutting down to avoid "cannot schedule new futures" error
+            # Check if we're shutting down to avoid "cannot schedule new futures" error
+            if not self._running:
+                safe_log("Skipping RTSP validation due to shutdown")
+                return False
+            
+            with self._executor_lock:
                 if not self._running:
-                    logger.debug("Skipping RTSP validation due to shutdown")
                     return False
                 
                 try:
                     # Submit validation task to separate process
-                    future = executor.submit(_rtsp_validation_worker, rtsp_url, timeout_ms)
+                    future = self._process_executor.submit(_rtsp_validation_worker, rtsp_url, timeout_ms)
+                    self._active_futures.add(future)
                     
                     # Wait for result with timeout
                     is_valid = future.result(timeout=self.config.RTSP_TIMEOUT)
                     
                     if is_valid:
-                        logger.debug(f"Successfully validated RTSP stream: {rtsp_url}")
+                        safe_log(f"Successfully validated RTSP stream: {rtsp_url}")
                     else:
-                        logger.debug(f"RTSP stream validation failed: {rtsp_url}")
+                        safe_log(f"RTSP stream validation failed: {rtsp_url}")
                         
                     return is_valid
                     
                 except FuturesTimeoutError:
-                    logger.warning(f"RTSP validation timed out after {self.config.RTSP_TIMEOUT}s: {rtsp_url}")
+                    safe_log(f"RTSP validation timed out after {self.config.RTSP_TIMEOUT}s: {rtsp_url}", logging.WARNING)
                     return False
+                finally:
+                    self._active_futures.discard(future)
                     
         except RuntimeError as e:
             if "cannot schedule new futures" in str(e):
-                logger.debug("ProcessPoolExecutor shutdown during RTSP validation")
+                safe_log("ProcessPoolExecutor shutdown during RTSP validation")
                 return False
             else:
-                logger.error(f"Unexpected RuntimeError during RTSP validation: {e}")
+                safe_log(f"Unexpected RuntimeError during RTSP validation: {e}", logging.ERROR)
                 return False
         except Exception as e:
-            logger.error(f"Unexpected error during RTSP validation: {e}")
+            safe_log(f"Unexpected error during RTSP validation: {e}", logging.ERROR)
             return False
     
     def _health_check_loop(self):
@@ -1858,7 +1955,7 @@ class CameraDetector:
                                 camera.online = False
                                 camera.stream_active = False
                                 self._publish_camera_status(camera, "offline")
-                                logger.warning(f"Camera {camera.name} ({camera.ip}) is offline")
+                                safe_log(f"Camera {camera.name} ({camera.ip}) is offline", logging.WARNING)
                                 # Mark for immediate rediscovery (likely DHCP address change)
                                 cameras_to_rediscover.append(camera)
                         
@@ -1871,16 +1968,16 @@ class CameraDetector:
                                 else:
                                     camera.stream_active = False
                                     self._publish_camera_status(camera, "stream_error")
-                                    logger.warning(f"Camera {camera.name} stream error")
+                                    safe_log(f"Camera {camera.name} stream error", logging.WARNING)
                 
                 # Trigger immediate rediscovery for offline cameras
                 if cameras_to_rediscover:
-                    logger.info(f"Triggering immediate rediscovery for {len(cameras_to_rediscover)} offline cameras")
+                    safe_log(f"Triggering immediate rediscovery for {len(cameras_to_rediscover)} offline cameras")
                     threading.Thread(target=self._rediscover_offline_cameras, 
                                    args=(cameras_to_rediscover,), daemon=True).start()
                 
             except Exception as e:
-                logger.error(f"Health check error: {e}")
+                safe_log(f"Health check error: {e}", logging.ERROR)
             
             time.sleep(30)
     
@@ -1895,7 +1992,7 @@ class CameraDetector:
             for camera in offline_cameras:
                 new_ip = self.mac_tracker.get_ip_for_mac(camera.mac)
                 if new_ip and new_ip != camera.ip:
-                    logger.info(f"Found camera {camera.name} at new IP {new_ip} (was {camera.ip})")
+                    safe_log(f"Found camera {camera.name} at new IP {new_ip} (was {camera.ip})")
                     camera.update_ip(new_ip)
                     # Validate the camera at new IP
                     if self._validate_camera_at_new_ip(camera):
@@ -1905,12 +2002,12 @@ class CameraDetector:
             # For cameras still not found, do a targeted scan
             networks = self._get_local_networks()
             for network in networks[:3]:  # Limit to first 3 networks for speed
-                logger.info(f"Quick scan for offline cameras on {network}")
+                safe_log(f"Quick scan for offline cameras on {network}")
                 # Use high parallelization for fast scan
                 self._quick_scan_for_cameras(network, offline_cameras)
                 
         except Exception as e:
-            logger.error(f"Error in offline camera rediscovery: {e}")
+            safe_log(f"Error in offline camera rediscovery: {e}")
     
     def _validate_camera_at_new_ip(self, camera: Camera) -> bool:
         """Validate camera at its current IP address"""
@@ -1938,7 +2035,7 @@ class CameraDetector:
             return self._check_rtsp_stream(camera)
             
         except Exception as e:
-            logger.error(f"Error validating camera at new IP: {e}")
+            safe_log(f"Error validating camera at new IP: {e}")
             return False
     
     def _quick_scan_for_cameras(self, network: str, target_cameras: List[Camera]):
@@ -1969,16 +2066,25 @@ class CameraDetector:
                     if mac:
                         for camera in target_cameras:
                             if camera.mac == mac:
-                                logger.info(f"Found offline camera {camera.name} at {ip_str}")
+                                safe_log(f"Found offline camera {camera.name} at {ip_str}")
                                 camera.update_ip(ip_str)
                                 if self._validate_camera_at_new_ip(camera):
                                     return camera
                 return None
             
-            with concurrent.futures.ThreadPoolExecutor(max_workers=worker_count) as executor:
-                futures = {executor.submit(check_ip_for_camera, str(ip)): str(ip) for ip in hosts}
+            # Use shared executor
+            futures = {}
+            with self._executor_lock:
+                if not self._running:
+                    return
                 
-                for future in concurrent.futures.as_completed(futures):
+                for ip in hosts:
+                    future = self._thread_executor.submit(check_ip_for_camera, str(ip))
+                    futures[future] = str(ip)
+                    self._active_futures.add(future)
+            
+            for future in concurrent.futures.as_completed(futures):
+                try:
                     result = future.result()
                     if result:
                         found_cameras.append(result)
@@ -1987,9 +2093,12 @@ class CameraDetector:
                         if not target_cameras:
                             # All cameras found
                             break
+                finally:
+                    with self._executor_lock:
+                        self._active_futures.discard(future)
                             
         except Exception as e:
-            logger.error(f"Quick scan error: {e}")
+            safe_log(f"Quick scan error: {e}")
     
     def _publish_camera_discovery(self, camera: Camera):
         """Publish camera discovery event"""
@@ -2003,10 +2112,10 @@ class CameraDetector:
             
             topic = f"{self.config.TOPIC_DISCOVERY}/{camera.id}"
             self.mqtt_client.publish(topic, json.dumps(payload), qos=1, retain=True)
-            logger.debug(f"Published discovery for camera {camera.id}")
+            safe_log(f"Published discovery for camera {camera.id}")
             
         except Exception as e:
-            logger.error(f"Failed to publish discovery: {e}")
+            safe_log(f"Failed to publish discovery: {e}")
     
     def _publish_camera_status(self, camera: Camera, status: str):
         """Publish camera status change"""
@@ -2021,10 +2130,10 @@ class CameraDetector:
             
             topic = f"{self.config.TOPIC_STATUS}/{camera.id}"
             self.mqtt_client.publish(topic, json.dumps(payload), qos=1)
-            logger.info(f"Camera {camera.name} status: {status}")
+            safe_log(f"Camera {camera.name} status: {status}")
             
         except Exception as e:
-            logger.error(f"Failed to publish status: {e}")
+            safe_log(f"Failed to publish status: {e}")
     
     def _update_frigate_config(self):
         """Update Frigate camera configuration"""
@@ -2071,20 +2180,25 @@ class CameraDetector:
             # Trigger Frigate reload
             self.mqtt_client.publish(self.config.FRIGATE_RELOAD_TOPIC, "", qos=1)
             
-            logger.info(f"Updated Frigate config with {len(frigate_config['cameras'])} cameras")
+            safe_log(f"Updated Frigate config with {len(frigate_config['cameras'])} cameras")
             
         except Exception as e:
-            logger.error(f"Failed to update Frigate config: {e}")
+            safe_log(f"Failed to update Frigate config: {e}")
     
     def _periodic_health_report(self):
         """Publish periodic health report"""
+        if not self._running:
+            return
+            
         try:
             self._publish_health()
         except Exception as e:
-            logger.error(f"Health report error: {e}")
+            safe_log(f"Health report error: {e}")
         
-        # Reschedule
-        threading.Timer(60, self._periodic_health_report).start()
+        # Reschedule only if still running
+        if self._running:
+            self._health_report_timer = threading.Timer(60, self._periodic_health_report)
+            self._health_report_timer.start()
     
     def _publish_health(self):
         """Publish health status"""
@@ -2125,7 +2239,7 @@ class CameraDetector:
                 retain=True
             )
         except Exception as e:
-            logger.error(f"Failed to publish health: {e}")
+            safe_log(f"Failed to publish health: {e}")
     
     def get_health(self) -> dict:
         """Get health status for health check"""
@@ -2138,30 +2252,69 @@ class CameraDetector:
     
     def run(self):
         """Main run loop"""
-        logger.info("Camera Detector Service started")
+        safe_log("Camera Detector Service started")
         
         try:
             while True:
                 time.sleep(1)
                 
         except KeyboardInterrupt:
-            logger.info("Shutdown requested")
+            safe_log("Shutdown requested")
         finally:
             self.cleanup()
     
     def cleanup(self):
         """Clean shutdown"""
-        logger.info("Cleaning up Camera Detector Service")
+        safe_log("Cleaning up Camera Detector Service")
         
         # Stop all background threads
         self._running = False
+        
+        # Cancel all active futures
+        with self._executor_lock:
+            for future in list(self._active_futures):
+                future.cancel()
+            self._active_futures.clear()
+        
+        # Stop the health report timer
+        if hasattr(self, '_health_report_timer'):
+            try:
+                self._health_report_timer.cancel()
+            except:
+                pass
+        
+        # Wait for background threads to finish
+        for thread in self._background_threads:
+            if thread.is_alive():
+                thread.join(timeout=2.0)
+        
+        # Give threads a moment to finish logging
+        time.sleep(0.5)
+        
+        # Shutdown executors with proper wait
+        safe_log("Shutting down thread executor...")
+        if hasattr(self, '_thread_executor') and self._thread_executor:
+            try:
+                self._thread_executor.shutdown(wait=True, cancel_futures=True)
+            except Exception as e:
+                safe_log(f"Error shutting down thread executor: {e}", logging.WARNING)
+        
+        safe_log("Shutting down process executor...")
+        if hasattr(self, '_process_executor') and self._process_executor:
+            try:
+                self._process_executor.shutdown(wait=True, cancel_futures=True)
+            except Exception as e:
+                safe_log(f"Error shutting down process executor: {e}", logging.WARNING)
         
         # Mark all cameras offline
         with self.lock:
             for camera in self.cameras.values():
                 if camera.online:
                     camera.online = False
-                    self._publish_camera_status(camera, "offline")
+                    try:
+                        self._publish_camera_status(camera, "offline")
+                    except:
+                        pass  # Ignore errors during shutdown
         
         # Publish offline status
         try:
@@ -2181,8 +2334,13 @@ class CameraDetector:
             pass
         
         # Disconnect MQTT
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
+        try:
+            self.mqtt_client.loop_stop()
+            self.mqtt_client.disconnect()
+        except:
+            pass
+        
+        safe_log("Camera Detector Service cleanup complete")
 
 # ─────────────────────────────────────────────────────────────
 # Main Entry Point

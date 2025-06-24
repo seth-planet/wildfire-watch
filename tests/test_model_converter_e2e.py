@@ -17,11 +17,14 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import numpy as np
+import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
 from convert_model import EnhancedModelConverter, ModelInfo
 
 
+@pytest.mark.timeout_expected
+@pytest.mark.model_converter
 class ModelConverterE2ETests(unittest.TestCase):
     """End-to-end tests for model conversion to all formats"""
     
@@ -64,24 +67,34 @@ class ModelConverterE2ETests(unittest.TestCase):
     
     def tearDown(self):
         """Clean up after each test"""
+        import gc
         for dir_path in [self.output_dir, self.calibration_dir]:
             if dir_path.exists():
-                shutil.rmtree(dir_path)
+                try:
+                    shutil.rmtree(dir_path)
+                except Exception as e:
+                    print(f"Warning: Failed to cleanup {dir_path}: {e}")
+        # Force garbage collection to release file handles
+        gc.collect()
     
     def _create_calibration_data(self):
         """Create minimal calibration data with actual images"""
         # Create small test images
         try:
             import cv2
-            for i in range(50):
-                # Create random image
-                img = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+            # Reduced from 50 to 10 images to prevent file descriptor exhaustion
+            for i in range(10):
+                # Create smaller random images (320x320 instead of 640x640)
+                img = np.random.randint(0, 255, (320, 320, 3), dtype=np.uint8)
                 cv2.imwrite(str(self.calibration_dir / f"calib_{i:04d}.jpg"), img)
+                # Explicitly delete the numpy array to free memory
+                del img
         except ImportError:
-            # Fallback to creating dummy files if cv2 not available
-            for i in range(50):
+            # Fallback to creating dummy files if cv2 not available - reduced count
+            for i in range(10):
                 (self.calibration_dir / f"calib_{i:04d}.jpg").touch()
     
+    @pytest.mark.timeout(600)  # 10 minutes for ONNX conversion
     def test_onnx_conversion(self):
         """Test conversion to ONNX format"""
         converter = EnhancedModelConverter(
@@ -120,6 +133,7 @@ class ModelConverterE2ETests(unittest.TestCase):
         except ImportError:
             print("ONNX not installed, skipping validation")
     
+    @pytest.mark.timeout(1800)  # 30 minutes for TFLite conversion with quantization
     def test_tflite_conversion(self):
         """Test conversion to TFLite format for Coral TPU"""
         converter = EnhancedModelConverter(
@@ -133,16 +147,30 @@ class ModelConverterE2ETests(unittest.TestCase):
         # Convert to TFLite
         results = converter.convert_all(formats=['tflite'], validate=False)
         
-        # Check TFLite files exist
-        tflite_path = self.output_dir / '320x320' / 'yolov8n_320x320.tflite'
-        edge_tpu_path = self.output_dir / '320x320' / 'yolov8n_320x320_edgetpu.tflite'
+        # Check TFLite files exist - the converter creates multiple variants
+        tflite_variants = [
+            'yolov8n_cpu.tflite',      # FP16 optimized
+            'yolov8n_quant.tflite',    # INT8 quantized
+            'yolov8n_dynamic.tflite',  # Dynamic range quantized
+            'yolov8n_edgetpu.tflite',  # Edge TPU compiled
+            'yolov8n_320x320.tflite',  # Legacy naming
+            'yolov8n_320x320_edgetpu.tflite'  # Legacy Edge TPU naming
+        ]
         
-        # At least the base TFLite should exist
+        # Check if any TFLite variant exists
+        tflite_found = False
+        for variant in tflite_variants:
+            if (self.output_dir / '320x320' / variant).exists():
+                tflite_found = True
+                break
+        
         self.assertTrue(
-            tflite_path.exists() or edge_tpu_path.exists(),
-            f"No TFLite files found in {self.output_dir / '320x320'}"
+            tflite_found,
+            f"No TFLite files found in {self.output_dir / '320x320'}. "
+            f"Checked for: {tflite_variants}"
         )
     
+    @pytest.mark.timeout(1200)  # 20 minutes for OpenVINO conversion
     def test_openvino_conversion(self):
         """Test conversion to OpenVINO format"""
         converter = EnhancedModelConverter(
@@ -157,8 +185,8 @@ class ModelConverterE2ETests(unittest.TestCase):
         results = converter.convert_all(formats=['openvino'], validate=False)
         
         # Check OpenVINO files exist
-        openvino_xml = self.output_dir / '320x320' / 'yolov8n_320x320_openvino.xml'
-        openvino_bin = self.output_dir / '320x320' / 'yolov8n_320x320_openvino.bin'
+        openvino_xml = self.output_dir / '320x320' / 'yolov8n_openvino.xml'
+        openvino_bin = self.output_dir / '320x320' / 'yolov8n_openvino.bin'
         
         # Check if conversion was attempted
         if 'openvino' in results['sizes']['320x320']['models']:
@@ -169,6 +197,7 @@ class ModelConverterE2ETests(unittest.TestCase):
                     f"OpenVINO files not found"
                 )
     
+    @pytest.mark.timeout(3600)  # 60 minutes for TensorRT engine building
     def test_tensorrt_conversion(self):
         """Test conversion to TensorRT format"""
         # Skip if not on Linux or no GPU
@@ -183,6 +212,10 @@ class ModelConverterE2ETests(unittest.TestCase):
             debug=True
         )
         
+        # Skip if TensorRT is not available
+        if not converter.hardware.get('nvidia', {}).get('tensorrt', False):
+            self.skipTest("TensorRT not available on this system")
+        
         # Convert to TensorRT
         results = converter.convert_all(formats=['tensorrt'], validate=False)
         
@@ -196,6 +229,7 @@ class ModelConverterE2ETests(unittest.TestCase):
             f"No TensorRT files found"
         )
     
+    @pytest.mark.timeout(2400)  # 40 minutes for Hailo conversion
     def test_hailo_conversion_with_python310(self):
         """Test Hailo conversion ensures Python 3.10 is used"""
         converter = EnhancedModelConverter(
@@ -317,6 +351,7 @@ class ModelConverterE2ETests(unittest.TestCase):
             if 'validation' in results['sizes']['320x320']:
                 self.assertIn('onnx', results['sizes']['320x320']['validation'])
     
+    @pytest.mark.timeout(7200)  # 2 hours for all formats conversion
     def test_all_formats_conversion(self):
         """Test conversion to all supported formats"""
         converter = EnhancedModelConverter(

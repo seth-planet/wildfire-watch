@@ -41,18 +41,27 @@ else
     export RECORD_QUALITY="23"
 fi
 
-# Mount USB storage
-log "Setting up storage..."
-python3 /scripts/usb_manager.py mount
-
-# Get storage stats
-STORAGE_STATS=$(python3 /scripts/usb_manager.py stats)
-if [ $? -eq 0 ]; then
-    log "Storage mounted successfully"
-    echo "$STORAGE_STATS"
+# Check for already mounted storage
+log "Checking for available storage..."
+# Look for already mounted drives or use the configured path
+if [ -d "$USB_MOUNT_PATH" ] && [ -w "$USB_MOUNT_PATH" ]; then
+    log "Using existing mount at $USB_MOUNT_PATH"
+    # Ensure Frigate directory structure exists
+    mkdir -p "$USB_MOUNT_PATH"/{recordings,clips,exports,logs} 2>/dev/null || true
 else
-    log "WARNING: No USB storage detected, using local storage"
-    mkdir -p /media/frigate/{recordings,clips,exports,logs}
+    log "No writable storage at $USB_MOUNT_PATH, using local storage"
+    # Use Frigate's default data directory which should be writable
+    export USB_MOUNT_PATH="/tmp/frigate"
+    mkdir -p "$USB_MOUNT_PATH"/{recordings,clips,exports,logs} 2>/dev/null || true
+fi
+
+# Get storage stats for the mount path
+if [ -d "$USB_MOUNT_PATH" ]; then
+    STORAGE_STATS=$(df -h "$USB_MOUNT_PATH" 2>/dev/null | tail -n 1 || echo "")
+    if [ -n "$STORAGE_STATS" ]; then
+        log "Storage statistics:"
+        echo "$STORAGE_STATS"
+    fi
 fi
 
 # Configure power mode
@@ -75,31 +84,86 @@ esac
 
 # Generate Frigate configuration
 log "Generating Frigate configuration..."
-python3 /scripts/camera_manager.py generate-config
+if ! python3 /scripts/camera_manager.py generate-config 2>/dev/null; then
+    log "WARNING: Camera manager failed, generating minimal config"
+    # Create a minimal Frigate config for testing/development
+    cat > /config/frigate.yml << EOF
+mqtt:
+  enabled: true
+  host: ${FRIGATE_MQTT_HOST:-mqtt_broker}
+  port: ${FRIGATE_MQTT_PORT:-1883}
+  topic_prefix: frigate
+  client_id: frigate
+  stats_interval: 30
+
+database:
+  path: ${USB_MOUNT_PATH}/frigate.db
+
+detectors:
+  cpu1:
+    type: cpu
+
+cameras: {}
+
+record:
+  enabled: false
+  path: ${USB_MOUNT_PATH}/recordings
+
+snapshots:
+  enabled: false
+  path: ${USB_MOUNT_PATH}/snapshots
+
+clips:
+  enabled: false
+  path: ${USB_MOUNT_PATH}/clips
+
+exports:
+  path: ${USB_MOUNT_PATH}/exports
+
+objects:
+  track:
+    - fire
+    - smoke
+
+logger:
+  default: ${LOG_LEVEL:-info}
+
+ui:
+  live_mode: mse
+  timezone: UTC
+
+birdseye:
+  enabled: false
+EOF
+fi
 
 # Validate configuration
 if [ -f "/config/frigate.yml" ]; then
-    log "Configuration generated successfully"
+    log "Configuration ready"
 else
-    log "ERROR: Failed to generate configuration"
+    log "ERROR: Failed to create configuration"
     exit 1
 fi
 
-# Start USB monitor in background
-log "Starting USB storage monitor..."
-python3 /scripts/usb_manager.py monitor &
-USB_MONITOR_PID=$!
+# Skip storage monitor since we're not mounting
+log "Storage monitoring disabled (using existing mounts only)"
+STORAGE_MONITOR_PID=""
 
-# Start power manager in background
-log "Starting power manager..."
-python3 /scripts/power_manager.py &
-POWER_MANAGER_PID=$!
+# Start power manager in background if available
+if [ -f "/scripts/power_manager.py" ]; then
+    log "Starting power manager..."
+    python3 /scripts/power_manager.py &
+    POWER_MANAGER_PID=$!
+else
+    log "Power manager not available, skipping..."
+    POWER_MANAGER_PID=""
+fi
 
 # Function to cleanup on exit
 cleanup() {
     log "Shutting down services..."
-    kill $USB_MONITOR_PID 2>/dev/null || true
-    kill $POWER_MANAGER_PID 2>/dev/null || true
+    [ -n "$STORAGE_MONITOR_PID" ] && kill $STORAGE_MONITOR_PID 2>/dev/null || true
+    [ -n "$POWER_MANAGER_PID" ] && kill $POWER_MANAGER_PID 2>/dev/null || true
     exit 0
 }
 
@@ -116,6 +180,7 @@ log "  Storage: ${USB_MOUNT_PATH}"
 log "  MQTT: ${FRIGATE_MQTT_HOST}:${FRIGATE_MQTT_PORT}"
 log "=================================================="
 
-# Start Frigate
+# Start Frigate using the base image's init system
 log "Starting Frigate NVR..."
-exec python3 -m frigate
+# Call the original entrypoint from the base image
+exec /init

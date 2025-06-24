@@ -38,7 +38,7 @@ TEST_CONFIG = {
     'TEST_VIDEO_URL': 'https://github.com/ultralytics/yolov5/raw/master/data/images/bus.jpg',  # Will be replaced with fire video
     'TEST_TIMEOUT': 300,  # 5 minutes for full E2E test
     'CONTAINER_BUILD_TIMEOUT': 600,  # 10 minutes for building
-    'FRIGATE_STARTUP_TIMEOUT': 120,  # 2 minutes for Frigate to start
+    'FRIGATE_STARTUP_TIMEOUT': 300,  # 5 minutes for Frigate to start (increased for full image)
 }
 
 class E2ETestOrchestrator:
@@ -51,6 +51,7 @@ class E2ETestOrchestrator:
         self.mqtt_messages = []
         self.gpio_states = {}
         self.test_network_name = "wildfire-e2e-test"
+        self.discovered_cameras = []
         
     def setup_test_environment(self):
         """Setup complete test environment"""
@@ -78,7 +79,9 @@ class E2ETestOrchestrator:
         
         # Start core services
         self.start_mqtt_broker()
-        self.start_frigate_with_test_video()
+        self.start_camera_detector()  # Discover real cameras
+        self.wait_for_camera_discovery()  # Wait for cameras to be found
+        self.start_frigate_with_discovered_cameras()
         self.start_fire_consensus()
         self.start_gpio_trigger()
         
@@ -119,42 +122,77 @@ class E2ETestOrchestrator:
         )
         print("✓ Fire Consensus built")
         
-        # Build GPIO Trigger
+        # Build GPIO Trigger - need to provide platform argument
         print("Building GPIO Trigger...")
+        import platform
+        current_platform = f"linux/{platform.machine()}"
         gpio_image = self.docker_client.images.build(
             path="gpio_trigger",
             tag="wildfire-gpio-trigger:test",
+            buildargs={'PLATFORM': current_platform},
             rm=True,
             timeout=TEST_CONFIG['CONTAINER_BUILD_TIMEOUT']
         )
         print("✓ GPIO Trigger built")
         
+        # Build Camera Detector
+        print("Building Camera Detector...")
+        detector_image = self.docker_client.images.build(
+            path="camera_detector",
+            tag="wildfire-camera-detector:test",
+            rm=True,
+            timeout=TEST_CONFIG['CONTAINER_BUILD_TIMEOUT']
+        )
+        print("✓ Camera Detector built")
+        
     def start_mqtt_broker(self):
         """Start MQTT broker"""
-        print("Starting MQTT broker...")
+        print("Starting MQTT broker with TLS...")
+        
+        # Get absolute path to certs directory
+        certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'certs'))
+        
+        # Use TLS ports (different from default to avoid conflicts)
+        mqtt_port = 18883  # TLS port
+        mqtt_insecure_port = 11883  # Non-TLS port for compatibility
         
         self.containers['mqtt'] = self.docker_client.containers.run(
             "wildfire-mqtt:test",
             name="e2e-mqtt-broker",
-            ports={'1883/tcp': 1883, '9001/tcp': 9001},
-            networks=[self.test_network_name],
+            ports={
+                '1883/tcp': mqtt_insecure_port,
+                '8883/tcp': mqtt_port,
+                '9001/tcp': 19001
+            },
+            network=self.test_network_name,
+            volumes={
+                certs_dir: {'bind': '/mosquitto/certs', 'mode': 'ro'}
+            },
             detach=True,
             remove=True,
             environment={
                 'MQTT_PORT': '1883',
+                'MQTT_TLS_PORT': '8883',
+                'MQTT_TLS': 'true'
             }
         )
         
-        # Wait for MQTT to be ready
-        self.wait_for_service_health('mqtt', 1883, 30)
-        print("✓ MQTT broker ready")
+        # Store the ports for other services
+        self.mqtt_port = mqtt_port  # TLS port
+        self.mqtt_insecure_port = mqtt_insecure_port  # Non-TLS port
+        
+        # Wait for MQTT to be ready (check TLS port)
+        self.wait_for_service_health('mqtt', mqtt_port, 30)
+        print("✓ MQTT broker ready with TLS")
         
     def create_test_frigate_config(self) -> str:
-        """Create Frigate configuration for test video"""
+        """Create Frigate configuration with placeholder for discovered cameras"""
+        # Start with a base config that camera_detector will update
         config = {
             'mqtt': {
                 'host': 'e2e-mqtt-broker',
-                'port': 1883,
+                'port': 8883,  # TLS port
+                'tls': True,
                 'topic_prefix': 'frigate',
                 'client_id': 'frigate'
             },
@@ -170,51 +208,40 @@ class E2ETestOrchestrator:
                 'width': 320,
                 'height': 320
             },
-            'cameras': {
-                'test_fire_camera': {
-                    'ffmpeg': {
-                        'inputs': [
-                            {
-                                'path': 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-                                'roles': ['detect']
-                            }
-                        ]
-                    },
-                    'detect': {
-                        'enabled': True,
-                        'width': 320,
-                        'height': 320,
-                        'fps': 5
-                    },
-                    'objects': {
-                        'track': ['fire', 'smoke'],
-                        'filters': {
-                            'fire': {
-                                'min_area': 100,
-                                'max_area': 100000,
-                                'threshold': 0.7
-                            },
-                            'smoke': {
-                                'min_area': 100, 
-                                'max_area': 100000,
-                                'threshold': 0.7
-                            }
-                        }
-                    },
-                    'zones': {
-                        'detection_zone': {
-                            'coordinates': '0,0,320,0,320,320,0,320'
-                        }
-                    }
-                }
-            },
+            'cameras': {},  # Will be populated by camera_detector
             'record': {
-                'enabled': False
+                'enabled': True,
+                'retain': {
+                    'days': 1,
+                    'mode': 'all'
+                }
             },
             'snapshots': {
                 'enabled': True,
                 'timestamp': True,
-                'bounding_box': True
+                'bounding_box': True,
+                'retain': {
+                    'default': 1,
+                    'objects': {
+                        'fire': 7,
+                        'smoke': 7
+                    }
+                }
+            },
+            'objects': {
+                'track': ['fire', 'smoke'],
+                'filters': {
+                    'fire': {
+                        'min_area': 100,
+                        'max_area': 100000,
+                        'threshold': 0.7
+                    },
+                    'smoke': {
+                        'min_area': 100, 
+                        'max_area': 100000,
+                        'threshold': 0.7
+                    }
+                }
             }
         }
         
@@ -222,16 +249,96 @@ class E2ETestOrchestrator:
         config_dir = Path("/tmp/frigate-e2e-config")
         config_dir.mkdir(exist_ok=True)
         
-        # Write config
+        # Write base config
+        base_file = config_dir / "frigate_base.yml"
+        with open(base_file, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+            
+        # Create empty camera config that will be updated
         config_file = config_dir / "config.yml"
         with open(config_file, 'w') as f:
             yaml.dump(config, f, default_flow_style=False)
             
         return str(config_dir)
         
-    def start_frigate_with_test_video(self):
-        """Start Frigate with test video configuration"""
-        print("Starting Frigate with test video...")
+    def start_camera_detector(self):
+        """Start Camera Detector service to discover real cameras"""
+        print("Starting Camera Detector...")
+        
+        # Get absolute path to certs directory
+        certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'certs'))
+        
+        # Get config directory for Frigate
+        config_dir = self.create_test_frigate_config()
+        
+        self.containers['camera_detector'] = self.docker_client.containers.run(
+            "wildfire-camera-detector:test",
+            name="e2e-camera-detector",
+            network=self.test_network_name,
+            volumes={
+                certs_dir: {'bind': '/mnt/data/certs', 'mode': 'ro'},
+                config_dir: {'bind': '/config', 'mode': 'rw'}
+            },
+            detach=True,
+            remove=True,
+            environment={
+                'MQTT_BROKER': 'e2e-mqtt-broker',
+                'MQTT_PORT': '8883',
+                'MQTT_TLS': 'true',
+                'CAMERA_CREDENTIALS': os.environ.get('CAMERA_CREDENTIALS', 'admin:,admin:admin'),  # Use env var or default
+                'DISCOVERY_INTERVAL': '10',  # Faster discovery for testing
+                'MAC_TRACKING_ENABLED': 'true',
+                'FRIGATE_UPDATE_ENABLED': 'true',
+                'FRIGATE_CONFIG_PATH': '/config/config.yml',
+                'LOG_LEVEL': 'DEBUG'
+            }
+        )
+        
+        print("✓ Camera Detector started")
+        
+    def wait_for_camera_discovery(self):
+        """Wait for cameras to be discovered"""
+        print("Waiting for camera discovery...")
+        
+        # Monitor MQTT for camera discovery messages
+        discovered_cameras = []
+        
+        def on_message(client, userdata, message):
+            if message.topic.startswith('cameras/discovered'):
+                try:
+                    data = json.loads(message.payload.decode())
+                    discovered_cameras.append(data)
+                    print(f"Discovered camera: {data.get('id', 'unknown')}")
+                except:
+                    pass
+        
+        mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="e2e-camera-monitor")
+        mqtt_client.on_message = on_message
+        mqtt_client.connect('localhost', self.mqtt_port, 60)
+        mqtt_client.subscribe('cameras/discovered', qos=1)
+        mqtt_client.subscribe('camera/discovery/+', qos=1)
+        mqtt_client.loop_start()
+        
+        # Wait up to 60 seconds for at least one camera
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            if discovered_cameras:
+                print(f"✓ Found {len(discovered_cameras)} cameras")
+                break
+            time.sleep(2)
+        
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+        
+        if not discovered_cameras:
+            print("WARNING: No cameras discovered, continuing with empty config")
+        
+        self.discovered_cameras = discovered_cameras
+        
+    def start_frigate_with_discovered_cameras(self):
+        """Start Frigate with discovered cameras"""
+        print("Starting Frigate with discovered cameras...")
+        print("Using production Dockerfile and entrypoint to ensure E2E correctness")
         
         config_dir = self.create_test_frigate_config()
         
@@ -245,27 +352,49 @@ class E2ETestOrchestrator:
         with open(f"{config_dir}/model.yml", 'w') as f:
             yaml.dump(model_config, f)
         
+        # Create media directory with unique name for this test
+        import tempfile
+        media_dir = Path(tempfile.mkdtemp(prefix="frigate-media-"))
+        print(f"Created media directory: {media_dir}")
+        
+        # Get absolute paths to required directories
+        utils_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'utils'))
+        certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'certs'))
+        
         self.containers['frigate'] = self.docker_client.containers.run(
             "wildfire-security-nvr:test",
             name="e2e-frigate",
             ports={'5000/tcp': 5000, '8554/tcp': 8554, '8555/tcp': 8555},
-            networks=[self.test_network_name],
+            network=self.test_network_name,
             volumes={
                 config_dir: {'bind': '/config', 'mode': 'rw'},
-                '/tmp/frigate-media': {'bind': '/media/frigate', 'mode': 'rw'}
+                str(media_dir): {'bind': '/media/frigate', 'mode': 'rw'},
+                utils_dir: {'bind': '/utils', 'mode': 'ro'},
+                certs_dir: {'bind': '/mnt/data/certs', 'mode': 'ro'}
             },
             detach=True,
             remove=True,
             environment={
                 'MQTT_BROKER': 'e2e-mqtt-broker',
-                'MQTT_PORT': '1883',
+                'MQTT_PORT': '8883',
+                'MQTT_TLS': 'true',
+                'FRIGATE_MQTT_HOST': 'e2e-mqtt-broker',
+                'FRIGATE_MQTT_PORT': '8883',
+                'FRIGATE_MQTT_TLS': 'true',
                 'FRIGATE_DETECTOR': 'cpu',
+                'DETECTOR_TYPE': 'cpu',  # For hardware detector script
+                'MODEL_PATH': '/config/model.yml',
+                'FRIGATE_MODEL': 'cpu',
+                'HARDWARE_ACCEL': 'disabled',
+                'USB_MOUNT_PATH': '/media/frigate',
+                'POWER_MODE': 'balanced',
                 'LOG_LEVEL': 'DEBUG'
             },
             shm_size='1g'
         )
         
-        # Wait for Frigate to be ready
+        # Wait for Frigate to be ready with extended timeout
+        print(f"Waiting up to {TEST_CONFIG['FRIGATE_STARTUP_TIMEOUT']} seconds for Frigate to start...")
         self.wait_for_service_health('frigate', 5000, TEST_CONFIG['FRIGATE_STARTUP_TIMEOUT'])
         print("✓ Frigate ready")
         
@@ -273,15 +402,22 @@ class E2ETestOrchestrator:
         """Start Fire Consensus service"""
         print("Starting Fire Consensus...")
         
+        # Get absolute path to certs directory
+        certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'certs'))
+        
         self.containers['consensus'] = self.docker_client.containers.run(
             "wildfire-fire-consensus:test",
             name="e2e-fire-consensus",
-            networks=[self.test_network_name],
+            network=self.test_network_name,
+            volumes={
+                certs_dir: {'bind': '/mnt/data/certs', 'mode': 'ro'}
+            },
             detach=True,
             remove=True,
             environment={
                 'MQTT_BROKER': 'e2e-mqtt-broker',
-                'MQTT_PORT': '1883',
+                'MQTT_PORT': '8883',
+                'MQTT_TLS': 'true',
                 'CONSENSUS_THRESHOLD': '1',  # Single camera for test
                 'SINGLE_CAMERA_TRIGGER': 'true',
                 'MIN_CONFIDENCE': '0.7',
@@ -296,15 +432,22 @@ class E2ETestOrchestrator:
         """Start GPIO Trigger service"""
         print("Starting GPIO Trigger...")
         
+        # Get absolute path to certs directory
+        certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'certs'))
+        
         self.containers['gpio'] = self.docker_client.containers.run(
             "wildfire-gpio-trigger:test",
             name="e2e-gpio-trigger",
-            networks=[self.test_network_name],
+            network=self.test_network_name,
+            volumes={
+                certs_dir: {'bind': '/mnt/data/certs', 'mode': 'ro'}
+            },
             detach=True,
             remove=True,
             environment={
                 'MQTT_BROKER': 'e2e-mqtt-broker', 
-                'MQTT_PORT': '1883',
+                'MQTT_PORT': '8883',
+                'MQTT_TLS': 'true',
                 'GPIO_SIMULATION': 'true',  # Enable simulation for testing
                 'LOG_LEVEL': 'DEBUG'
             }
@@ -316,9 +459,19 @@ class E2ETestOrchestrator:
         """Wait for a service to be healthy"""
         container = self.containers[service_name]
         start_time = time.time()
+        last_log_time = 0
         
         while time.time() - start_time < timeout:
             try:
+                # Check if container is still running
+                container.reload()
+                if container.status != 'running':
+                    # Get logs for debugging
+                    logs = container.logs(tail=50).decode()
+                    print(f"\n{service_name} container stopped with status: {container.status}")
+                    print(f"Last 50 lines of logs:\n{logs}")
+                    raise Exception(f"{service_name} container stopped: {container.status}")
+                
                 if service_name == 'mqtt':
                     # Test MQTT connection
                     import socket
@@ -334,15 +487,41 @@ class E2ETestOrchestrator:
                     if response.status_code == 200:
                         return True
                         
-                # Check if container is still running
-                container.reload()
-                if container.status != 'running':
-                    raise Exception(f"{service_name} container stopped: {container.status}")
-                    
-            except Exception as e:
+            except requests.exceptions.RequestException:
+                # Normal during startup
                 pass
+            except Exception as e:
+                if "container stopped" in str(e):
+                    raise
+                    
+            # Log progress every 10 seconds for Frigate, 30 for others
+            elapsed = int(time.time() - start_time)
+            log_interval = 10 if service_name == 'frigate' else 30
+            if elapsed - last_log_time >= log_interval:
+                print(f"Waiting for {service_name}... {elapsed}s/{timeout}s")
+                # Get container logs for debugging
+                try:
+                    logs = container.logs(tail=50).decode()
+                    if logs:
+                        print(f"Recent logs from {service_name}:")
+                        # Show more logs for Frigate during startup
+                        if service_name == 'frigate':
+                            print(logs)
+                        else:
+                            print(logs[-500:])
+                except Exception as e:
+                    print(f"Could not get logs: {e}")
+                last_log_time = elapsed
                 
             time.sleep(1)
+            
+        # Timeout - get final logs
+        try:
+            logs = container.logs(tail=100).decode()
+            print(f"\n{service_name} failed to start within {timeout} seconds.")
+            print(f"Final logs:\n{logs}")
+        except:
+            pass
             
         raise Exception(f"{service_name} service not ready within {timeout} seconds")
         
@@ -355,9 +534,17 @@ class E2ETestOrchestrator:
         """Inject fire detection messages to simulate fire detection"""
         print("Injecting fire detection messages...")
         
+        # Use first discovered camera or fallback to test camera
+        camera_id = 'test_fire_camera'
+        if self.discovered_cameras:
+            camera_id = self.discovered_cameras[0].get('id', camera_id)
+            print(f"Using discovered camera: {camera_id}")
+        else:
+            print("No cameras discovered, using test camera ID")
+        
         # Create MQTT client for test
         mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="e2e-test-client")
-        mqtt_client.connect('localhost', 1883, 60)
+        mqtt_client.connect('localhost', self.mqtt_port, 60)  # Use the actual port
         mqtt_client.loop_start()
         
         # Wait a moment for connection
@@ -369,7 +556,7 @@ class E2ETestOrchestrator:
         # Create growing fire detections for consensus
         for i in range(8):
             detection = {
-                'camera_id': 'test_fire_camera',
+                'camera_id': camera_id,
                 'object': 'fire',
                 'object_id': 'fire_test_1',
                 'confidence': 0.8 + i * 0.01,
@@ -389,7 +576,7 @@ class E2ETestOrchestrator:
                 'before': {},
                 'after': {
                     'id': f'fire_test_1_{i}',
-                    'camera': 'test_fire_camera',
+                    'camera': camera_id,
                     'label': 'fire',
                     'current_score': detection['confidence'],
                     'box': [
@@ -439,7 +626,7 @@ class E2ETestOrchestrator:
         
         mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="e2e-monitor")
         mqtt_client.on_message = on_message
-        mqtt_client.connect('localhost', 1883, 60)
+        mqtt_client.connect('localhost', self.mqtt_port, 60)  # Use the actual port
         
         # Subscribe to all relevant topics
         topics = [
@@ -526,6 +713,8 @@ class E2ETestOrchestrator:
         print("✓ Cleanup completed")
 
 
+@pytest.mark.slow
+@pytest.mark.infrastructure_dependent
 class TestE2EFireDetection:
     """Complete end-to-end fire detection test suite"""
     
@@ -540,6 +729,7 @@ class TestE2EFireDetection:
         finally:
             orch.cleanup()
             
+    @pytest.mark.timeout(600)  # 10 minute timeout
     def test_complete_fire_detection_pipeline(self, orchestrator):
         """Test complete fire detection from video to GPIO actuation"""
         print("\n" + "="*60)

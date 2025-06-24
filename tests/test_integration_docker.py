@@ -20,6 +20,7 @@ class DockerIntegrationTest:
         self.docker_client = docker.from_env()
         self.containers = {}
         self.test_passed = False
+        self.network = None
         
     def build_docker_images(self):
         """Build required Docker images"""
@@ -33,10 +34,16 @@ class DockerIntegrationTest:
             if os.path.exists(os.path.join(dockerfile_path, 'Dockerfile')):
                 print(f"Building {service}...")
                 try:
-                    # Build using docker-compose
+                    # Try docker compose v2 first, then v1
                     result = subprocess.run([
-                        'docker-compose', 'build', service
+                        'docker', 'compose', 'build', service
                     ], cwd=project_root, capture_output=True, text=True)
+                    
+                    if result.returncode != 0:
+                        # Try docker-compose v1
+                        result = subprocess.run([
+                            'docker-compose', 'build', service
+                        ], cwd=project_root, capture_output=True, text=True)
                     
                     if result.returncode == 0:
                         print(f"✓ Built {service}")
@@ -52,9 +59,32 @@ class DockerIntegrationTest:
                 except Exception as e:
                     print(f"Error building {service}: {e}")
                     
+    def create_test_network(self):
+        """Create a dedicated network for test containers"""
+        network_name = "wildfire-test-net"
+        
+        # Remove existing network if present
+        try:
+            existing = self.docker_client.networks.get(network_name)
+            existing.remove()
+        except docker.errors.NotFound:
+            pass
+        
+        # Create new network
+        self.network = self.docker_client.networks.create(
+            network_name,
+            driver="bridge"
+        )
+        print(f"Created test network: {network_name}")
+        return self.network
+        
     def start_mqtt_container(self):
         """Start MQTT broker container"""
         print("Starting MQTT broker container...")
+        
+        # Create network if not exists
+        if not self.network:
+            self.create_test_network()
         
         # Check if mosquitto image exists
         try:
@@ -71,13 +101,22 @@ class DockerIntegrationTest:
         except docker.errors.NotFound:
             pass
             
-        # Create and start container
+        # Create mosquitto config that listens on all interfaces
+        mosquitto_config = "listener 1883\nallow_anonymous true\n"
+        
+        # Create and start container with custom config
         container = self.docker_client.containers.run(
             "eclipse-mosquitto:latest",
             name="mqtt-test",
+            network=self.network.name,
             ports={'1883/tcp': 11883},
             detach=True,
-            remove=False
+            remove=False,
+            command=[
+                "sh", "-c",
+                f'echo "{mosquitto_config}" > /mosquitto/config/mosquitto.conf && '
+                'exec mosquitto -c /mosquitto/config/mosquitto.conf'
+            ]
         )
         
         self.containers['mqtt'] = container
@@ -100,17 +139,79 @@ class DockerIntegrationTest:
         """Start fire consensus container"""
         print("Starting fire consensus container...")
         
-        # Build custom consensus image
+        # Build custom consensus image for testing
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         consensus_path = os.path.join(project_root, 'fire_consensus')
         
         try:
-            # Build image
+            # Create test entrypoint script first
+            test_entrypoint = '''#!/bin/sh
+echo "Starting test environment..."
+# Try to start D-Bus and Avahi, but continue if they fail
+dbus-daemon --system --fork || echo "D-Bus failed (normal in test)"
+if command -v avahi-daemon >/dev/null 2>&1; then
+    mkdir -p /var/run/avahi-daemon || true
+    avahi-daemon --no-drop-root --daemonize --no-chroot || echo "Avahi failed (normal in test)"
+fi
+echo "=================================================="
+echo "Fire Consensus Service (TEST MODE)"
+echo "MQTT Broker: ${MQTT_BROKER}"
+echo "=================================================="
+exec "$@"
+'''
+            
+            test_entrypoint_path = os.path.join(consensus_path, 'test_entrypoint.sh')
+            with open(test_entrypoint_path, 'w') as f:
+                f.write(test_entrypoint)
+            os.chmod(test_entrypoint_path, 0o755)
+            
+            # Create a test-specific Dockerfile that runs as root
+            test_dockerfile = '''FROM python:3.13-slim
+
+# Install system dependencies for mDNS and resilience
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        avahi-daemon \
+        libnss-mdns \
+        dbus \
+        iputils-ping \
+        && rm -rf /var/lib/apt/lists/*
+
+# Configure mDNS resolution
+COPY nsswitch.conf /etc/nsswitch.conf
+
+# For testing, run as root to allow D-Bus and Avahi
+WORKDIR /app
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application files
+COPY consensus.py .
+COPY test_entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python", "-u", "consensus.py"]
+'''
+            
+            # Write test Dockerfile
+            test_dockerfile_path = os.path.join(consensus_path, 'Dockerfile.test')
+            with open(test_dockerfile_path, 'w') as f:
+                f.write(test_dockerfile)
+            
+            # Build image with test Dockerfile
             image, _ = self.docker_client.images.build(
                 path=consensus_path,
+                dockerfile='Dockerfile.test',
                 tag="wildfire-consensus:test",
                 rm=True
             )
+            
+            # Clean up test files
+            os.remove(test_dockerfile_path)
+            os.remove(test_entrypoint_path)
             
             # Remove old container
             try:
@@ -124,17 +225,23 @@ class DockerIntegrationTest:
             container = self.docker_client.containers.run(
                 "wildfire-consensus:test",
                 name="consensus-test",
+                network=self.network.name,
                 environment={
-                    'MQTT_BROKER': 'host.docker.internal',
-                    'MQTT_PORT': '11883',
-                    'CONSENSUS_THRESHOLD': '1',
-                    'SINGLE_CAMERA_TRIGGER': 'true',
+                    'MQTT_BROKER': 'mqtt-test',  # Use container name on same network
+                    'MQTT_PORT': '1883',  # Internal port, not mapped port
+                    'CONSENSUS_THRESHOLD': '2',
+                    'SINGLE_CAMERA_TRIGGER': 'false',
                     'MIN_CONFIDENCE': '0.7',
-                    'LOG_LEVEL': 'DEBUG'
+                    'LOG_LEVEL': 'DEBUG',
+                    'DETECTION_WINDOW': '15',
+                    'INCREASE_COUNT': '3',
+                    'AREA_INCREASE_RATIO': '1.1',
+                    'MOVING_AVERAGE_WINDOW': '2',
+                    'COOLDOWN_PERIOD': '0'
                 },
-                extra_hosts={'host.docker.internal': 'host-gateway'},
                 detach=True,
                 remove=False
+                # Use default entrypoint and command from Dockerfile
             )
             
             self.containers['consensus'] = container
@@ -166,37 +273,75 @@ class DockerIntegrationTest:
         
         # 5. Monitor for fire trigger
         triggered = False
+        messages = []
+        
         def on_message(client, userdata, msg):
             nonlocal triggered
+            messages.append((msg.topic, msg.payload))
             if msg.topic == "fire/trigger":
                 print(f"✓ Fire trigger received!")
                 triggered = True
+            elif "consensus" in msg.topic or "telemetry" in msg.topic:
+                print(f"Debug: {msg.topic} - {msg.payload[:100]}")
                 
         monitor = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "monitor")
         monitor.on_message = on_message
         monitor.connect("localhost", 11883)
-        monitor.subscribe("fire/trigger", qos=1)
+        monitor.subscribe("#", qos=0)  # Subscribe to all topics for debugging
         monitor.loop_start()
         
-        # 6. Inject fire detections
-        print("Injecting fire detections...")
+        # 6. Send camera telemetry first
+        print("Sending camera telemetry...")
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "publisher")
         publisher.connect("localhost", 11883)
         
-        for i in range(8):
-            detection = {
-                'camera_id': 'docker_test_cam',
-                'object': 'fire',
-                'object_id': 'fire_1',
-                'confidence': 0.75 + i * 0.02,
-                'bounding_box': [0.1, 0.1, 0.04 + i * 0.01, 0.04 + i * 0.008],
-                'timestamp': time.time() + i * 0.5
+        # Send telemetry for two cameras
+        for camera_id in ['docker_test_cam1', 'docker_test_cam2']:
+            telemetry = {
+                'camera_id': camera_id,
+                'status': 'online',
+                'timestamp': time.time()
             }
-            publisher.publish('fire/detection', json.dumps(detection), qos=1)
-            print(f"  Sent detection {i+1}")
+            publisher.publish('system/camera_telemetry', json.dumps(telemetry), qos=1)
+            print(f"  Sent telemetry for {camera_id}")
+        
+        time.sleep(2)  # Wait for telemetry to be processed
+        
+        # 7. Inject fire detections with growth pattern
+        print("Injecting fire detections...")
+        
+        # Send initial small detections
+        for i in range(4):
+            for camera_id in ['docker_test_cam1', 'docker_test_cam2']:
+                detection = {
+                    'camera_id': camera_id,
+                    'object_type': 'fire',  # Fixed key name
+                    'object_id': f'{camera_id}_fire_1',
+                    'confidence': 0.85,
+                    'bounding_box': [0.1, 0.1, 0.2, 0.2],  # Small initial fire
+                    'timestamp': time.time()
+                }
+                publisher.publish(f'fire/detection/{camera_id}', json.dumps(detection), qos=1)
+            print(f"  Sent initial detection {i+1}")
+            time.sleep(0.5)
+        
+        # Send growing detections
+        for i in range(6):
+            size = 0.2 + (i * 0.05)  # Growing fire
+            for camera_id in ['docker_test_cam1', 'docker_test_cam2']:
+                detection = {
+                    'camera_id': camera_id,
+                    'object_type': 'fire',
+                    'object_id': f'{camera_id}_fire_1',
+                    'confidence': 0.85,
+                    'bounding_box': [0.1, 0.1, 0.1 + size, 0.1 + size],  # Growing bbox
+                    'timestamp': time.time()
+                }
+                publisher.publish(f'fire/detection/{camera_id}', json.dumps(detection), qos=1)
+            print(f"  Sent growing detection {i+5} (size: {size:.2f})")
             time.sleep(0.5)
             
-        # 7. Wait and check
+        # 8. Wait and check
         print("Waiting for consensus...")
         time.sleep(10)
         
@@ -215,7 +360,7 @@ class DockerIntegrationTest:
         return triggered
         
     def cleanup(self):
-        """Clean up containers"""
+        """Clean up containers and network"""
         print("\nCleaning up containers...")
         for name, container in self.containers.items():
             try:
@@ -224,6 +369,14 @@ class DockerIntegrationTest:
                 print(f"✓ Removed {name} container")
             except Exception as e:
                 print(f"Error removing {name}: {e}")
+        
+        # Clean up network
+        if self.network:
+            try:
+                self.network.remove()
+                print("✓ Removed test network")
+            except Exception as e:
+                print(f"Error removing network: {e}")
 
 
 def test_docker_integration():
