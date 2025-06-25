@@ -251,24 +251,7 @@ def consensus_service(class_mqtt_broker, monkeypatch):
     
     # Cleanup - ensure complete shutdown
     try:
-        # Set shutdown flag first
-        service._shutdown = True
-        
-        # Stop MQTT client loop first to prevent new messages/reconnections
-        if hasattr(service, 'mqtt_client'):
-            # Disable callbacks to prevent logging errors during shutdown
-            service.mqtt_client.on_disconnect = None
-            service.mqtt_client.on_connect = None
-            service.mqtt_client.on_message = None
-            
-            # Stop the loop and disconnect
-            service.mqtt_client.loop_stop()
-            try:
-                service.mqtt_client.disconnect()
-            except Exception:
-                pass  # Ignore disconnect errors during cleanup
-        
-        # Then cleanup timers
+        # Call the service's cleanup method which handles everything properly
         service.cleanup()
         
         # Give a moment for threads to finish and connections to close

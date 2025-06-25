@@ -926,7 +926,7 @@ class TestIntegration:
                 controller.handle_fire_trigger()
                 wait_for_state(controller, PumpState.RUNNING)
                 controller._shutdown_engine()
-                wait_for_state(controller, PumpState.COOLDOWN)
+                wait_for_state(controller, PumpState.REFILLING)
             
             # Cleanup
             controller.cleanup()

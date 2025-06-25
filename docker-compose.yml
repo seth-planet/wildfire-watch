@@ -71,8 +71,8 @@ services:
   # Camera Discovery Service - needs MQTT
   camera_detector:
     build:
-      context: ./camera_detector
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./camera_detector/Dockerfile
       args:
         - PLATFORM=${PLATFORM:-linux/amd64}
     image: wildfire-watch/camera_detector:${VERSION:-latest}

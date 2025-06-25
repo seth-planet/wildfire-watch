@@ -26,6 +26,7 @@ if [ -f "$HARDWARE_CONFIG" ]; then
     export DETECTOR_TYPE=$(jq -r '.recommended.detector_type' "$HARDWARE_CONFIG")
     export DETECTOR_DEVICE=$(jq -r '.recommended.detector_device' "$HARDWARE_CONFIG")
     export MODEL_PATH=$(jq -r '.recommended.model_path' "$HARDWARE_CONFIG")
+    export MODEL_URL=$(jq -r '.recommended.model_url // empty' "$HARDWARE_CONFIG")
     export HWACCEL_ARGS=$(jq -r '.recommended.hwaccel_args | @json' "$HARDWARE_CONFIG")
     export RECORD_CODEC=$(jq -r '.recommended.record_codec' "$HARDWARE_CONFIG")
     export RECORD_PRESET=$(jq -r '.recommended.record_preset' "$HARDWARE_CONFIG")
@@ -39,6 +40,28 @@ else
     export RECORD_CODEC="copy"
     export RECORD_PRESET="fast"
     export RECORD_QUALITY="23"
+fi
+
+# Download model if needed (only if URL is set AND file doesn't exist)
+if [ -n "$MODEL_URL" ] && [ -n "$MODEL_PATH" ]; then
+    if [ ! -f "$MODEL_PATH" ]; then
+        log "Model not found locally, downloading..."
+        if python3 /scripts/download_model.py "$MODEL_URL" "$MODEL_PATH"; then
+            log "Model downloaded successfully"
+        else
+            log "WARNING: Model download failed, will use CPU fallback"
+            export DETECTOR_TYPE="cpu"
+            export MODEL_PATH="/models/wildfire_nano_tflite_fp32.tflite"
+        fi
+    else
+        log "Model already exists: $MODEL_PATH"
+    fi
+elif [ -n "$MODEL_PATH" ]; then
+    if [ -f "$MODEL_PATH" ]; then
+        log "Using local model: $MODEL_PATH"
+    else
+        log "WARNING: Model path set but file not found: $MODEL_PATH"
+    fi
 fi
 
 # Check for already mounted storage

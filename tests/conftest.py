@@ -43,6 +43,16 @@ try:
 except ImportError as e:
     logger.warning(f"Test isolation fixtures not available: {e}")
     
+# Import enhanced test isolation with garbage collection
+try:
+    from enhanced_test_isolation import (
+        comprehensive_test_isolation, cleanup_services,
+        EnhancedThreadManager, ResourceMonitor
+    )
+    logger.info("Enhanced test isolation loaded successfully")
+except ImportError as e:
+    logger.warning(f"Enhanced test isolation not available: {e}")
+    
 try:
     from enhanced_mqtt_broker import TestMQTTBroker
     logger.info("Enhanced MQTT broker loaded successfully")
@@ -87,7 +97,23 @@ def handle_session_timeouts():
     signal.signal(signal.SIGINT, original_sigint)
 
 def safe_log(message, level=logging.INFO):
-    """Safely log messages, catching I/O errors during teardown."""
+    """Safely log messages, checking handler state and catching I/O errors during teardown.
+    
+    This enhanced version checks if logging has been shut down or if handlers
+    are closed before attempting to log, preventing errors during teardown.
+    """
+    # Check if logging has been shut down globally
+    if hasattr(logging, '_shutdown') and logging._shutdown:
+        return
+        
+    # Check if the logger has handlers and if they're still operational
+    if hasattr(logger, 'handlers'):
+        for handler in logger.handlers:
+            # Check if handler has a stream that might be closed
+            if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                if handler.stream.closed:
+                    return
+                    
     try:
         logger.log(level, message)
     except (ValueError, OSError):
@@ -420,7 +446,7 @@ def pytest_collection_modifyitems(config, items):
             # Skip tests that are marked for other Python versions
             markers = [marker.name for marker in item.iter_markers()]
             skip_markers = ['python310', 'python38', 'yolo_nas', 'super_gradients', 
-                          'coral_tpu', 'tflite_runtime', 'model_converter', 
+                          'coral_tpu', 'tflite_runtime', 
                           'hardware_integration', 'deployment']
             
             if any(marker in markers for marker in skip_markers):

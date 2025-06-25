@@ -42,8 +42,11 @@ COPY security_nvr/camera_manager.py /scripts/
 COPY security_nvr/entrypoint.sh /scripts/
 COPY security_nvr/nvr_base_config.yml /config/
 
-# Copy the shared utils module
+# Copy the shared utils module  
 COPY utils /utils
+
+# Create a script to handle model downloads at runtime
+COPY security_nvr/download_model.py /scripts/
 
 # Make scripts executable
 RUN chmod +x /scripts/*.sh /scripts/*.py

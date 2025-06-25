@@ -208,7 +208,23 @@ logger.addHandler(null_handler)
 # Safe Logging Helper
 # ─────────────────────────────────────────────────────────────
 def safe_log(message, level=logging.INFO):
-    """Safely log messages, catching I/O errors during teardown."""
+    """Safely log messages, checking handler state and catching I/O errors during teardown.
+    
+    This enhanced version checks if logging has been shut down or if handlers
+    are closed before attempting to log, preventing errors during teardown.
+    """
+    # Check if logging has been shut down globally
+    if hasattr(logging, '_shutdown') and logging._shutdown:
+        return
+        
+    # Check if the logger has handlers and if they're still operational
+    if hasattr(logger, 'handlers'):
+        for handler in logger.handlers:
+            # Check if handler has a stream that might be closed
+            if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                if handler.stream.closed:
+                    return
+                    
     try:
         logger.log(level, message)
     except (ValueError, OSError, IOError):
@@ -1036,16 +1052,31 @@ class CameraDetector:
             
             # Update MAC mappings first if enabled
             if self.config.MAC_TRACKING_ENABLED and self._running:
-                future = self._thread_executor.submit(self._update_mac_mappings)
-                futures.append(future)
-                self._active_futures.add(future)
+                try:
+                    future = self._thread_executor.submit(self._update_mac_mappings)
+                    futures.append(future)
+                    self._active_futures.add(future)
+                except RuntimeError as e:
+                    if "cannot schedule new futures" in str(e):
+                        safe_log("ThreadPoolExecutor shutdown during MAC mapping update", logging.DEBUG)
+                    else:
+                        safe_log(f"RuntimeError during MAC mapping update: {e}", logging.ERROR)
             
             # Run discovery methods in parallel
             if self._running:
                 for method in [self._discover_onvif_cameras, self._discover_mdns_cameras, self._scan_rtsp_ports]:
-                    future = self._thread_executor.submit(method)
-                    futures.append(future)
-                    self._active_futures.add(future)
+                    if not self._running:  # Check before each submit
+                        break
+                    try:
+                        future = self._thread_executor.submit(method)
+                        futures.append(future)
+                        self._active_futures.add(future)
+                    except RuntimeError as e:
+                        if "cannot schedule new futures" in str(e):
+                            safe_log("ThreadPoolExecutor shutdown during discovery method submission", logging.DEBUG)
+                        else:
+                            safe_log(f"RuntimeError during discovery method submission: {e}", logging.ERROR)
+                        break
         
         # Wait for all to complete
         for future in concurrent.futures.as_completed(futures):
@@ -1109,9 +1140,19 @@ class CameraDetector:
                 return
             
             for cam in cameras_to_check:
-                future = self._thread_executor.submit(check_camera_health, cam)
-                futures[future] = cam
-                self._active_futures.add(future)
+                if not self._running:  # Check before each submit
+                    safe_log("Shutdown detected, stopping health checks")
+                    break
+                try:
+                    future = self._thread_executor.submit(check_camera_health, cam)
+                    futures[future] = cam
+                    self._active_futures.add(future)
+                except RuntimeError as e:
+                    if "cannot schedule new futures" in str(e):
+                        safe_log("ThreadPoolExecutor shutdown during health checks, stopping", logging.DEBUG)
+                    else:
+                        safe_log(f"RuntimeError during health checks: {e}", logging.ERROR)
+                    break
         
         for future in concurrent.futures.as_completed(futures):
             try:
@@ -1546,10 +1587,20 @@ class CameraDetector:
                     return
                 
                 for network in networks:
+                    if not self._running:  # Check before each submit
+                        safe_log("Shutdown detected, stopping network scans")
+                        break
                     safe_log(f"Submitting scan for network: {network}")
-                    future = self._thread_executor.submit(self._scan_single_network, network)
-                    futures.append(future)
-                    self._active_futures.add(future)
+                    try:
+                        future = self._thread_executor.submit(self._scan_single_network, network)
+                        futures.append(future)
+                        self._active_futures.add(future)
+                    except RuntimeError as e:
+                        if "cannot schedule new futures" in str(e):
+                            safe_log("ThreadPoolExecutor shutdown during network scan submission", logging.DEBUG)
+                        else:
+                            safe_log(f"RuntimeError during network scan submission: {e}", logging.ERROR)
+                        break
             
             # Wait for all scans to complete
             completed = 0
@@ -1697,9 +1748,19 @@ class CameraDetector:
                         return
                     
                     for ip in hosts:
-                        future = self._thread_executor.submit(scan_ip, str(ip))
-                        future_to_ip[future] = str(ip)
-                        self._active_futures.add(future)
+                        if not self._running:  # Check before each submit
+                            safe_log("Shutdown detected, stopping IP scan")
+                            break
+                        try:
+                            future = self._thread_executor.submit(scan_ip, str(ip))
+                            future_to_ip[future] = str(ip)
+                            self._active_futures.add(future)
+                        except RuntimeError as e:
+                            if "cannot schedule new futures" in str(e):
+                                safe_log("ThreadPoolExecutor shutdown during IP scan, stopping", logging.DEBUG)
+                            else:
+                                safe_log(f"RuntimeError during IP scan: {e}", logging.ERROR)
+                            break
                 
                 # Wait for completion with timeout
                 done, not_done = concurrent.futures.wait(
@@ -1811,9 +1872,19 @@ class CameraDetector:
                     return False
                 
                 for combo in test_combinations:
-                    future = self._thread_executor.submit(test_rtsp_url, combo)
-                    futures.append(future)
-                    self._active_futures.add(future)
+                    if not self._running:  # Check before each submit
+                        safe_log("Shutdown detected, stopping RTSP tests")
+                        break
+                    try:
+                        future = self._thread_executor.submit(test_rtsp_url, combo)
+                        futures.append(future)
+                        self._active_futures.add(future)
+                    except RuntimeError as e:
+                        if "cannot schedule new futures" in str(e):
+                            safe_log("ThreadPoolExecutor shutdown during RTSP tests, stopping", logging.DEBUG)
+                        else:
+                            safe_log(f"RuntimeError during RTSP tests: {e}", logging.ERROR)
+                        break
             
             try:
                 for future in concurrent.futures.as_completed(futures):
@@ -1908,6 +1979,7 @@ class CameraDetector:
                 if not self._running:
                     return False
                 
+                future = None  # Initialize to prevent UnboundLocalError
                 try:
                     # Submit validation task to separate process
                     future = self._process_executor.submit(_rtsp_validation_worker, rtsp_url, timeout_ms)
@@ -1926,8 +1998,15 @@ class CameraDetector:
                 except FuturesTimeoutError:
                     safe_log(f"RTSP validation timed out after {self.config.RTSP_TIMEOUT}s: {rtsp_url}", logging.WARNING)
                     return False
+                except RuntimeError as e:
+                    if "cannot schedule new futures" in str(e):
+                        safe_log("ProcessPoolExecutor shutdown during RTSP validation", logging.DEBUG)
+                    else:
+                        safe_log(f"RuntimeError during RTSP validation: {e}", logging.ERROR)
+                    return False
                 finally:
-                    self._active_futures.discard(future)
+                    if future is not None:  # Only discard if future was assigned
+                        self._active_futures.discard(future)
                     
         except RuntimeError as e:
             if "cannot schedule new futures" in str(e):
@@ -2079,9 +2158,19 @@ class CameraDetector:
                     return
                 
                 for ip in hosts:
-                    future = self._thread_executor.submit(check_ip_for_camera, str(ip))
-                    futures[future] = str(ip)
-                    self._active_futures.add(future)
+                    if not self._running:  # Check before each submit
+                        safe_log("Shutdown detected, stopping quick scan")
+                        break
+                    try:
+                        future = self._thread_executor.submit(check_ip_for_camera, str(ip))
+                        futures[future] = str(ip)
+                        self._active_futures.add(future)
+                    except RuntimeError as e:
+                        if "cannot schedule new futures" in str(e):
+                            safe_log("ThreadPoolExecutor shutdown during quick scan", logging.DEBUG)
+                        else:
+                            safe_log(f"RuntimeError during quick scan: {e}", logging.ERROR)
+                        break
             
             for future in concurrent.futures.as_completed(futures):
                 try:

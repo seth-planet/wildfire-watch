@@ -32,7 +32,7 @@ def mqtt_monitor(test_mqtt_broker):
     # Storage for captured messages
     captured_messages = []
     
-    def on_connect(client, userdata, flags, rc):
+    def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
             # Subscribe to all topics for monitoring
             client.subscribe("#", 0)
@@ -47,7 +47,7 @@ def mqtt_monitor(test_mqtt_broker):
     
     # Create monitoring client
     conn_params = test_mqtt_broker.get_connection_params()
-    monitor_client = mqtt.Client()
+    monitor_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
     monitor_client.on_connect = on_connect
     monitor_client.on_message = on_message
     
@@ -157,7 +157,7 @@ class TestRealIntegration:
             mqtt_monitor.clear()
             
             # Create publisher client for sending detection messages
-            publisher = mqtt.Client()
+            publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
             publisher.connect(conn_params['host'], conn_params['port'], 60)
             publisher.loop_start()
             
@@ -264,7 +264,7 @@ class TestRealIntegration:
             from trigger import GPIO
             
             # Create publisher client for sending trigger message
-            publisher = mqtt.Client()
+            publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
             publisher.connect(conn_params['host'], conn_params['port'], 60)
             publisher.loop_start()
             

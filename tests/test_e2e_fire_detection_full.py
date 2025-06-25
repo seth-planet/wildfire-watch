@@ -92,30 +92,34 @@ class E2ETestOrchestrator:
         """Build all Docker images from scratch"""
         print("Building Docker images from scratch...")
         
+        # Get project root (parent of tests directory)
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        
         # Build MQTT broker
         print("Building MQTT broker...")
         mqtt_image = self.docker_client.images.build(
-            path="mqtt_broker",
+            path=os.path.join(project_root, "mqtt_broker"),
             tag="wildfire-mqtt:test",
             rm=True,
             timeout=TEST_CONFIG['CONTAINER_BUILD_TIMEOUT']
         )
         print("✓ MQTT broker built")
         
-        # Build Frigate/Security NVR
-        print("Building Security NVR (Frigate)...")
+        # Build Frigate/Security NVR from project root with extended dockerfile
+        print("Building Security NVR (Frigate) with extended features...")
         frigate_image = self.docker_client.images.build(
-            path="security_nvr", 
-            tag="wildfire-security-nvr:test",
+            path=project_root,  # Build from project root to access utils
+            dockerfile="security_nvr/Dockerfile",
+            tag="wildfire-security-nvr-extended:test",
             rm=True,
             timeout=TEST_CONFIG['CONTAINER_BUILD_TIMEOUT']
         )
-        print("✓ Security NVR built")
+        print("✓ Security NVR Extended built")
         
         # Build Fire Consensus
         print("Building Fire Consensus...")
         consensus_image = self.docker_client.images.build(
-            path="fire_consensus",
+            path=os.path.join(project_root, "fire_consensus"),
             tag="wildfire-fire-consensus:test", 
             rm=True,
             timeout=TEST_CONFIG['CONTAINER_BUILD_TIMEOUT']
@@ -127,7 +131,7 @@ class E2ETestOrchestrator:
         import platform
         current_platform = f"linux/{platform.machine()}"
         gpio_image = self.docker_client.images.build(
-            path="gpio_trigger",
+            path=os.path.join(project_root, "gpio_trigger"),
             tag="wildfire-gpio-trigger:test",
             buildargs={'PLATFORM': current_platform},
             rm=True,
@@ -135,15 +139,16 @@ class E2ETestOrchestrator:
         )
         print("✓ GPIO Trigger built")
         
-        # Build Camera Detector
-        print("Building Camera Detector...")
+        # Build Camera Detector from project root to access utils
+        print("Building Camera Detector with extended features...")
         detector_image = self.docker_client.images.build(
-            path="camera_detector",
-            tag="wildfire-camera-detector:test",
+            path=project_root,  # Build from project root to access utils
+            dockerfile="camera_detector/Dockerfile",
+            tag="wildfire-camera-detector-extended:test",
             rm=True,
             timeout=TEST_CONFIG['CONTAINER_BUILD_TIMEOUT']
         )
-        print("✓ Camera Detector built")
+        print("✓ Camera Detector Extended built")
         
     def start_mqtt_broker(self):
         """Start MQTT broker"""
@@ -272,7 +277,7 @@ class E2ETestOrchestrator:
         config_dir = self.create_test_frigate_config()
         
         self.containers['camera_detector'] = self.docker_client.containers.run(
-            "wildfire-camera-detector:test",
+            "wildfire-camera-detector-extended:test",
             name="e2e-camera-detector",
             network=self.test_network_name,
             volumes={
@@ -362,7 +367,7 @@ class E2ETestOrchestrator:
         certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'certs'))
         
         self.containers['frigate'] = self.docker_client.containers.run(
-            "wildfire-security-nvr:test",
+            "wildfire-security-nvr-extended:test",
             name="e2e-frigate",
             ports={'5000/tcp': 5000, '8554/tcp': 8554, '8555/tcp': 8555},
             network=self.test_network_name,

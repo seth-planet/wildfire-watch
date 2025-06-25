@@ -24,7 +24,7 @@ RUN apt-get update && \
         && rm -rf /var/lib/apt/lists/*
 
 # Configure mDNS resolution
-COPY nsswitch.conf /etc/nsswitch.conf
+COPY camera_detector/nsswitch.conf /etc/nsswitch.conf
 
 # Create non-root user
 RUN useradd -m -s /bin/bash detector && \
@@ -33,18 +33,30 @@ RUN useradd -m -s /bin/bash detector && \
 
 WORKDIR /app
 
+# Copy utils module
+COPY utils /utils
+# Add root to Python path so utils can be imported
+ENV PYTHONPATH=/
+
 # Install Python dependencies
-COPY requirements.txt .
+COPY camera_detector/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy WSDL files script
+COPY camera_detector/copy_wsdl.py .
+
+# Copy WSDL files from onvif-zeep package to expected location
+RUN python3 copy_wsdl.py
+
 # Copy application files
-COPY detect.py .
-COPY entrypoint_simple.sh /usr/local/bin/entrypoint.sh
+COPY camera_detector/detect.py .
+COPY camera_detector/entrypoint_simple.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Create directories for Frigate config
 RUN mkdir -p /config/frigate && \
-    chown -R detector:detector /config
+    chown -R detector:detector /config && \
+    chmod -R 755 /utils
 
 # Switch to non-root user
 USER detector

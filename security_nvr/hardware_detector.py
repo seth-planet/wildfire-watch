@@ -64,9 +64,13 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Import centralized command runner
+# Import centralized command runner and model naming
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.command_runner import run_command, CommandError
+from utils.model_naming import (
+    get_model_filename, get_model_path, get_model_url,
+    determine_model_size_for_hardware, list_available_models
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -402,15 +406,79 @@ class HardwareDetector:
             'record_quality': '23'
         }
         
-        # Select best detector
+        # Determine optimal model size based on hardware
+        gpu_memory = self.detected_hardware['gpu'].get('memory_mb', 0)
+        coral_count = (len(self.detected_hardware['coral']['usb']) + 
+                      len(self.detected_hardware['coral']['pcie']))
+        has_hailo = bool(self.detected_hardware['hailo']['devices'])
+        
+        model_size = determine_model_size_for_hardware(
+            gpu_memory_mb=gpu_memory,
+            coral_count=coral_count,
+            has_hailo=has_hailo
+        )
+        
+        # Model repository URL (configurable via environment)
+        model_repo = os.environ.get('MODEL_REPOSITORY', 
+                                   'https://huggingface.co/mailseth/wildfire-watch/resolve/main')
+        
+        # Select best detector and determine model parameters
+        accelerator = None
+        precision = None
+        
         if self.detected_hardware['gpu']['vendor'] == 'nvidia':
             config['detector_type'] = 'tensorrt'
+            accelerator = 'tensorrt'
+            # Prefer INT8 for efficiency, fallback to FP16
+            precision = 'int8'  # Try INT8 first
         elif self.detected_hardware['hailo']['devices']:
             config['detector_type'] = 'hailo'
-            config['model_path'] = '/models/wildfire/wildfire_hailo8.hef'
+            accelerator = 'hailo'
+            precision = 'int8'  # Hailo uses INT8
         elif self.detected_hardware['coral']['usb'] or self.detected_hardware['coral']['pcie']:
             config['detector_type'] = 'edgetpu'
-            config['model_path'] = '/models/wildfire/wildfire_coral_lite.tflite'
+            accelerator = 'coral'
+            precision = 'int8'  # Coral requires INT8
+        else:
+            config['detector_type'] = 'cpu'
+            accelerator = 'tflite'
+            precision = 'fp32'  # CPU uses FP32
+        
+        # Check for available models in priority order
+        model_dir = Path('/models')
+        model_found = False
+        
+        # For TensorRT, try INT8 first, then FP16
+        if accelerator == 'tensorrt':
+            for try_precision in ['int8', 'fp16']:
+                model_path = get_model_path(model_dir, model_size, accelerator, try_precision)
+                if model_path.exists():
+                    config['model_path'] = str(model_path)
+                    config['model_precision'] = try_precision
+                    model_found = True
+                    print(f"Found {try_precision.upper()} TensorRT model: {model_path.name}")
+                    break
+        else:
+            # For other accelerators, use the determined precision
+            model_path = get_model_path(model_dir, model_size, accelerator, precision)
+            if model_path.exists():
+                config['model_path'] = str(model_path)
+                config['model_precision'] = precision
+                model_found = True
+                print(f"Found model: {model_path.name}")
+        
+        if not model_found:
+            # Model needs to be downloaded
+            filename = get_model_filename(model_size, accelerator, precision)
+            model_path = model_dir / filename
+            model_url = get_model_url(model_repo, model_size, accelerator, precision)
+            
+            config['model_path'] = str(model_path)
+            config['model_url'] = model_url
+            config['model_precision'] = precision
+            print(f"Model will be downloaded: {filename}")
+            print(f"  From: {model_url}")
+            print(f"  To: {model_path}")
 
         # Select best hardware acceleration for video
         gpu = self.detected_hardware['gpu']
@@ -437,7 +505,7 @@ class HardwareDetector:
             ]
 
         return config
-
+    
 if __name__ == '__main__':
     detector = HardwareDetector()
     config = detector.get_recommended_config()

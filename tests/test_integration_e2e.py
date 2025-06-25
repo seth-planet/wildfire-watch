@@ -8,7 +8,10 @@ import time
 import json
 import pytest
 import docker
+import yaml
+import subprocess
 import paho.mqtt.client as mqtt
+from pathlib import Path
 from typing import Dict, List
 try:
     from tests.integration_setup_fixed import IntegrationTestSetup
@@ -100,6 +103,7 @@ class TestE2EIntegration:
         subscriber.connect("localhost", 18833, 60)
         
         # Subscribe to the correct topics that camera-detector actually uses
+        subscriber.subscribe("cameras/discovered")
         subscriber.subscribe("camera/discovery/+")
         subscriber.subscribe("camera/status/+")
         subscriber.subscribe("frigate/config/+")
@@ -237,3 +241,321 @@ class TestE2EIntegration:
         
         time.sleep(10)
         assert connected, "Camera detector did not reconnect"
+
+
+@pytest.mark.integration
+@pytest.mark.e2e
+@pytest.mark.timeout(1800)  # 30 minutes for complete pipeline test
+class TestE2EPipelineWithRealCameras:
+    """Test complete E2E pipeline with real camera discovery"""
+    
+    @pytest.fixture(scope="class")
+    def docker_client(self):
+        """Get Docker client"""
+        return docker.from_env()
+    
+    @pytest.fixture(scope="class")
+    def e2e_setup(self, docker_client):
+        """Setup E2E test environment with host networking for camera discovery"""
+        containers = {}
+        
+        # Clean up any existing containers
+        for name in ['e2e-mqtt', 'e2e-camera-detector', 'e2e-frigate', 
+                     'e2e-consensus', 'e2e-gpio']:
+            try:
+                container = docker_client.containers.get(name)
+                container.stop(timeout=5)
+                container.remove()
+            except:
+                pass
+        
+        # Start MQTT broker on host network
+        import tempfile
+        import shutil
+        
+        # Create a new temporary directory each time
+        cert_dir = Path(tempfile.mkdtemp(prefix="e2e-mqtt-certs-"))
+        
+        # Copy certificates
+        shutil.copytree(
+            "/home/seth/wildfire-watch/certs",
+            cert_dir,
+            dirs_exist_ok=True
+        )
+        
+        # Fix permissions recursively
+        for root, dirs, files in os.walk(cert_dir):
+            for d in dirs:
+                os.chmod(os.path.join(root, d), 0o755)
+            for f in files:
+                os.chmod(os.path.join(root, f), 0o644)
+        
+        # Create mosquitto config
+        config = """
+listener 1883
+allow_anonymous true
+log_type all
+
+listener 8883
+cafile /mosquitto/config/ca.crt
+certfile /mosquitto/config/server.crt
+keyfile /mosquitto/config/server.key
+require_certificate false
+"""
+        config_path = cert_dir / "mosquitto.conf"
+        config_path.write_text(config)
+        
+        containers['mqtt'] = docker_client.containers.run(
+            "eclipse-mosquitto:2.0",
+            name="e2e-mqtt",
+            network_mode="host",
+            volumes={
+                str(cert_dir): {'bind': '/mosquitto/config', 'mode': 'ro'}
+            },
+            detach=True,
+            remove=True,
+            user="root"
+        )
+        
+        # Wait for MQTT to start
+        time.sleep(5)
+        
+        yield containers
+        
+        # Cleanup
+        for container in containers.values():
+            try:
+                container.stop(timeout=5)
+                container.remove()
+            except:
+                pass
+    
+    def test_complete_pipeline_with_real_cameras(self, docker_client, e2e_setup):
+        """Test complete fire detection pipeline with real camera discovery"""
+        # Require CAMERA_CREDENTIALS environment variable
+        if 'CAMERA_CREDENTIALS' not in os.environ:
+            pytest.fail("CAMERA_CREDENTIALS environment variable must be set for real camera testing")
+        
+        containers = e2e_setup
+        discovered_cameras = []
+        mqtt_messages = []
+        fire_triggered = False
+        
+        # Create config directory
+        config_dir = Path("/tmp/e2e-frigate-config")
+        config_dir.mkdir(exist_ok=True)
+        
+        # Start camera detector with host networking
+        containers['camera'] = docker_client.containers.run(
+            "wildfire-camera-detector-extended:test",
+            name="e2e-camera-detector",
+            network_mode="host",
+            volumes={
+                str(config_dir): {'bind': '/config', 'mode': 'rw'}
+            },
+            environment={
+                'MQTT_BROKER': 'localhost',
+                'MQTT_PORT': '1883',
+                'MQTT_TLS': 'false',
+                'CAMERA_CREDENTIALS': os.environ['CAMERA_CREDENTIALS'],
+                'DISCOVERY_INTERVAL': '30',
+                'LOG_LEVEL': 'DEBUG',
+                'SCAN_SUBNETS': '192.168.5.0/24',  # Focus on the specific subnet
+                'FRIGATE_CONFIG_PATH': '/config/config.yml'
+            },
+            detach=True,
+            remove=True
+        )
+        
+        # Monitor camera discoveries
+        def on_discovery(client, userdata, msg):
+            try:
+                if 'cameras/discovered' in msg.topic:
+                    data = json.loads(msg.payload.decode())
+                    discovered_cameras.append(data)
+                    print(f"Discovered camera: {data.get('ip')}")
+            except:
+                pass
+        
+        # Connect to MQTT to monitor discoveries
+        discovery_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        discovery_client.on_message = on_discovery
+        discovery_client.connect('localhost', 1883, 60)
+        discovery_client.subscribe('cameras/discovered')
+        discovery_client.loop_start()
+        
+        # Wait for camera discovery (up to 3 minutes)
+        start_time = time.time()
+        while time.time() - start_time < 180 and len(discovered_cameras) < 1:
+            time.sleep(5)
+        
+        discovery_client.loop_stop()
+        discovery_client.disconnect()
+        
+        if not discovered_cameras:
+            pytest.skip("No cameras discovered on network")
+        
+        # Create Frigate config with discovered cameras
+        frigate_config = {
+            'mqtt': {
+                'host': 'localhost',
+                'port': 1883,
+                'topic_prefix': 'frigate'
+            },
+            'detectors': {
+                'cpu': {'type': 'cpu'}
+            },
+            'cameras': {}
+        }
+        
+        for i, cam in enumerate(discovered_cameras[:2]):  # Use first 2 cameras
+            cam_id = f"camera_{i}"
+            rtsp_url = cam.get('rtsp_url', '')
+            if rtsp_url:
+                frigate_config['cameras'][cam_id] = {
+                    'ffmpeg': {
+                        'inputs': [{
+                            'path': rtsp_url,
+                            'roles': ['detect']
+                        }]
+                    },
+                    'detect': {
+                        'width': 640,
+                        'height': 480,
+                        'fps': 5
+                    },
+                    'objects': {
+                        'track': ['person', 'car', 'fire', 'smoke']
+                    }
+                }
+        
+        # Always add a dummy camera for Frigate to start
+        if not frigate_config['cameras']:
+            frigate_config['cameras']['dummy'] = {
+                'enabled': False,
+                'ffmpeg': {
+                    'inputs': [{
+                        'path': 'rtsp://127.0.0.1/dummy',
+                        'roles': ['detect']
+                    }]
+                }
+            }
+        
+        with open(config_dir / 'config.yml', 'w') as f:
+            yaml.dump(frigate_config, f)
+        
+        # Start Frigate
+        media_dir = Path("/tmp/e2e-frigate-media")
+        media_dir.mkdir(exist_ok=True)
+        
+        containers['frigate'] = docker_client.containers.run(
+            "ghcr.io/blakeblackshear/frigate:stable",
+            name="e2e-frigate",
+            network_mode="host",
+            volumes={
+                str(config_dir): {'bind': '/config', 'mode': 'ro'},
+                str(media_dir): {'bind': '/media/frigate', 'mode': 'rw'},
+                "/etc/localtime": {'bind': '/etc/localtime', 'mode': 'ro'}
+            },
+            environment={
+                'FRIGATE_DETECTOR': 'cpu'
+            },
+            shm_size='512m',
+            detach=True,
+            remove=True,
+            privileged=True
+        )
+        
+        # Start consensus service
+        containers['consensus'] = docker_client.containers.run(
+            "wildfire-fire-consensus:test",
+            name="e2e-consensus",
+            network_mode="host",
+            environment={
+                'MQTT_BROKER': 'localhost',
+                'MQTT_PORT': '1883',
+                'MQTT_TLS': 'false',
+                'CONSENSUS_THRESHOLD': '1',
+                'LOG_LEVEL': 'DEBUG'
+            },
+            detach=True,
+            remove=True
+        )
+        
+        # Start GPIO trigger
+        containers['gpio'] = docker_client.containers.run(
+            "wildfire-gpio-trigger:test",
+            name="e2e-gpio",
+            network_mode="host",
+            environment={
+                'MQTT_BROKER': 'localhost',
+                'MQTT_PORT': '1883',
+                'MQTT_TLS': 'false',
+                'GPIO_SIMULATION': 'true',
+                'LOG_LEVEL': 'DEBUG'
+            },
+            detach=True,
+            remove=True
+        )
+        
+        # Wait for services to start
+        time.sleep(20)
+        
+        # Verify all services are running
+        for name, container in containers.items():
+            container.reload()
+            assert container.status == 'running', f"{name} is not running"
+        
+        # Set up MQTT monitoring for fire detection
+        def on_message(client, userdata, msg):
+            nonlocal fire_triggered
+            mqtt_messages.append({
+                'topic': msg.topic,
+                'payload': msg.payload.decode()[:100]
+            })
+            
+            if 'trigger/fire_detected' in msg.topic:
+                fire_triggered = True
+            elif 'gpio/status' in msg.topic and 'on' in msg.payload.decode().lower():
+                fire_triggered = True
+        
+        # Connect to MQTT
+        test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        test_client.on_message = on_message
+        test_client.connect('localhost', 1883, 60)
+        test_client.subscribe('#')
+        test_client.loop_start()
+        
+        # Simulate fire detection
+        camera_id = 'camera_0' if discovered_cameras else 'test_cam'
+        
+        for i in range(5):
+            event = {
+                'type': 'new',
+                'after': {
+                    'id': f'test-{i}',
+                    'label': 'fire',
+                    'camera': camera_id,
+                    'score': 0.85,
+                    'top_score': 0.85,
+                    'false_positive': False,
+                    'start_time': time.time() - i,
+                    'end_time': None,
+                    'current_zones': [],
+                    'entered_zones': []
+                }
+            }
+            
+            test_client.publish('frigate/events', json.dumps(event))
+            time.sleep(1)
+        
+        # Wait for processing
+        time.sleep(15)
+        
+        test_client.loop_stop()
+        test_client.disconnect()
+        
+        # Verify results
+        assert len(discovered_cameras) > 0, "No cameras discovered"
+        assert len(mqtt_messages) > 0, "No MQTT messages received"
+        assert fire_triggered, "Fire detection did not trigger GPIO"

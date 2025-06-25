@@ -39,6 +39,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import numpy as np
 from accuracy_validator import AccuracyValidator, AccuracyMetrics
 
+# Add parent directory to path for utils
+sys.path.append(str(Path(__file__).parent.parent))
+from utils.model_naming import get_size_category, get_model_filename, PRECISION_MAP
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -126,7 +130,8 @@ class EnhancedModelConverter:
         qat_enabled: bool = False,
         target_hardware: List[str] = None,
         debug: bool = False,
-        auto_download: bool = True
+        auto_download: bool = True,
+        apply_qat: bool = False
     ):
         # Handle model path - check if it's a known model name
         if auto_download and model_path in MODEL_URLS and not Path(model_path).exists():
@@ -197,6 +202,11 @@ class EnhancedModelConverter:
         # Detect hardware
         self.hardware = self._detect_hardware()
         logger.info(f"Detected hardware: {self.hardware}")
+        
+        # Apply QAT if requested
+        self.apply_qat = apply_qat
+        if self.apply_qat and self.model_path.suffix == '.pt':
+            logger.info("QAT application requested - will apply before conversion")
     
     def _parse_model_sizes(self, size_input: Union[int, str, Tuple[int, int], List]) -> List[Tuple[int, int]]:
         """Parse and validate model sizes input
@@ -3527,6 +3537,8 @@ The converter tool itself is MIT licensed.
             'intel': {'cpu': True, 'openvino': False}
         }
         
+        logger.debug("Starting hardware detection...")
+        
         # Check for hardware - simplified approach
         try:
             # Coral USB
@@ -3540,18 +3552,33 @@ The converter tool itself is MIT licensed.
                 hardware['coral']['pcie'] = True
                 
             # Hailo
-            result = subprocess.run(['hailortcli', 'fw-control', 'identify'], 
-                                  capture_output=True, timeout=2)
-            if result.returncode == 0:
-                hardware['hailo']['hailo8'] = True
+            try:
+                result = subprocess.run(['hailortcli', 'fw-control', 'identify'], 
+                                      capture_output=True, timeout=2)
+                if result.returncode == 0:
+                    hardware['hailo']['hailo8'] = True
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass  # Hailo not installed
                 
             # NVIDIA GPU
+            logger.debug("Checking for NVIDIA GPU...")
             result = subprocess.run(['nvidia-smi'], capture_output=True, timeout=5)
+            logger.debug(f"nvidia-smi result: returncode={result.returncode}")
             if result.returncode == 0:
                 hardware['nvidia']['cuda'] = True
-                hardware['nvidia']['tensorrt'] = True
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+                # Check if TensorRT Python package is actually available
+                try:
+                    import tensorrt
+                    hardware['nvidia']['tensorrt'] = True
+                    logger.debug("TensorRT Python package found")
+                except ImportError:
+                    logger.debug("TensorRT Python package not found despite NVIDIA GPU")
+            else:
+                logger.debug(f"nvidia-smi failed with code {result.returncode}")
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.debug(f"Exception during hardware detection: {type(e).__name__}: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error during hardware detection: {type(e).__name__}: {e}")
         
         # Check for OpenVINO
         try:
@@ -3951,62 +3978,130 @@ echo "Restart Frigate to use the new model."
 
     
     def _convert_tensorrt_precision(self, onnx_path: Path, precision: str, size: Tuple[int, int]) -> Optional[Path]:
-        """Convert ONNX to TensorRT with specific precision"""
-        output_path = self.output_dir / f"{self.model_name}_{size[0]}x{size[1]}_tensorrt_{precision}.engine"
-        
-        # Build trtexec command
-        cmd = [
-            'trtexec',
-            f'--onnx={onnx_path}',
-            f'--saveEngine={output_path}',
-            '--workspace=4096'
-        ]
-        
-        # Add shape specifications
-        cmd.extend([
-            f'--minShapes=images:1x3x{size[1]}x{size[0]}',
-            f'--optShapes=images:1x3x{size[1]}x{size[0]}',
-            f'--maxShapes=images:1x3x{size[1]}x{size[0]}',
-            '--buildOnly'
-        ])
-        
-        # Add precision-specific flags
-        if precision == 'fp16':
-            cmd.append('--fp16')
-        elif precision == 'int8':
-            if self.calibration_dir:
-                cmd.extend([
-                    '--int8',
-                    f'--calib={self.calibration_dir}',
-                    '--calibrationBatchSize=16'
-                ])
-            else:
-                logger.warning("INT8 calibration requested but no calibration directory available")
-                return None
-        elif precision == 'int8_qat':
-            cmd.extend([
-                '--int8',
-                '--noTF32',
-                '--precisionConstraints=obey',
-                '--layerPrecisions=*:int8'
-            ])
+        """Convert ONNX to TensorRT with specific precision using Python API"""
+        # Use common naming utility
+        size_category = get_size_category(size[0])
+        filename = get_model_filename(size_category, 'tensorrt', precision)
+        output_path = self.output_dir / filename
         
         try:
-            logger.info(f"Building TensorRT {precision} engine for {size[0]}x{size[1]}...")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)  # 60 minutes for TensorRT
+            import tensorrt as trt
+            import numpy as np
             
-            if result.returncode == 0 and output_path.exists():
-                logger.info(f"TensorRT {precision} engine created: {output_path}")
-                return output_path
-            else:
-                logger.error(f"TensorRT {precision} conversion failed: {result.stderr}")
+            logger.info(f"Building TensorRT {precision} engine for {size[0]}x{size[1]} using Python API...")
+            
+            # Create builder and config
+            TRT_LOGGER = trt.Logger(trt.Logger.INFO)
+            builder = trt.Builder(TRT_LOGGER)
+            config = builder.create_builder_config()
+            
+            # Set memory pool limit (4GB)
+            config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 4 << 30)
+            
+            # Create network
+            network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+            parser = trt.OnnxParser(network, TRT_LOGGER)
+            
+            # Parse ONNX
+            with open(onnx_path, 'rb') as f:
+                onnx_data = f.read()
+                if not parser.parse(onnx_data):
+                    for i in range(parser.num_errors):
+                        logger.error(f"ONNX parse error: {parser.get_error(i)}")
+                    return None
+            
+            # Configure precision
+            if precision == 'fp16':
+                if builder.platform_has_fast_fp16:
+                    config.set_flag(trt.BuilderFlag.FP16)
+                    logger.info("Enabled FP16 precision")
+                else:
+                    logger.warning("Platform does not support fast FP16")
+            elif precision in ['int8', 'int8_qat']:
+                if builder.platform_has_fast_int8:
+                    config.set_flag(trt.BuilderFlag.INT8)
+                    
+                    if precision == 'int8' and self.calibration_dir:
+                        # Create INT8 calibrator with calibration data
+                        logger.info(f"Using calibration data from {self.calibration_dir}")
+                        
+                        # Create a simple calibrator (you may need to implement a proper one)
+                        class SimpleCalibrator(trt.IInt8EntropyCalibrator2):
+                            def __init__(self, calibration_dir, batch_size=1):
+                                super().__init__()
+                                self.batch_size = batch_size
+                                self.cache_file = "calibration.cache"
+                                
+                                # Load calibration images
+                                import glob
+                                from PIL import Image
+                                self.images = []
+                                for img_path in glob.glob(os.path.join(calibration_dir, "*.jpg"))[:100]:
+                                    img = Image.open(img_path).convert('RGB')
+                                    img = img.resize((size[0], size[1]))
+                                    img_array = np.array(img).astype(np.float32) / 255.0
+                                    img_array = np.transpose(img_array, (2, 0, 1))  # HWC to CHW
+                                    self.images.append(img_array)
+                                
+                                self.current_index = 0
+                                logger.info(f"Loaded {len(self.images)} calibration images")
+                            
+                            def get_batch_size(self):
+                                return self.batch_size
+                            
+                            def get_batch(self, names):
+                                if self.current_index >= len(self.images):
+                                    return None
+                                
+                                batch = np.array([self.images[self.current_index]])
+                                self.current_index += 1
+                                return [batch]
+                            
+                            def read_calibration_cache(self):
+                                if os.path.exists(self.cache_file):
+                                    with open(self.cache_file, "rb") as f:
+                                        return f.read()
+                                return None
+                            
+                            def write_calibration_cache(self, cache):
+                                with open(self.cache_file, "wb") as f:
+                                    f.write(cache)
+                        
+                        calibrator = SimpleCalibrator(self.calibration_dir, batch_size=1)
+                        config.int8_calibrator = calibrator
+                    elif precision == 'int8_qat':
+                        # QAT mode - use INT8 without calibration
+                        logger.info("Using QAT INT8 mode (no calibration needed)")
+                        config.set_flag(trt.BuilderFlag.PREFER_PRECISION_CONSTRAINTS)
+                    
+                    logger.info("Enabled INT8 precision")
+                else:
+                    logger.warning("Platform does not support fast INT8")
+                    return None
+            
+            # Build engine
+            logger.info("Building optimized TensorRT engine...")
+            serialized_engine = builder.build_serialized_network(network, config)
+            
+            if serialized_engine is None:
+                logger.error("Failed to build TensorRT engine")
                 return None
-                
-        except subprocess.TimeoutExpired:
-            logger.error(f"TensorRT {precision} conversion timed out")
+            
+            # Save engine
+            with open(output_path, 'wb') as f:
+                f.write(serialized_engine)
+            
+            engine_size_mb = output_path.stat().st_size / (1024 * 1024)
+            logger.info(f"TensorRT {precision} engine created: {output_path} ({engine_size_mb:.1f} MB)")
+            return output_path
+            
+        except ImportError:
+            logger.error("TensorRT Python API not available. Please install tensorrt package.")
             return None
         except Exception as e:
             logger.error(f"TensorRT {precision} conversion error: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     @staticmethod
