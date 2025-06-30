@@ -328,7 +328,7 @@ info = {{
 
 try:
     # Load checkpoint
-    checkpoint = torch.load('{self.model_path}', map_location='cpu')
+    checkpoint = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
     
     # Try to detect YOLOv9-MIT
     if isinstance(checkpoint, dict):
@@ -508,7 +508,7 @@ def prepare_model_for_qat(model):
 
 try:
     # Load YOLOv9-MIT model
-    checkpoint = torch.load('{self.model_path}', map_location='cpu')
+    checkpoint = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
     model = checkpoint['model'].float()
     model.eval()
     
@@ -642,7 +642,7 @@ try:
     print("Loading YOLOv9 converted model...")
     
     # The converted models are standard PyTorch checkpoints
-    checkpoint = torch.load('{self.model_path}', map_location='cpu')
+    checkpoint = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
     
     # Extract model - YOLOv9 converted models store the model directly
     if isinstance(checkpoint, dict):
@@ -727,7 +727,7 @@ import sys
 import torch
 
 # Minimal export for YOLOv9 converted models
-model = torch.load(sys.argv[1], map_location='cpu')
+model = torch.load(sys.argv[1], map_location='cpu', weights_only=False)
 if isinstance(model, dict):
     model = model.get('model', model.get('ema', model))
     
@@ -850,7 +850,7 @@ def create_rtdetr_wrapper(state_dict, num_classes=80):
 try:
     # Load the checkpoint
     print("Loading RT-DETR checkpoint...")
-    checkpoint = torch.load('{self.model_path}', map_location='cpu')
+    checkpoint = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
     
     # Extract model based on checkpoint structure
     model = None
@@ -944,7 +944,7 @@ except Exception as e:
         print("Trying TorchScript export...")
         
         # Load model again
-        model = torch.load('{self.model_path}', map_location='cpu')
+        model = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
         if isinstance(model, dict):
             model = model.get('model', model.get('ema', model))
             
@@ -1015,7 +1015,7 @@ try:
     from super_gradients.common.object_names import Models
     
     # Load model
-    checkpoint = torch.load('{self.model_path}', map_location='cpu')
+    checkpoint = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
     
     if 'net' in checkpoint:
         state_dict = checkpoint['net']
@@ -1577,16 +1577,112 @@ except Exception as e:
                 logger.info(f"Edge TPU: {line.strip()}")
     
     def convert_to_hailo_optimized(self) -> Dict[str, Path]:
-        """Convert to Hailo with QAT optimizations"""
-        logger.info("Preparing optimized Hailo conversion...")
+        """Convert to Hailo HEF format with actual conversion.
+        
+        This method performs the complete Hailo conversion pipeline:
+        1. Ensures ONNX model exists
+        2. Runs Hailo conversion for both targets (hailo8 and hailo8l)
+        3. Returns paths to converted HEF files
+        
+        Returns:
+            Dictionary with paths to converted HEF files
+        """
+        logger.info("Starting Hailo HEF conversion...")
         
         results = {}
         
-        # Use QAT ONNX if available
+        # Ensure we have an ONNX model first
         onnx_suffix = "_qat" if self.qat_enabled else ""
         onnx_path = self.output_dir / f"{self.model_name}{onnx_suffix}.onnx"
+        
         if not onnx_path.exists():
+            logger.info("ONNX model not found, converting from PyTorch...")
             onnx_path = self.convert_to_onnx_optimized(qat_prepare=self.qat_enabled)
+            if not onnx_path or not onnx_path.exists():
+                logger.error("Failed to create ONNX model for Hailo conversion")
+                return results
+        
+        # Check for hailo_converter module
+        hailo_converter_path = Path(__file__).parent / 'hailo_converter.py'
+        if not hailo_converter_path.exists():
+            logger.warning(f"hailo_converter.py not found, falling back to script generation")
+            return self._convert_to_hailo_scripts_only(onnx_path)
+        
+        # Convert for both Hailo targets
+        for target in ['hailo8', 'hailo8l']:
+            try:
+                output_path = self.output_dir / f"{self.model_name}_{target}.hef"
+                
+                cmd = [
+                    'python3.10',
+                    str(hailo_converter_path),
+                    str(onnx_path),
+                    '--output', str(output_path),
+                    '--target', target,
+                    '--batch-size', '1'  # Batch size 1 for Frigate compatibility
+                ]
+                
+                # Add calibration data if available
+                if self.calibration_dir:
+                    cmd.extend(['--calibration-data', str(self.calibration_dir)])
+                
+                logger.info(f"Running Hailo conversion for {target}...")
+                logger.debug(f"Command: {' '.join(cmd)}")
+                
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=3600  # 60 minute timeout
+                )
+                
+                if result.returncode == 0 and output_path.exists():
+                    logger.info(f"Successfully converted to {target}: {output_path}")
+                    results[target] = output_path
+                    
+                    # Also create size-specific variants
+                    size_str = f"{self.model_size[0]}x{self.model_size[1]}"
+                    size_specific_path = self.output_dir / f"{self.model_name}_{size_str}_{target}.hef"
+                    if output_path != size_specific_path:
+                        shutil.copy2(output_path, size_specific_path)
+                        results[f"{target}_{size_str}"] = size_specific_path
+                else:
+                    logger.error(f"Hailo conversion failed for {target}")
+                    if result.stderr:
+                        logger.error(f"Error: {result.stderr}")
+                    if result.stdout:
+                        logger.debug(f"Output: {result.stdout}")
+                        
+            except subprocess.TimeoutExpired:
+                logger.error(f"Hailo conversion timed out for {target}")
+            except Exception as e:
+                logger.error(f"Hailo conversion error for {target}: {e}")
+        
+        # If we successfully converted any models, also create the config files
+        if results:
+            # Create optimized Hailo configuration for reference
+            config = self._create_optimized_hailo_config()
+            config_path = self.output_dir / f"{self.model_name}_hailo_config.json"
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+            results['config'] = config_path
+            
+            logger.info(f"Hailo conversion complete. Converted {len([k for k in results if k.endswith('.hef')])} models")
+        else:
+            logger.warning("No Hailo models were successfully converted")
+            # Fall back to creating scripts
+            return self._convert_to_hailo_scripts_only(onnx_path)
+        
+        return results
+    
+    def _convert_to_hailo_scripts_only(self, onnx_path: Path) -> Dict[str, Path]:
+        """Original method that only creates scripts without conversion.
+        
+        This is the fallback when actual conversion isn't possible.
+        """
+        logger.info("Creating Hailo conversion scripts (no actual conversion)...")
+        
+        results = {}
         
         # Create optimized Hailo configuration
         config = self._create_optimized_hailo_config()
@@ -2255,7 +2351,7 @@ else:
         # Check model structure for QAT indicators
         script = f'''
 import torch
-model = torch.load('{self.model_path}', map_location='cpu')
+model = torch.load('{self.model_path}', map_location='cpu', weights_only=False)
 
 # Check for QAT indicators
 has_qat = False

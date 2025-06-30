@@ -169,12 +169,29 @@ class Config:
         self.NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
         self.SERVICE_ID = f"consensus-{self.NODE_ID}"
         
-        # Topics
-        self.TOPIC_DETECTION = os.getenv("DETECTION_TOPIC", "fire/detection")
-        self.TOPIC_TRIGGER = os.getenv("TRIGGER_TOPIC", "fire/trigger")
-        self.TOPIC_HEALTH = os.getenv("CONSENSUS_HEALTH_TOPIC", "system/consensus_telemetry")
-        self.TOPIC_FRIGATE = os.getenv("FRIGATE_EVENTS_TOPIC", "frigate/events")
-        self.TOPIC_CAMERA_TELEMETRY = os.getenv("CAMERA_TELEMETRY_TOPIC", "system/camera_telemetry")
+        # Topic prefix support for test isolation
+        self.TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "")
+        
+        # Topics - with optional prefix for test isolation
+        base_detection = os.getenv("DETECTION_TOPIC", "fire/detection")
+        base_trigger = os.getenv("TRIGGER_TOPIC", "fire/trigger")
+        base_health = os.getenv("CONSENSUS_HEALTH_TOPIC", "system/consensus_telemetry")
+        base_frigate = os.getenv("FRIGATE_EVENTS_TOPIC", "frigate/events")
+        base_telemetry = os.getenv("CAMERA_TELEMETRY_TOPIC", "system/camera_telemetry")
+        
+        # Apply prefix if set
+        if self.TOPIC_PREFIX:
+            self.TOPIC_DETECTION = f"{self.TOPIC_PREFIX}/{base_detection}"
+            self.TOPIC_TRIGGER = f"{self.TOPIC_PREFIX}/{base_trigger}"
+            self.TOPIC_HEALTH = f"{self.TOPIC_PREFIX}/{base_health}"
+            self.TOPIC_FRIGATE = f"{self.TOPIC_PREFIX}/{base_frigate}"
+            self.TOPIC_CAMERA_TELEMETRY = f"{self.TOPIC_PREFIX}/{base_telemetry}"
+        else:
+            self.TOPIC_DETECTION = base_detection
+            self.TOPIC_TRIGGER = base_trigger
+            self.TOPIC_HEALTH = base_health
+            self.TOPIC_FRIGATE = base_frigate
+            self.TOPIC_CAMERA_TELEMETRY = base_telemetry
         
         # Zone-based activation
         self.ZONE_MAPPING = json.loads(os.getenv("ZONE_MAPPING", "{}"))  # Camera ID -> Zone mapping

@@ -114,9 +114,9 @@ CONFIG = {
     'MQTT_PORT': int(os.getenv('MQTT_PORT', '1883')),
     'MQTT_TLS': os.getenv('MQTT_TLS', 'false').lower() == 'true',
     'TLS_CA_PATH': os.getenv('TLS_CA_PATH', '/mnt/data/certs/ca.crt'),
-    'TRIGGER_TOPIC': os.getenv('TRIGGER_TOPIC', 'fire/trigger'),
-    'EMERGENCY_TOPIC': os.getenv('EMERGENCY_TOPIC', 'fire/emergency'),
-    'TELEMETRY_TOPIC': os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry'),
+    
+    # Topic prefix support for test isolation
+    'TOPIC_PREFIX': os.getenv('MQTT_TOPIC_PREFIX', ''),
     
     # GPIO Pins - Control
     'MAIN_VALVE_PIN': int(os.getenv('MAIN_VALVE_PIN', '18')),
@@ -166,6 +166,17 @@ CONFIG = {
     'ENHANCED_STATUS_ENABLED': os.getenv('ENHANCED_STATUS_ENABLED', 'true').lower() == 'true',
     'SIMULATION_MODE_WARNINGS': os.getenv('SIMULATION_MODE_WARNINGS', 'true').lower() == 'true',
 }
+
+# Apply topic prefix to MQTT topics
+_prefix = CONFIG['TOPIC_PREFIX']
+if _prefix:
+    CONFIG['TRIGGER_TOPIC'] = f"{_prefix}/{os.getenv('TRIGGER_TOPIC', 'fire/trigger')}"
+    CONFIG['EMERGENCY_TOPIC'] = f"{_prefix}/{os.getenv('EMERGENCY_TOPIC', 'fire/emergency')}"
+    CONFIG['TELEMETRY_TOPIC'] = f"{_prefix}/{os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry')}"
+else:
+    CONFIG['TRIGGER_TOPIC'] = os.getenv('TRIGGER_TOPIC', 'fire/trigger')
+    CONFIG['EMERGENCY_TOPIC'] = os.getenv('EMERGENCY_TOPIC', 'fire/emergency')
+    CONFIG['TELEMETRY_TOPIC'] = os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry')
 
 # ─────────────────────────────────────────────────────────────
 # Logging Setup
@@ -1167,6 +1178,9 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._state = PumpState.STARTING
             self._publish_event('engine_start_sequence')
             
+            # Allow time for the state to be observed
+            time.sleep(0.1)
+            
             # Start ignition sequence with retry logic
             if not self._set_pin('IGN_START', True):
                 logger.error("Primary ignition start failed - attempting recovery")
@@ -1602,6 +1616,11 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             except Exception as e:
                 logger.error(f"Emergency button monitoring error: {e}")
                 time.sleep(1)
+
+    def _emergency_switch_callback(self, channel):
+        """Callback for emergency switch interrupt."""
+        logger.warning(f"Emergency switch activated on channel {channel}")
+        self.handle_fire_trigger()
     
     def _publish_health(self):
         """Publish periodic health status with enhanced reporting"""

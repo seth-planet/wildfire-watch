@@ -60,23 +60,12 @@ class DockerIntegrationTest:
                     print(f"Error building {service}: {e}")
                     
     def create_test_network(self):
-        """Create a dedicated network for test containers"""
-        network_name = "wildfire-test-net"
-        
-        # Remove existing network if present
-        try:
-            existing = self.docker_client.networks.get(network_name)
-            existing.remove()
-        except docker.errors.NotFound:
-            pass
-        
-        # Create new network
-        self.network = self.docker_client.networks.create(
-            network_name,
-            driver="bridge"
-        )
-        print(f"Created test network: {network_name}")
-        return self.network
+        """Network is provided by fixture, just return it"""
+        if self.network:
+            print(f"Using test network from fixture: {self.network.name}")
+            return self.network
+        else:
+            raise RuntimeError("No test network provided by fixture")
         
     def start_mqtt_container(self):
         """Start MQTT broker container"""
@@ -95,7 +84,7 @@ class DockerIntegrationTest:
         
         # Remove existing test container if any
         try:
-            old_container = self.docker_client.containers.get("mqtt-test")
+            old_container = self.docker_client.containers.get("mqtt-test-sdk")
             old_container.stop()
             old_container.remove()
         except docker.errors.NotFound:
@@ -360,7 +349,7 @@ CMD ["python", "-u", "consensus.py"]
         return triggered
         
     def cleanup(self):
-        """Clean up containers and network"""
+        """Clean up containers (network is managed by fixture)"""
         print("\nCleaning up containers...")
         for name, container in self.containers.items():
             try:
@@ -370,18 +359,14 @@ CMD ["python", "-u", "consensus.py"]
             except Exception as e:
                 print(f"Error removing {name}: {e}")
         
-        # Clean up network
-        if self.network:
-            try:
-                self.network.remove()
-                print("✓ Removed test network")
-            except Exception as e:
-                print(f"Error removing network: {e}")
+        # Network cleanup is handled by the fixture, not here
 
 
-def test_docker_integration():
+def test_docker_integration(docker_client, docker_test_network):
     """Test Docker container integration"""
     test = DockerIntegrationTest()
+    test.docker_client = docker_client
+    test.network = docker_test_network
     
     try:
         success = test.test_docker_fire_detection_flow()

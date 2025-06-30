@@ -52,7 +52,7 @@ cameras:
   front_yard:
     ffmpeg:
       inputs:
-        - path: rtsp://admin:password@192.168.1.100:554/stream1
+        - path: rtsp://username:password@192.168.1.100:554/stream1
           roles:
             - detect
             - record

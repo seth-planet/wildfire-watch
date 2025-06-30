@@ -328,7 +328,12 @@ class UnifiedYOLOTrainer:
             from super_gradients.training.models.detection_models.pp_yolo_e import PPYoloEPostPredictionCallback
             from super_gradients.training.utils.distributed_training_utils import setup_device
             from super_gradients.common.object_names import Models
-            from super_gradients.training.transforms.detection import DetectionLongestMaxSize, DetectionPadIfNeeded
+            from super_gradients.training.transforms.detection import (
+                DetectionLongestMaxSize, 
+                DetectionPadIfNeeded,
+                DetectionStandardize,
+                DetectionTargetsFormatTransform
+            )
         except ImportError as e:
             raise ImportError(f"super-gradients not available: {e}")
         
@@ -423,11 +428,16 @@ class UnifiedYOLOTrainer:
             except ImportError:
                 self.logger.warning("No dataset validation available, proceeding with caution")
         
-        # Setup transforms to prevent tensor size mismatches
+        # Setup transforms to prevent tensor size mismatches and convert to correct format
         input_size = self.config['model']['input_size']
         transforms = [
             DetectionLongestMaxSize(max_height=input_size[0], max_width=input_size[1]),
-            DetectionPadIfNeeded(min_height=input_size[0], min_width=input_size[1], pad_value=114)
+            DetectionPadIfNeeded(min_height=input_size[0], min_width=input_size[1], pad_value=114),
+            DetectionStandardize(max_value=255.),
+            DetectionTargetsFormatTransform(
+                input_dim=input_size,
+                output_format='LABEL_CXCYWH'
+            )
         ]
         
         # Training dataloader
@@ -474,12 +484,29 @@ class UnifiedYOLOTrainer:
         
         # Wrap with safety validation
         try:
-            from .class_index_fixer import SafeDataLoaderWrapper
-            train_loader = SafeDataLoaderWrapper(train_loader, num_classes)
-            val_loader = SafeDataLoaderWrapper(val_loader, num_classes)
-            self.logger.info("✓ Dataloaders wrapped with class index validation")
-        except ImportError:
-            self.logger.warning("SafeDataLoaderWrapper not available, using standard dataloaders")
+            # Use absolute import for class_index_fixer
+            import sys
+            current_dir = Path(__file__).parent
+            if str(current_dir) not in sys.path:
+                sys.path.insert(0, str(current_dir))
+            
+            from class_index_fixer import SafeDataLoaderWrapper
+            
+            # Get max invalid ratio from config or use default (0.1% for production)
+            max_invalid_ratio = self.config.get('dataset', {}).get('max_invalid_class_ratio', 0.001)
+            
+            train_loader = SafeDataLoaderWrapper(train_loader, num_classes, max_invalid_ratio=max_invalid_ratio)
+            val_loader = SafeDataLoaderWrapper(val_loader, num_classes, max_invalid_ratio=max_invalid_ratio)
+            self.logger.info(f"✓ Dataloaders wrapped with class index validation (max_invalid_ratio={max_invalid_ratio})")
+            
+            # Store references for statistics reporting
+            self._train_wrapper = train_loader
+            self._val_wrapper = val_loader
+            
+        except ImportError as e:
+            self.logger.warning(f"SafeDataLoaderWrapper not available: {e}, using standard dataloaders")
+            self._train_wrapper = None
+            self._val_wrapper = None
         
         self.logger.info(f"Dataloaders created: {len(train_loader.dataset)} train, {len(val_loader.dataset)} val")
         
@@ -534,7 +561,11 @@ class UnifiedYOLOTrainer:
             "mixed_precision": config['mixed_precision'],
             "average_best_models": config['epochs'] >= 50,  # Only average if we have enough epochs
             "ema": config['epochs'] >= 10,  # Only use EMA if we have enough epochs
-            "ema_params": {"decay": 0.9999, "decay_type": "threshold"},
+            "ema_params": {
+                "decay": 0.9999,
+                "decay_type": "exp",
+                "beta": 15
+            },
             
             # Validation metrics
             "valid_metrics_list": [
@@ -595,21 +626,41 @@ class UnifiedYOLOTrainer:
 
     def _report_cuda_fix_stats(self):
         """Report statistics from CUDA index fixing"""
+        # Report SafeDataLoaderWrapper statistics
+        if hasattr(self, '_train_wrapper') and self._train_wrapper is not None:
+            train_stats = self._train_wrapper.get_statistics()
+            if train_stats['total_invalid_indices'] > 0:
+                self.logger.warning(
+                    f"SafeDataLoaderWrapper - Training: Fixed {train_stats['total_invalid_indices']} "
+                    f"invalid indices out of {train_stats['total_indices_seen']} total "
+                    f"({train_stats['invalid_ratio']:.2%}) in {train_stats['batches_processed']} batches"
+                )
+            else:
+                self.logger.info("SafeDataLoaderWrapper - Training: No invalid indices found")
+                
+        if hasattr(self, '_val_wrapper') and self._val_wrapper is not None:
+            val_stats = self._val_wrapper.get_statistics()
+            if val_stats['total_invalid_indices'] > 0:
+                self.logger.warning(
+                    f"SafeDataLoaderWrapper - Validation: Fixed {val_stats['total_invalid_indices']} "
+                    f"invalid indices out of {val_stats['total_indices_seen']} total "
+                    f"({val_stats['invalid_ratio']:.2%}) in {val_stats['batches_processed']} batches"
+                )
+            else:
+                self.logger.info("SafeDataLoaderWrapper - Validation: No invalid indices found")
+        
+        # Report old collate function statistics if available
         if hasattr(self, '_train_collate'):
             train_stats = self._train_collate.get_stats()
             if train_stats['invalid_batches'] > 0:
                 self.logger.warning(f"CUDA Fix Stats - Training: Fixed {train_stats['fixed_indices']} "
                                   f"invalid indices in {train_stats['invalid_batches']} batches")
-            else:
-                self.logger.info("CUDA Fix Stats - Training: No invalid indices found")
                 
         if hasattr(self, '_val_collate'):
             val_stats = self._val_collate.get_stats()
             if val_stats['invalid_batches'] > 0:
                 self.logger.warning(f"CUDA Fix Stats - Validation: Fixed {val_stats['fixed_indices']} "
                                   f"invalid indices in {val_stats['invalid_batches']} batches")
-            else:
-                self.logger.info("CUDA Fix Stats - Validation: No invalid indices found")
     
 
     def train(self):

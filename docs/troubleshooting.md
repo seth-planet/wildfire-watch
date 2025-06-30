@@ -81,7 +81,7 @@ docker exec camera-detector python camera_detector.py --subnet 192.168.1.0/24
 mosquitto_sub -t 'cameras/discovered' -C 1 | jq
 
 # Test RTSP URL
-ffprobe rtsp://admin:password@192.168.1.100:554/stream
+ffprobe rtsp://username:password@192.168.1.100:554/stream
 
 # Override stream path
 CAMERA_STREAM_PATHS="camera1=/h264/ch1/main/av_stream,camera2=/live/0/MAIN"

@@ -164,10 +164,26 @@ class YOLONASDataLoaderFixer:
 class SafeDataLoaderWrapper:
     """Wrapper that validates class indices in dataloader output"""
     
-    def __init__(self, base_dataloader, num_classes: int):
+    def __init__(self, base_dataloader, num_classes: int, max_invalid_ratio: float = 0.001, debug: bool = False):
         self.base_dataloader = base_dataloader
         self.num_classes = num_classes
         self.dataset = base_dataloader.dataset
+        self.max_invalid_ratio = max_invalid_ratio  # Maximum ratio of invalid indices allowed
+        self.debug = debug
+        
+        # Forward common attributes that super-gradients expects
+        self.batch_size = getattr(base_dataloader, 'batch_size', None)
+        self.sampler = getattr(base_dataloader, 'sampler', None)
+        self.collate_fn = getattr(base_dataloader, 'collate_fn', None)
+        self.num_workers = getattr(base_dataloader, 'num_workers', 0)
+        self.pin_memory = getattr(base_dataloader, 'pin_memory', False)
+        self.drop_last = getattr(base_dataloader, 'drop_last', False)
+        self.batch_sampler = getattr(base_dataloader, 'batch_sampler', None)
+        
+        # Statistics tracking
+        self.total_indices_seen = 0
+        self.total_invalid_indices = 0
+        self.batches_processed = 0
         
     def __iter__(self):
         for batch in self.base_dataloader:
@@ -183,22 +199,90 @@ class SafeDataLoaderWrapper:
         if isinstance(batch, (list, tuple)) and len(batch) >= 2:
             images, targets = batch[0], batch[1]
             
+            if self.debug and self.batches_processed == 0:
+                logger.info(f"Debug - First batch structure:")
+                logger.info(f"  Batch type: {type(batch)}, length: {len(batch)}")
+                logger.info(f"  Images shape: {images.shape if hasattr(images, 'shape') else 'N/A'}")
+                logger.info(f"  Targets shape: {targets.shape if hasattr(targets, 'shape') else 'N/A'}")
+                logger.info(f"  Targets dtype: {targets.dtype if hasattr(targets, 'dtype') else 'N/A'}")
+                if isinstance(targets, torch.Tensor) and targets.numel() > 0:
+                    logger.info(f"  First few targets:\n{targets[:min(5, len(targets))]}")
+            
             if isinstance(targets, torch.Tensor) and targets.numel() > 0:
-                # Check if targets have class column (usually column 1)
-                if targets.dim() == 2 and targets.shape[1] > 1:
+                # Check target format based on number of columns
+                if targets.dim() == 2 and targets.shape[1] == 6:
+                    # Format: [batch_idx, x1, y1, x2, y2, class_id]
+                    class_indices = targets[:, 5]
+                elif targets.dim() == 2 and targets.shape[1] == 5:
+                    # Format: [x1, y1, x2, y2, class_id] (XYXY_LABEL)
+                    class_indices = targets[:, 4]
+                elif targets.dim() == 2 and targets.shape[1] > 1:
+                    # Fallback: assume column 1 has class indices
                     class_indices = targets[:, 1]
+                else:
+                    # No valid format detected
+                    return images, targets
+                
+                # Update statistics
+                num_indices = len(class_indices)
+                self.total_indices_seen += num_indices
+                self.batches_processed += 1
+                
+                # Find invalid class indices
+                invalid_mask = class_indices >= self.num_classes
+                negative_mask = class_indices < 0
+                invalid_mask = invalid_mask | negative_mask
+                
+                if invalid_mask.any():
+                    num_invalid = invalid_mask.sum().item()
+                    self.total_invalid_indices += num_invalid
                     
-                    # Find invalid class indices
-                    invalid_mask = class_indices >= self.num_classes
+                    # Calculate current invalid ratio
+                    current_invalid_ratio = self.total_invalid_indices / self.total_indices_seen
                     
-                    if invalid_mask.any():
-                        logger.warning(f"Found {invalid_mask.sum()} invalid class indices, fixing...")
-                        # Clamp to valid range
+                    # Log detailed information
+                    invalid_classes = class_indices[invalid_mask].unique().tolist()
+                    logger.warning(
+                        f"Batch {self.batches_processed}: Found {num_invalid}/{num_indices} invalid class indices. "
+                        f"Invalid classes: {invalid_classes[:10]}{'...' if len(invalid_classes) > 10 else ''}. "
+                        f"Total invalid ratio: {current_invalid_ratio:.4f}"
+                    )
+                    
+                    # Check if we've exceeded the threshold
+                    if current_invalid_ratio > self.max_invalid_ratio:
+                        raise ValueError(
+                            f"Too many invalid class indices detected! "
+                            f"{self.total_invalid_indices}/{self.total_indices_seen} "
+                            f"({current_invalid_ratio:.2%}) exceeds threshold of {self.max_invalid_ratio:.2%}. "
+                            f"This suggests a dataset configuration error. "
+                            f"Please check that num_classes={self.num_classes} matches your dataset. "
+                            f"Found class indices: {sorted(set(invalid_classes))[:20]}"
+                        )
+                    
+                    # Clamp to valid range based on target format
+                    if targets.shape[1] == 6:
+                        # Format: [batch_idx, x1, y1, x2, y2, class_id]
+                        targets[:, 5] = torch.clamp(targets[:, 5], 0, self.num_classes - 1)
+                    elif targets.shape[1] == 5:
+                        # Format: [x1, y1, x2, y2, class_id] (XYXY_LABEL)
+                        targets[:, 4] = torch.clamp(targets[:, 4], 0, self.num_classes - 1)
+                    else:
+                        # Fallback
                         targets[:, 1] = torch.clamp(targets[:, 1], 0, self.num_classes - 1)
             
             return images, targets
         
         return batch
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """Get validation statistics"""
+        return {
+            'batches_processed': self.batches_processed,
+            'total_indices_seen': self.total_indices_seen,
+            'total_invalid_indices': self.total_invalid_indices,
+            'invalid_ratio': self.total_invalid_indices / max(self.total_indices_seen, 1),
+            'max_invalid_ratio': self.max_invalid_ratio
+        }
 
 def fix_yolo_nas_class_issues(dataset_dir: str, num_classes: int) -> Dict[str, Any]:
     """Main function to fix all YOLO-NAS class-related issues"""

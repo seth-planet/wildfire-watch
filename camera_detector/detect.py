@@ -83,7 +83,11 @@ import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
 from onvif import ONVIFCamera
 from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
-import netifaces
+try:
+    import netifaces
+except ImportError:
+    # Try netifaces-plus as fallback for Python 3.10+
+    import netifaces_plus as netifaces
 import cv2
 from scapy.all import ARP, Ether, srp
 
@@ -169,7 +173,8 @@ class Config:
         self.HTTP_PORT = int(os.getenv("HTTP_PORT", "80"))
         
         # Camera credentials (comma-separated user:pass pairs)
-        self.CAMERA_CREDENTIALS = os.getenv("CAMERA_CREDENTIALS", "admin:,admin:admin,admin:12345")
+        # Default is empty - credentials must be provided via environment variable
+        self.CAMERA_CREDENTIALS = os.getenv("CAMERA_CREDENTIALS", "")
         
         # Health Monitoring
         self.HEALTH_CHECK_INTERVAL = max(10, int(os.getenv("HEALTH_CHECK_INTERVAL", "60")))  # Minimum 10 seconds
@@ -184,11 +189,21 @@ class Config:
         self.NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
         self.SERVICE_ID = f"camera-detector-{self.NODE_ID}"
         
-        # Topics
-        self.TOPIC_DISCOVERY = "camera/discovery"
-        self.TOPIC_STATUS = "camera/status"
-        self.TOPIC_HEALTH = "system/camera_detector_health"
-        self.TOPIC_FRIGATE_CONFIG = "frigate/config/cameras"
+        # Topic prefix support for test isolation
+        self.TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "")
+        
+        # Topics - with optional prefix for test isolation
+        if self.TOPIC_PREFIX:
+            self.TOPIC_DISCOVERY = f"{self.TOPIC_PREFIX}/camera/discovery"
+            self.TOPIC_STATUS = f"{self.TOPIC_PREFIX}/camera/status"
+            self.TOPIC_HEALTH = f"{self.TOPIC_PREFIX}/system/camera_detector_health"
+            self.TOPIC_FRIGATE_CONFIG = f"{self.TOPIC_PREFIX}/frigate/config/cameras"
+            self.FRIGATE_RELOAD_TOPIC = f"{self.TOPIC_PREFIX}/{self.FRIGATE_RELOAD_TOPIC}"
+        else:
+            self.TOPIC_DISCOVERY = "camera/discovery"
+            self.TOPIC_STATUS = "camera/status"
+            self.TOPIC_HEALTH = "system/camera_detector_health"
+            self.TOPIC_FRIGATE_CONFIG = "frigate/config/cameras"
 
 # ─────────────────────────────────────────────────────────────
 # Logging Setup
@@ -825,7 +840,8 @@ class CameraDetector:
         
         while attempt < max_attempts:
             try:
-                port = 8883 if self.config.MQTT_TLS else 1883
+                # Use configured port - TLS can run on any port
+                port = self.config.MQTT_PORT
                 self.mqtt_client.connect(
                     self.config.MQTT_BROKER,
                     port,

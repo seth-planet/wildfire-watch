@@ -33,10 +33,10 @@ data:
     # Camera Discovery
     DISCOVERY_INTERVAL: "300"
     MAC_TRACKING_ENABLED: "true"
-    CAMERA_CREDENTIALS: "admin:,admin:admin,admin:12345,admin:password"
+    CAMERA_CREDENTIALS: ""  # Set via Balena dashboard: username:password,username2:password2
     
     # Frigate NVR
-    RTSP_STREAM_URL: "rtsp://admin:password@192.168.1.100:554/stream"
+    RTSP_STREAM_URL: ""  # Set via Balena dashboard: rtsp://username:password@ip:port/stream
     FRIGATE_DETECTOR: "cpu"   # cpu|coral|hailo
     FRIGATE_UPDATE_ENABLED: "true"
     RECORD_DAYS: "7"

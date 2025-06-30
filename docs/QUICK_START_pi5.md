@@ -57,7 +57,7 @@ PLATFORM=linux/arm64
 MQTT_TLS=false
 
 # Camera settings
-CAMERA_CREDENTIALS=admin:yourpassword,admin:12345
+CAMERA_CREDENTIALS=admin:yourpassword,username:password
 DISCOVERY_INTERVAL=300
 
 # Hardware acceleration
@@ -278,7 +278,7 @@ sudo apt reinstall hailo-rt
 ip addr show
 
 # Test camera directly
-curl -u admin:password http://camera-ip/onvif/device_service
+curl -u username:password http://camera-ip/onvif/device_service
 
 # Check firewall
 sudo iptables -L

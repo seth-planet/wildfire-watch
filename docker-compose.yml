@@ -84,7 +84,7 @@ services:
         condition: service_healthy
     environment:
       <<: *common-variables
-      CAMERA_CREDENTIALS: ${CAMERA_CREDENTIALS:-admin:,admin:admin}
+      CAMERA_CREDENTIALS: ${CAMERA_CREDENTIALS:-admin:,username:password}
       DISCOVERY_INTERVAL: ${DISCOVERY_INTERVAL:-300}
       MAC_TRACKING_ENABLED: ${MAC_TRACKING_ENABLED:-true}
       FRIGATE_UPDATE_ENABLED: ${FRIGATE_UPDATE_ENABLED:-true}
@@ -115,6 +115,7 @@ services:
       dockerfile: ./security_nvr/Dockerfile
       args:
         - FRIGATE_VERSION=${FRIGATE_VERSION:-stable}
+        - FRIGATE_VARIANT=${FRIGATE_VARIANT:-}  # Set to -h8l for Hailo support
     image: wildfire-watch/security-nvr-extended:${VERSION:-latest}
     container_name: security-nvr
     hostname: security-nvr

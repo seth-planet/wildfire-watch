@@ -27,6 +27,7 @@ SPECIFIC_TESTS=""
 EXTRA_ARGS=""
 DRY_RUN=false
 VERBOSE=false
+PARALLEL=true
 
 # Function to print colored output
 print_status() {
@@ -76,6 +77,10 @@ run_python_tests() {
     fi
     
     # Add extra arguments
+    if [[ "$PARALLEL" == "true" ]]; then
+        cmd="$cmd -n auto"
+    fi
+
     if [[ -n "$EXTRA_ARGS" ]]; then
         cmd="$cmd $EXTRA_ARGS"
     fi
@@ -143,6 +148,7 @@ OPTIONS:
     --verbose          Enable verbose output
     --timeout N        Set pytest timeout (0 = no timeout)
     --no-cov           Disable coverage reporting
+    --no-parallel      Disable parallel test execution
     --help             Show this help message
 
 EXAMPLES:
@@ -189,6 +195,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-cov)
             EXTRA_ARGS="$EXTRA_ARGS --no-cov"
+            shift
+            ;;
+        --no-parallel)
+            PARALLEL=false
             shift
             ;;
         --validate)

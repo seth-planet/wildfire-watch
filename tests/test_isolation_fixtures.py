@@ -349,7 +349,7 @@ def camera_detector_clean(mqtt_broker, monkeypatch, state_manager, thread_monito
         "HEALTH_CHECK_INTERVAL": "3600",
         "ONVIF_TIMEOUT": "1",
         "RTSP_TIMEOUT": "1",
-        "CAMERA_CREDENTIALS": "admin:password"
+        "CAMERA_CREDENTIALS": ""
     }
     
     for key, value in test_env.items():

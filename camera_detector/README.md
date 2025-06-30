@@ -70,7 +70,7 @@ The camera detector uses intelligent discovery to minimize resource usage:
 # Camera login credentials - comma-separated pairs
 CAMERA_USERNAME=admin        # Default username to try
 CAMERA_PASSWORD=             # Default password (empty for no password)
-CAMERA_CREDENTIALS=admin:,admin:admin,admin:12345
+CAMERA_CREDENTIALS=admin:,username:password,username:password
 ```
 
 **💡 Tip**: 
@@ -129,7 +129,7 @@ OFFLINE_THRESHOLD=180       # Mark offline after 3 minutes (minimum 60 seconds)
 2. **Verify camera is ONVIF compatible**: Most modern IP cameras support ONVIF
 3. **Add credentials**: Your camera might use non-standard login:
    ```bash
-   CAMERA_CREDENTIALS=admin:,admin:admin,root:pass,user:user
+   CAMERA_CREDENTIALS=admin:,username:password,root:pass,user:user
    ```
 4. **Check firewall**: Ensure ports 80 and 554 aren't blocked
 
@@ -154,7 +154,7 @@ OFFLINE_THRESHOLD=180       # Mark offline after 3 minutes (minimum 60 seconds)
 1. Find your camera's password (check camera label or manual)
 2. Add to credentials list:
    ```bash
-   CAMERA_CREDENTIALS=admin:your_password,admin:admin
+   CAMERA_CREDENTIALS=admin:your_password,username:password
    ```
 3. **Note**: Malformed credentials are automatically handled with fallback defaults
 

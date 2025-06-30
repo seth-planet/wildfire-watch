@@ -1,6 +1,8 @@
 # Use an ARG to receive the version from docker-compose.yml
 ARG FRIGATE_VERSION=stable
-FROM ghcr.io/blakeblackshear/frigate:${FRIGATE_VERSION}
+ARG FRIGATE_VARIANT=
+# Use Hailo variant if specified, otherwise standard Frigate
+FROM ghcr.io/blakeblackshear/frigate:${FRIGATE_VERSION}${FRIGATE_VARIANT}
 
 # Set the working directory for clarity
 WORKDIR /

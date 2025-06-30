@@ -369,26 +369,65 @@ class DataloaderWrapperTests(unittest.TestCase):
         mock_dataloader.dataset = MagicMock()
         mock_dataloader.__len__ = MagicMock(return_value=10)
         
-        # Create test batch with invalid class indices
+        # Create test batch with mostly valid and one invalid class index
+        # This keeps invalid ratio below 0.1% threshold to test clamping behavior
         import torch
-        images = torch.randn(2, 3, 320, 320)
-        targets = torch.tensor([
-            [0, 31, 0.5, 0.5, 0.1, 0.1],  # Valid class 31
-            [1, 50, 0.5, 0.5, 0.1, 0.1],  # Invalid class 50
-        ])
+        batch_size = 2000  # Need large batch to keep 1 invalid index below 0.1%
+        num_classes = 32
+        images = torch.randn(batch_size, 3, 320, 320)
+        
+        # Create targets with valid class indices
+        targets_list = []
+        for i in range(batch_size - 1):
+            # Use different valid class indices including Fire (26)
+            class_idx = i % num_classes  # This will cycle through 0-31
+            targets_list.append([i, float(class_idx), 0.5, 0.5, 0.1, 0.1])
+        
+        # Add one invalid target at the end
+        targets_list.append([batch_size-1, 50.0, 0.5, 0.5, 0.1, 0.1])  # Invalid class 50
+        
+        targets = torch.tensor(targets_list)
         
         mock_dataloader.__iter__ = MagicMock(return_value=iter([(images, targets)]))
         
         # Wrap with SafeDataLoaderWrapper
-        wrapper = SafeDataLoaderWrapper(mock_dataloader, num_classes=32)
+        wrapper = SafeDataLoaderWrapper(mock_dataloader, num_classes=num_classes)
         
-        # Get batch
+        # Get batch - this should now pass without ValueError
         batch_iter = iter(wrapper)
         fixed_images, fixed_targets = next(batch_iter)
         
-        # Verify class indices are clamped
-        self.assertEqual(fixed_targets[0, 1].item(), 31)  # Still valid
-        self.assertEqual(fixed_targets[1, 1].item(), 31)  # Clamped from 50 to 31
+        # Verify valid indices remain unchanged
+        for i in range(batch_size - 1):
+            expected_class = i % num_classes
+            self.assertEqual(fixed_targets[i, 1].item(), expected_class)
+        
+        # Verify invalid index is clamped to num_classes - 1
+        self.assertEqual(fixed_targets[batch_size - 1, 1].item(), num_classes - 1)
+    
+    def test_safe_dataloader_wrapper_raises_error_on_too_many_invalid(self):
+        """Test SafeDataLoaderWrapper raises error when too many invalid indices"""
+        from class_index_fixer import SafeDataLoaderWrapper
+        
+        # Create batch where most indices are invalid (exceeds 10% threshold)
+        import torch
+        num_classes = 32
+        images = torch.randn(2, 3, 320, 320)
+        targets = torch.tensor([
+            [0, 50.0, 0.5, 0.5, 0.1, 0.1],  # Invalid class 50
+            [1, 51.0, 0.5, 0.5, 0.1, 0.1],  # Invalid class 51
+        ])
+        
+        mock_dataloader = MagicMock()
+        mock_dataloader.__iter__ = MagicMock(return_value=iter([(images, targets)]))
+        
+        # Wrap with SafeDataLoaderWrapper
+        wrapper = SafeDataLoaderWrapper(mock_dataloader, num_classes=num_classes)
+        
+        # Expect ValueError to be raised
+        with self.assertRaisesRegex(ValueError, "Too many invalid class indices detected!"):
+            batch_iter = iter(wrapper)
+            next(batch_iter)
     
     def test_dataloader_wrapper_preserves_functionality(self):
         """Test that wrapper preserves dataloader functionality"""

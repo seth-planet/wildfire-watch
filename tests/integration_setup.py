@@ -95,7 +95,7 @@ class IntegrationTestSetup:
                     "MQTT_BROKER": "mqtt-broker-test",
                     "MQTT_PORT": "1883",  # Internal port within container network
                     "LOG_LEVEL": "DEBUG",
-                    "CAMERA_CREDENTIALS": "admin:admin,admin:",
+                    "CAMERA_CREDENTIALS": "username:password,admin:",
                     "DISCOVERY_INTERVAL": "30"
                 },
                 detach=True,

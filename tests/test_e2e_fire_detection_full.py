@@ -290,7 +290,7 @@ class E2ETestOrchestrator:
                 'MQTT_BROKER': 'e2e-mqtt-broker',
                 'MQTT_PORT': '8883',
                 'MQTT_TLS': 'true',
-                'CAMERA_CREDENTIALS': os.environ.get('CAMERA_CREDENTIALS', 'admin:,admin:admin'),  # Use env var or default
+                'CAMERA_CREDENTIALS': os.environ.get('CAMERA_CREDENTIALS', 'admin:,username:password'),  # Use env var or default
                 'DISCOVERY_INTERVAL': '10',  # Faster discovery for testing
                 'MAC_TRACKING_ENABLED': 'true',
                 'FRIGATE_UPDATE_ENABLED': 'true',

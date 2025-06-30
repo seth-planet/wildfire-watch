@@ -132,8 +132,8 @@ docker-compose logs -f
 ### Essential Settings (.env)
 
 ```bash
-# Camera credentials
-CAMERA_CREDENTIALS=admin:password,admin:12345
+# Camera credentials (comma-separated username:password pairs)
+CAMERA_CREDENTIALS=username:password,username2:password2
 
 # Fire detection
 CONSENSUS_THRESHOLD=2      # Cameras required for consensus

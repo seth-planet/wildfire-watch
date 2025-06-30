@@ -175,7 +175,7 @@ class FrigateConfigurationTests(unittest.TestCase):
                 'camera_1': {
                     'ffmpeg': {
                         'inputs': [{
-                            'path': 'rtsp://admin:password@192.0.2.100:554/stream',
+                            'path': 'rtsp://username:password@192.0.2.100:554/stream',
                             'roles': ['detect', 'record']
                         }]
                     },

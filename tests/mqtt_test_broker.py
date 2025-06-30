@@ -44,7 +44,7 @@ class MQTTTestBroker:
             self._start_embedded_broker()
     
     def _start_mosquitto(self):
-        """Start mosquitto broker"""
+        """Start mosquitto broker with proper health checking"""
         # Create temporary directories
         self.data_dir = tempfile.mkdtemp(prefix="mqtt_test_")
         
@@ -55,7 +55,8 @@ allow_anonymous true
 
 # Optimizations for testing
 persistence false
-log_type none
+log_type error
+log_dest stdout
 """
         
         self.config_file = os.path.join(self.data_dir, "mosquitto.conf")
@@ -67,45 +68,11 @@ log_type none
             'mosquitto', '-c', self.config_file
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         
-        # Wait for broker to start
-        time.sleep(2.0)
-        
-        # Check if process is running
-        if self.process.poll() is not None:
+        # Wait for broker to be ready with proper health check
+        if not self.wait_for_ready(timeout=30):
+            # Get output for debugging
             stdout, stderr = self.process.communicate()
-            raise RuntimeError(f"Failed to start mosquitto: {stderr.decode()}")
-        
-        # Test connection with proper API version
-        test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        connected = False
-        
-        def on_connect(client, userdata, flags, rc, properties=None):
-            nonlocal connected
-            connected = True
-            
-        test_client.on_connect = on_connect
-        
-        try:
-            test_client.connect("localhost", self.port, 60)
-            test_client.loop_start()
-            
-            # Wait for connection with timeout
-            timeout = 10
-            start_time = time.time()
-            while not connected and time.time() - start_time < timeout:
-                time.sleep(0.1)
-                
-            test_client.disconnect()
-            test_client.loop_stop()
-            
-            if not connected:
-                raise RuntimeError("Failed to establish MQTT connection within timeout")
-                
-        except Exception as e:
-            test_client.loop_stop()
-            self.process.terminate()
-            self.process.wait()
-            raise RuntimeError(f"Cannot connect to mosquitto broker: {e}")
+            raise RuntimeError(f"Mosquitto failed to start within 30s. Stdout: {stdout.decode()[:500]} Stderr: {stderr.decode()[:500]}")
     
     def _start_embedded_broker(self):
         """Start an embedded MQTT broker using Python"""

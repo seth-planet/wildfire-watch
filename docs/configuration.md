@@ -8,7 +8,7 @@ Complete configuration guide for Wildfire Watch. All settings use environment va
 
 ```bash
 # Camera credentials (comma-separated user:pass pairs)
-CAMERA_CREDENTIALS=admin:password,admin:12345,root:admin
+CAMERA_CREDENTIALS=username:password,username2:password2,root:rootpass
 
 # Fire consensus (number of cameras that must agree)
 CONSENSUS_THRESHOLD=2

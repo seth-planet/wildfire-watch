@@ -256,7 +256,7 @@ If conversions timeout, consider:
 - TLS enabled via `MQTT_TLS=true` environment variable
 
 ### Camera Credentials
-- Supports multiple credential sets: `CAMERA_CREDENTIALS=admin:password,admin:12345`
+- Supports multiple credential sets: `CAMERA_CREDENTIALS=username:password,username2:password2`
 - Automatic credential testing during discovery
 - MAC address tracking prevents IP-based spoofing
 

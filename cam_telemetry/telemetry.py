@@ -86,7 +86,16 @@ load_dotenv()
 MQTT_BROKER       = os.getenv("MQTT_BROKER", "mqtt_broker")
 CAMERA_ID         = os.getenv("CAMERA_ID", socket.gethostname())
 TELEMETRY_INT     = int(os.getenv("TELEMETRY_INTERVAL", "60"))
-TOPIC_INFO        = os.getenv("TELEMETRY_TOPIC", "system/telemetry")
+
+# Topic prefix support for test isolation
+TOPIC_PREFIX      = os.getenv("MQTT_TOPIC_PREFIX", "")
+base_topic        = os.getenv("TELEMETRY_TOPIC", "system/telemetry")
+
+if TOPIC_PREFIX:
+    TOPIC_INFO    = f"{TOPIC_PREFIX}/{base_topic}"
+else:
+    TOPIC_INFO    = base_topic
+
 LWT_TOPIC         = os.getenv("LWT_TOPIC", f"{TOPIC_INFO}/{CAMERA_ID}/lwt")
 
 # Include config snapshot
