@@ -68,6 +68,7 @@ import json
 import yaml
 import socket
 import threading
+import queue
 import logging
 import asyncio
 import ipaddress
@@ -725,6 +726,10 @@ class CameraDetector:
         self.lock = threading.RLock()
         self._running = True  # Flag to control background threads
         
+        # MQTT publish queue for thread-safe non-blocking publishes
+        self._mqtt_queue = queue.Queue(maxsize=1000)
+        self._mqtt_publisher_thread = None
+        
         # Parse credentials
         self.credentials = self._parse_credentials()
         
@@ -805,7 +810,7 @@ class CameraDetector:
         self.mqtt_client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=self.config.SERVICE_ID,
-            clean_session=False
+            clean_session=True  # Changed to True to prevent message buildup
         )
         
         # Set callbacks
@@ -846,7 +851,7 @@ class CameraDetector:
                 self.mqtt_client.connect(
                     self.config.MQTT_BROKER,
                     port,
-                    keepalive=60
+                    keepalive=30  # Reduced to 30s for faster disconnection detection
                 )
                 self.mqtt_client.loop_start()
                 safe_log(f"MQTT connection initiated to {self.config.MQTT_BROKER}:{port}")
@@ -875,9 +880,37 @@ class CameraDetector:
         """MQTT disconnection callback"""
         self.mqtt_connected = False
         safe_log(f"MQTT disconnected with code {rc}", logging.WARNING)
+        
+        # Schedule reconnection if not shutting down
+        if self._running and rc != 0:  # rc=0 means clean disconnect
+            safe_log("Scheduling MQTT reconnection in 5 seconds...")
+            t = threading.Timer(5.0, self._mqtt_reconnect)
+            t.daemon = True
+            t.start()
+    
+    def _mqtt_reconnect(self):
+        """Attempt to reconnect to MQTT broker"""
+        if not self._running or self.mqtt_connected:
+            return
+            
+        try:
+            safe_log("Attempting MQTT reconnection...")
+            self.mqtt_client.reconnect()
+        except Exception as e:
+            safe_log(f"MQTT reconnection failed: {e}", logging.ERROR)
+            # Schedule another attempt
+            if self._running:
+                t = threading.Timer(10.0, self._mqtt_reconnect)
+                t.daemon = True
+                t.start()
     
     def _start_background_tasks(self):
         """Start background tasks"""
+        # MQTT publisher thread - process publish queue
+        self._mqtt_publisher_thread = threading.Thread(target=self._mqtt_publisher_loop, daemon=True)
+        self._mqtt_publisher_thread.start()
+        self._background_threads.append(self._mqtt_publisher_thread)
+        
         # Discovery task
         t = threading.Thread(target=self._discovery_loop, daemon=True)
         t.start()
@@ -2218,7 +2251,7 @@ class CameraDetector:
             }
             
             topic = f"{self.config.TOPIC_DISCOVERY}/{camera.id}"
-            self.mqtt_client.publish(topic, json.dumps(payload), qos=1, retain=True)
+            self._mqtt_publish_safe(topic, json.dumps(payload), qos=1, retain=True)
             safe_log(f"Published discovery for camera {camera.id}")
             
         except Exception as e:
@@ -2236,7 +2269,7 @@ class CameraDetector:
             }
             
             topic = f"{self.config.TOPIC_STATUS}/{camera.id}"
-            self.mqtt_client.publish(topic, json.dumps(payload), qos=1)
+            self._mqtt_publish_safe(topic, json.dumps(payload), qos=1)
             safe_log(f"Camera {camera.name} status: {status}")
             
         except Exception as e:
@@ -2277,7 +2310,7 @@ class CameraDetector:
                 yaml.dump(frigate_config, f, default_flow_style=False, sort_keys=False)
             
             # Publish to MQTT
-            self.mqtt_client.publish(
+            self._mqtt_publish_safe(
                 self.config.TOPIC_FRIGATE_CONFIG,
                 json.dumps(frigate_config),
                 qos=1,
@@ -2285,7 +2318,7 @@ class CameraDetector:
             )
             
             # Trigger Frigate reload
-            self.mqtt_client.publish(self.config.FRIGATE_RELOAD_TOPIC, "", qos=1)
+            self._mqtt_publish_safe(self.config.FRIGATE_RELOAD_TOPIC, "", qos=1)
             
             safe_log(f"Updated Frigate config with {len(frigate_config['cameras'])} cameras")
             
@@ -2317,6 +2350,46 @@ class CameraDetector:
             self._health_report_timer = threading.Timer(self.config.HEALTH_REPORT_INTERVAL, self._periodic_health_report)
             self._health_report_timer.daemon = True  # Don\'t block process shutdown
             self._health_report_timer.start()
+    
+    def _mqtt_publisher_loop(self):
+        """Process MQTT publish queue in dedicated thread to prevent blocking"""
+        safe_log("MQTT publisher thread started")
+        
+        while self._running:
+            try:
+                # Get message from queue with timeout
+                msg = self._mqtt_queue.get(timeout=1.0)
+                
+                if msg is None:  # Poison pill to stop thread
+                    break
+                
+                topic, payload, qos, retain = msg
+                
+                # Only publish if connected
+                if self.mqtt_connected and self.mqtt_client:
+                    try:
+                        self.mqtt_client.publish(topic, payload, qos=qos, retain=retain)
+                    except Exception as e:
+                        safe_log(f"Failed to publish to {topic}: {e}", logging.ERROR)
+                else:
+                    # If not connected, messages are dropped
+                    safe_log(f"Dropping message to {topic} - not connected", logging.DEBUG)
+                    
+            except queue.Empty:
+                # Normal timeout, continue
+                continue
+            except Exception as e:
+                safe_log(f"Error in MQTT publisher thread: {e}", logging.ERROR)
+                time.sleep(1)  # Prevent tight loop on error
+        
+        safe_log("MQTT publisher thread stopped")
+    
+    def _mqtt_publish_safe(self, topic, payload, qos=1, retain=False):
+        """Thread-safe non-blocking MQTT publish via queue"""
+        try:
+            self._mqtt_queue.put_nowait((topic, payload, qos, retain))
+        except queue.Full:
+            safe_log(f"MQTT publish queue full, dropping message to {topic}", logging.WARNING)
     
     def _publish_health(self):
         """Publish health status"""
@@ -2350,16 +2423,8 @@ class CameraDetector:
             }
         
         try:
-
-        
-            if self.mqtt_client is None or not self.mqtt_connected:
-
-        
-                safe_log("Cannot publish health: MQTT client not ready")
-
-        
-                return
-            self.mqtt_client.publish(
+            # Use thread-safe publish
+            self._mqtt_publish_safe(
                 self.config.TOPIC_HEALTH,
                 json.dumps(payload),
                 qos=1,
@@ -2459,6 +2524,17 @@ class CameraDetector:
             )
         except:
             pass
+        
+        # Stop MQTT publisher thread
+        try:
+            if hasattr(self, '_mqtt_queue'):
+                # Send poison pill to stop publisher thread
+                self._mqtt_queue.put(None)
+                # Wait for publisher thread to finish
+                if hasattr(self, '_mqtt_publisher_thread') and self._mqtt_publisher_thread:
+                    self._mqtt_publisher_thread.join(timeout=5.0)
+        except Exception as e:
+            safe_log(f"Error stopping MQTT publisher thread: {e}")
         
         # Disconnect MQTT
         try:
