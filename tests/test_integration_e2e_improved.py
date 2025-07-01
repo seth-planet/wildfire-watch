@@ -691,43 +691,91 @@ class TestE2EIntegrationImproved:
         
         def on_message(client, userdata, msg):
             try:
-                # Strip namespace from topic for comparison
-                original_topic = namespace.strip(msg.topic)
                 payload_str = msg.payload.decode()
                 
-                # Debug: print all health/telemetry messages
-                if 'health' in original_topic or 'telemetry' in original_topic:
-                    print(f"[DEBUG] Health/Telemetry message: {msg.topic} -> {original_topic}")
+                # Debug: print all messages
+                print(f"[DEBUG] Received message on topic: {msg.topic}")
+                print(f"[DEBUG] Expected namespace prefix: {namespace_prefix}")
+                if 'health' in msg.topic or 'telemetry' in msg.topic:
                     print(f"[DEBUG] Payload preview: {payload_str[:100]}...")
+                
+                # Services publish to namespaced topics, so we need to check the full topic
+                # Remove the namespace prefix to get the base topic for mapping
+                if msg.topic.startswith(namespace_prefix + "/"):
+                    base_topic = msg.topic[len(namespace_prefix) + 1:]
+                else:
+                    base_topic = msg.topic
+                    print(f"[DEBUG] Warning: Topic {msg.topic} doesn't start with expected namespace {namespace_prefix}")
                 
                 # Direct pattern matching for known health topics
                 service_mapping = {
                     'system/camera_detector_health': 'camera_detector',
                     'system/consensus_telemetry': 'fire_consensus', 
-                    'system/gpio_trigger/health': 'gpio_trigger'
+                    'system/gpio_trigger/health': 'gpio_trigger',
+                    'system/trigger_telemetry': 'gpio_trigger'  # GPIO trigger uses this topic
                 }
                 
-                if original_topic in service_mapping:
-                    service = service_mapping[original_topic]
+                if base_topic in service_mapping:
+                    service = service_mapping[base_topic]
                     health_messages[service] = json.loads(payload_str)
                     health_events[service].set()
-                    print(f"[DEBUG] ✅ Health message received for {service} from {original_topic}")
-                elif 'health' in original_topic or 'telemetry' in original_topic:
-                    print(f"[DEBUG] ⚠️  Unrecognized health topic: {original_topic}")
+                    print(f"[DEBUG] ✅ Health message received for {service} from {base_topic}")
+                elif 'health' in base_topic or 'telemetry' in base_topic:
+                    print(f"[DEBUG] ⚠️  Unrecognized health topic: {base_topic}")
                     
             except Exception as e:
                 print(f"[DEBUG] Error processing message {msg.topic}: {e}")
         
-        # Set the callback BEFORE wrapping
-        mqtt_client.client.on_message = on_message
+        # Use the raw client for subscriptions since services already publish with namespace
+        raw_client = mqtt_client.client
+        raw_client.on_message = on_message
         
-        # Subscribe to all health/telemetry patterns and debug topics
-        mqtt_client.subscribe("#")  # Subscribe to ALL topics for debugging
-        print("[DEBUG] Subscribed to all topics (#) for debugging")
+        # Get the namespace prefix that services are using
+        namespace_prefix = namespace.namespace  # e.g., "test/master"
+        
+        # Subscribe to the namespaced topics that services actually publish to
+        # Services already include the namespace prefix in their topics
+        raw_client.subscribe(f"{namespace_prefix}/system/camera_detector_health")
+        raw_client.subscribe(f"{namespace_prefix}/system/consensus_telemetry")
+        raw_client.subscribe(f"{namespace_prefix}/system/trigger_telemetry")  # GPIO trigger uses this
+        raw_client.subscribe(f"{namespace_prefix}/system/+")  # Catch all system topics
+        print(f"[DEBUG] Subscribed to health topics with namespace: {namespace_prefix}")
+        
+        # Also subscribe to all topics for debugging
+        raw_client.subscribe(f"{namespace_prefix}/#")
+        print(f"[DEBUG] Subscribed to all namespaced topics: {namespace_prefix}/#")
+        
         mqtt_client.loop_start()
+        
+        # Debug: Print broker connection details
+        print(f"[DEBUG] Test MQTT Broker - Host: {self.mqtt_broker.host}, Port: {self.mqtt_broker.port}")
+        print(f"[DEBUG] Worker ID: {self.parallel_context.worker_id}")
+        print(f"[DEBUG] Is broker running: {self.mqtt_broker.is_running()}")
         
         # Wait for services to start publishing health
         time.sleep(8)  # Give camera_detector time to start and connect to MQTT
+        
+        # Debug: Test local connectivity first
+        test_event = Event()
+        def on_test_message(client, userdata, msg):
+            print(f"[DEBUG] Test message received: {msg.topic}")
+            test_event.set()
+        
+        # Subscribe to test topic and publish
+        test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test_debug")
+        test_client.on_message = on_test_message
+        test_client.connect(self.mqtt_broker.host, self.mqtt_broker.port)
+        test_client.subscribe("#")
+        test_client.loop_start()
+        
+        test_client.publish("test/connectivity", "ping")
+        if test_event.wait(timeout=2):
+            print("[DEBUG] ✅ Local MQTT connectivity verified")
+        else:
+            print("[DEBUG] ❌ Local MQTT connectivity FAILED!")
+        
+        test_client.loop_stop()
+        test_client.disconnect()
         
         # Wait for health messages (camera_detector now publishes every 5s)
         for service, event in health_events.items():
