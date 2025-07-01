@@ -15,6 +15,9 @@ import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)
 
+# Configuration toggle for per-worker brokers vs shared broker
+USE_PER_WORKER_BROKERS = os.getenv('TEST_PER_WORKER_BROKERS', 'true').lower() == 'true'
+
 class ConnectionPool:
     """Manages a pool of MQTT client connections"""
     
@@ -57,37 +60,83 @@ class TestMQTTBroker:
     Enhanced MQTT broker for testing with isolation features
     """
     
-    # Class-level broker instance for session reuse
-    _session_broker = None
-    _session_lock = threading.Lock()
+    # Class-level broker instances per worker for parallel isolation
+    _worker_brokers: Dict[str, 'TestMQTTBroker'] = {}
+    _worker_lock = threading.Lock()
     
-    def __init__(self, port=None, session_scope=True):
+    def __init__(self, port=None, session_scope=True, worker_id='master'):
         self.session_scope = session_scope
+        self.worker_id = worker_id
         
-        if session_scope and TestMQTTBroker._session_broker:
-            # Reuse existing session broker
-            self._reuse_session_broker()
+        # Determine if we should use per-worker brokers or shared
+        if USE_PER_WORKER_BROKERS:
+            # Per-worker broker mode
+            if session_scope and worker_id in TestMQTTBroker._worker_brokers:
+                # Reuse existing broker for this worker
+                self._reuse_worker_broker()
+            else:
+                # Create new broker instance with worker-based port allocation
+                if port is None:
+                    port = self._allocate_worker_port()
+                self.port = port
+                self.host = 'localhost'
+                self.process = None
+                self.config_file = None
+                self.data_dir = None
+                self.connection_pool = None
+                self._subscribers: Set[str] = set()
+                self._active_topics: Set[str] = set()
         else:
-            # Create new broker instance
-            self.port = port or self._find_free_port()
-            self.host = 'localhost'
-            self.process = None
-            self.config_file = None
-            self.data_dir = None
-            self.connection_pool = None
-            self._subscribers: Set[str] = set()
-            self._active_topics: Set[str] = set()
+            # Shared broker mode - all workers use same broker
+            if session_scope and 'shared' in TestMQTTBroker._worker_brokers:
+                # Reuse the shared broker
+                self.worker_id = 'shared'
+                self._reuse_worker_broker()
+            else:
+                # Create shared broker on default port
+                self.worker_id = 'shared'
+                self.port = port or 11883
+                self.host = 'localhost'
+                self.process = None
+                self.config_file = None
+                self.data_dir = None
+                self.connection_pool = None
+                self._subscribers: Set[str] = set()
+                self._active_topics: Set[str] = set()
     
-    def _reuse_session_broker(self):
-        """Reuse the session-scoped broker"""
-        broker = TestMQTTBroker._session_broker
+    def _reuse_worker_broker(self):
+        """Reuse the worker-specific broker"""
+        broker = TestMQTTBroker._worker_brokers[self.worker_id]
         self.port = broker.port
         self.host = broker.host
         self.process = broker.process
         self.config_file = broker.config_file
         self.data_dir = broker.data_dir
         self.connection_pool = broker.connection_pool
-        logger.debug(f"Reusing session broker on port {self.port}")
+        # Initialize tracking attributes for this instance
+        self._subscribers = set()
+        self._active_topics = set()
+        logger.debug(f"Reusing broker for worker {self.worker_id} on port {self.port}")
+    
+    def _allocate_worker_port(self):
+        """Allocate a port based on worker ID to prevent conflicts"""
+        base_port = 20000  # High port range to avoid conflicts
+        
+        if self.worker_id == 'master':
+            # Non-parallel execution uses base port
+            return base_port
+        elif self.worker_id.startswith('gw'):
+            # Extract worker number from ID (gw0 -> 0, gw1 -> 1, etc.)
+            try:
+                worker_num = int(self.worker_id[2:])
+                # Allocate with 100-port spacing to avoid conflicts
+                return base_port + (worker_num * 100)
+            except ValueError:
+                # Fallback to finding a free port
+                return self._find_free_port()
+        else:
+            # Unknown worker ID format, find a free port
+            return self._find_free_port()
     
     def _find_free_port(self):
         """Find an available port for the test broker"""
@@ -99,14 +148,14 @@ class TestMQTTBroker:
     
     def start(self):
         """Start the test MQTT broker"""
-        if self.session_scope and TestMQTTBroker._session_broker:
-            # Already started
+        if self.session_scope and self.worker_id in TestMQTTBroker._worker_brokers:
+            # Already started for this worker
             return
             
-        with TestMQTTBroker._session_lock:
-            if self.session_scope and TestMQTTBroker._session_broker:
+        with TestMQTTBroker._worker_lock:
+            if self.session_scope and self.worker_id in TestMQTTBroker._worker_brokers:
                 # Double-check after acquiring lock
-                self._reuse_session_broker()
+                self._reuse_worker_broker()
                 return
                 
             # Try mosquitto first
@@ -115,10 +164,10 @@ class TestMQTTBroker:
                 self.connection_pool = ConnectionPool(self.host, self.port)
                 
                 if self.session_scope:
-                    TestMQTTBroker._session_broker = self
+                    TestMQTTBroker._worker_brokers[self.worker_id] = self
                     
             except (FileNotFoundError, RuntimeError) as e:
-                logger.error(f"Failed to start mosquitto: {e}")
+                logger.error(f"Failed to start mosquitto for worker {self.worker_id}: {e}")
                 raise
     
     def _start_mosquitto(self):
@@ -146,7 +195,6 @@ log_type error
 log_type warning
 
 # Connection Settings
-retry_interval 10
 sys_interval 30
 
 # Protocol Settings
@@ -174,7 +222,7 @@ protocol mqtt
         if not self.wait_for_ready(timeout=10):
             raise RuntimeError("MQTT broker failed to become ready")
             
-        logger.info(f"Mosquitto broker started on port {self.port}")
+        logger.info(f"Mosquitto broker started for worker {self.worker_id} on port {self.port}")
     
     def stop(self):
         """Stop the test MQTT broker"""
@@ -193,23 +241,42 @@ protocol mqtt
         if self.process:
             try:
                 if self.process.poll() is None:
+                    # First try graceful termination
                     self.process.terminate()
                     try:
-                        self.process.wait(timeout=2)
+                        self.process.wait(timeout=3)
+                        logger.debug(f"Mosquitto process {self.process.pid} terminated gracefully")
                     except subprocess.TimeoutExpired:
+                        # Force kill if graceful termination fails
+                        logger.warning(f"Force killing mosquitto process {self.process.pid}")
                         self.process.kill()
-                        # Don't wait after kill
+                        try:
+                            # Wait a bit for kill to take effect
+                            self.process.wait(timeout=1)
+                        except subprocess.TimeoutExpired:
+                            logger.error(f"Failed to kill mosquitto process {self.process.pid}")
+                else:
+                    logger.debug(f"Mosquitto process already terminated with code {self.process.returncode}")
+                    
+                # Always wait for process cleanup
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                    
                 self.process = None
             except Exception as e:
-                logger.warning(f"Error stopping mosquitto: {e}")
+                logger.error(f"Error stopping mosquitto process: {e}")
+                # Force set to None to prevent further attempts
+                self.process = None
         
         # Clean up temporary files
         if self.data_dir and os.path.exists(self.data_dir):
             import shutil
             try:
                 shutil.rmtree(self.data_dir)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error cleaning up temp directory {self.data_dir}: {e}")
     
     def get_connection_params(self):
         """Get connection parameters for clients"""
@@ -232,6 +299,32 @@ protocol mqtt
                 time.sleep(0.5)
         return False
     
+    def wait_for_connection(self, timeout=5):
+        """Wait for MQTT broker to be ready for connections
+        
+        This method provides compatibility with tests expecting this method.
+        """
+        return self.wait_for_ready(timeout)
+    
+    def wait_for_connection_ready(self, client, timeout=10):
+        """Wait for MQTT client to be fully connected and ready
+        
+        Args:
+            client: The MQTT client to check
+            timeout: Maximum time to wait
+            
+        Returns:
+            bool: True if client is connected, False if timeout
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if client.is_connected():
+                # Give extra time for subscription setup
+                time.sleep(0.5)
+                return True
+            time.sleep(0.1)
+        return False
+    
     def get_pooled_client(self, client_id: str) -> mqtt.Client:
         """Get a pooled client connection"""
         if not self.connection_pool:
@@ -244,6 +337,31 @@ protocol mqtt
             return self.process.poll() is None
         return False
     
+    def publish_and_wait(self, client, topic, payload, qos=1, timeout=5):
+        """Publish message and wait for delivery confirmation"""
+        message_delivered = False
+        
+        def on_publish(client, userdata, mid, reason_code=None, properties=None):
+            nonlocal message_delivered
+            message_delivered = True
+            
+        # Store original callback
+        original_on_publish = client.on_publish
+        client.on_publish = on_publish
+        
+        try:
+            info = client.publish(topic, payload, qos=qos)
+            
+            # Wait for delivery
+            start_time = time.time()
+            while not message_delivered and time.time() - start_time < timeout:
+                time.sleep(0.1)
+                
+            return message_delivered
+        finally:
+            # Restore original callback
+            client.on_publish = original_on_publish
+    
     def reset_state(self):
         """Reset broker state between tests"""
         # Clear tracking sets
@@ -254,9 +372,38 @@ protocol mqtt
         logger.debug("Reset broker state for next test")
     
     @classmethod
-    def cleanup_session(cls):
-        """Clean up session broker"""
-        with cls._session_lock:
-            if cls._session_broker:
-                cls._session_broker._stop_broker()
-                cls._session_broker = None
+    def cleanup_session(cls, worker_id=None):
+        """Clean up session broker(s)"""
+        with cls._worker_lock:
+            if worker_id:
+                # Clean up specific worker's broker
+                if worker_id in cls._worker_brokers:
+                    broker = cls._worker_brokers[worker_id]
+                    logger.info(f"Cleaning up broker for worker {worker_id}")
+                    broker._stop_broker()
+                    del cls._worker_brokers[worker_id]
+            else:
+                # Clean up all worker brokers
+                logger.info(f"Cleaning up {len(cls._worker_brokers)} worker brokers")
+                for worker_id, broker in list(cls._worker_brokers.items()):
+                    logger.debug(f"Stopping broker for worker {worker_id}")
+                    broker._stop_broker()
+                cls._worker_brokers.clear()
+                
+        # Additional cleanup: kill any stray mosquitto processes
+        import subprocess
+        try:
+            # Find mosquitto processes from our test temp directories
+            result = subprocess.run(['pgrep', '-f', 'mqtt_test_'], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    if pid.strip():
+                        try:
+                            subprocess.run(['kill', '-TERM', pid.strip()], timeout=2)
+                            logger.debug(f"Terminated stray mosquitto process {pid}")
+                        except:
+                            pass
+        except Exception as e:
+            logger.warning(f"Error cleaning up stray processes: {e}")

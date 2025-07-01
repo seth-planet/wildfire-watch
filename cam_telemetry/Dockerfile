@@ -31,4 +31,4 @@ COPY telemetry.py .
 ENTRYPOINT ["entrypoint.sh"]
 
 # Run the telemetry publisher
-CMD ["python", "telemetry.py"]
+CMD ["python3.12", "telemetry.py"]

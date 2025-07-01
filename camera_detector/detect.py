@@ -178,6 +178,7 @@ class Config:
         
         # Health Monitoring
         self.HEALTH_CHECK_INTERVAL = max(10, int(os.getenv("HEALTH_CHECK_INTERVAL", "60")))  # Minimum 10 seconds
+        self.HEALTH_REPORT_INTERVAL = max(5, int(os.getenv("HEALTH_REPORT_INTERVAL", "60")))  # Minimum 5 seconds
         self.OFFLINE_THRESHOLD = max(60, int(os.getenv("OFFLINE_THRESHOLD", "180")))  # Minimum 1 minute
         
         # Frigate Integration
@@ -894,7 +895,8 @@ class CameraDetector:
             self._background_threads.append(t)
         
         # Periodic health reporting - will be handled in cleanup
-        self._health_report_timer = threading.Timer(60, self._periodic_health_report)
+        self._health_report_timer = threading.Timer(self.config.HEALTH_REPORT_INTERVAL, self._periodic_health_report)
+        self._health_report_timer.daemon = True  # Don\'t block process shutdown
         self._health_report_timer.start()
         
         # Network change detection
@@ -1353,7 +1355,7 @@ class CameraDetector:
             if wsd is not None:
                 try:
                     wsd.stop()
-                except:
+                except Exception:
                     pass
     
     def _discover_mdns_cameras(self):
@@ -2294,6 +2296,16 @@ class CameraDetector:
         """Publish periodic health report"""
         if not self._running:
             return
+        
+        # Also skip if MQTT not ready
+        if not self.mqtt_connected or self.mqtt_client is None:
+            safe_log("Skipping health report - MQTT not ready")
+            # Only reschedule if still running
+            if self._running:
+                self._health_report_timer = threading.Timer(self.config.HEALTH_REPORT_INTERVAL, self._periodic_health_report)
+                self._health_report_timer.daemon = True
+                self._health_report_timer.start()
+            return
             
         try:
             self._publish_health()
@@ -2302,7 +2314,8 @@ class CameraDetector:
         
         # Reschedule only if still running
         if self._running:
-            self._health_report_timer = threading.Timer(60, self._periodic_health_report)
+            self._health_report_timer = threading.Timer(self.config.HEALTH_REPORT_INTERVAL, self._periodic_health_report)
+            self._health_report_timer.daemon = True  # Don\'t block process shutdown
             self._health_report_timer.start()
     
     def _publish_health(self):
@@ -2337,6 +2350,15 @@ class CameraDetector:
             }
         
         try:
+
+        
+            if self.mqtt_client is None or not self.mqtt_connected:
+
+        
+                safe_log("Cannot publish health: MQTT client not ready")
+
+        
+                return
             self.mqtt_client.publish(
                 self.config.TOPIC_HEALTH,
                 json.dumps(payload),
@@ -2440,10 +2462,13 @@ class CameraDetector:
         
         # Disconnect MQTT
         try:
-            self.mqtt_client.loop_stop()
-            self.mqtt_client.disconnect()
-        except:
-            pass
+            if self.mqtt_client:
+                self.mqtt_client.loop_stop()
+                self.mqtt_client.disconnect()
+                # Clear the reference to prevent further use
+                self.mqtt_client = None
+        except Exception as e:
+            safe_log(f"Error during MQTT cleanup: {e}")
         
         safe_log("Camera Detector Service cleanup complete")
 

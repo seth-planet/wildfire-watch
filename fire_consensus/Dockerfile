@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.12-slim
 
 # Install system dependencies for mDNS and resilience
 RUN apt-get update && \
@@ -33,7 +33,7 @@ USER consensus
 
 # Health check for container monitoring
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD python -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('localhost', 1883)); s.close()"
+    CMD python3.12 -c "import socket; s=socket.socket(); s.settimeout(5); s.connect(('localhost', 1883)); s.close()"
 
 ENTRYPOINT ["entrypoint.sh"]
-CMD ["python", "-u", "consensus.py"]
+CMD ["python3.12", "-u", "consensus.py"]
