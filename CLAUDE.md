@@ -13,26 +13,15 @@ When performing multiple independent operations, use parallel tool calls in a si
 
 ```python
 # ✅ Good: Parallel tool execution
-# Use multiple tool calls in one message
 bash_tool.run("git status")
 bash_tool.run("git diff") 
 read_tool.read("file1.py")
 read_tool.read("file2.py")
 
-# ❌ Bad: Sequential messages
-# Multiple separate messages with single tool calls
+# ❌ Bad: Sequential messages with single tool calls
 ```
 
-**Use parallel tools for:**
-- Running multiple bash commands simultaneously
-- Reading multiple files for analysis
-- Performing independent grep/glob searches
-- Creating multiple test scripts or output files
-
-**Benefits:**
-- Faster execution and analysis
-- More efficient workflow
-- Better performance for complex tasks
+**Benefits:** Faster execution, more efficient workflow, better performance for complex tasks
 
 ## Development Commands
 
@@ -57,8 +46,6 @@ balena push wildfire-watch
 ### Testing
 ```bash
 # AUTOMATIC PYTHON VERSION SELECTION (Recommended)
-# Tests automatically run with correct Python version based on dependencies
-
 # Run all tests with automatic Python version selection
 ./scripts/run_tests_by_python_version.sh --all
 
@@ -74,74 +61,40 @@ balena push wildfire-watch
 ./scripts/run_tests_by_python_version.sh --validate
 
 # MANUAL PYTHON VERSION SELECTION (Advanced)
-# Python 3.12 tests (most tests) - timeout configuration handles long infrastructure setup
 python3.12 -m pytest -c pytest-python312.ini
-
-# Python 3.10 tests (YOLO-NAS/super-gradients)
 python3.10 -m pytest -c pytest-python310.ini
-
-# Python 3.8 tests (Coral TPU/tflite_runtime)
 python3.8 -m pytest -c pytest-python38.ini
 
 # SPECIFIC TEST CATEGORIES
-# Quick tests (skip slow infrastructure setup)
 python3.12 -m pytest tests/ -v -m "not slow and not infrastructure_dependent"
-
-# MQTT-specific tests (expected ~15s infrastructure setup)
-python3.12 -m pytest tests/ -v -m "mqtt"
-
-# Technology-specific tests
-python3.10 -m pytest tests/ -v -m "yolo_nas"      # YOLO-NAS training
-python3.8 -m pytest tests/ -v -m "coral_tpu"     # Coral TPU hardware
+python3.10 -m pytest tests/ -v -m "yolo_nas"
+python3.8 -m pytest tests/ -v -m "coral_tpu"
 
 # Disable timeouts for debugging
 python3.12 -m pytest tests/ -v --timeout=0
-
-# See docs/python_version_testing.md for automatic version selection details
-# See docs/timeout_configuration.md for timeout handling details
 ```
 
 ### Test Timeout Configuration
-All pytest configuration files are pre-configured with appropriate timeouts:
-- **pytest.ini** (general): 1 hour per test, 2 hour session timeout
 - **pytest-python312.ini**: 1 hour per test, 2 hour session timeout  
 - **pytest-python310.ini**: 2 hours per test, 4 hour session timeout (for training tests)
 - **pytest-python38.ini**: 2 hours per test, 4 hour session timeout (for model conversion)
 
-These timeouts ensure:
-- Infrastructure-heavy tests (MQTT setup, Docker containers) complete successfully
-- Model conversion and training tests have sufficient time
-- Tests don't hang indefinitely on failures
-- Proper cleanup after test completion
-
-For individual test runs that may need extended timeouts:
-```bash
-# Run with explicit timeout override
-python3.12 -m pytest tests/test_trigger.py --timeout=600
-
-# Run all tests with extended timeout
-python3.12 -m pytest tests/ --timeout=3600
-```
+These timeouts ensure infrastructure-heavy tests complete successfully and prevent indefinite hangs.
 
 ### Python Version
 This project requires Python 3.12. All commands should use `python3.12` and `pip3.12`.
 
 **Exceptions**:
 
-1. **Coral TPU**: Requires Python 3.8 for `tflite_runtime` compatibility. When running Coral-specific code:
+1. **Coral TPU**: Requires Python 3.8 for `tflite_runtime` compatibility
    - Use `python3.8` instead of `python3.12`
-   - Install tflite_runtime with: `python3.8 -m pip install tflite-runtime`
-   - See `docs/coral_python38_requirements.md` for details
-   - Run `./scripts/check_coral_python.py` to verify Python 3.8 setup
+   - Install: `python3.8 -m pip install tflite-runtime`
+   - Run `./scripts/check_coral_python.py` to verify setup
 
-2. **YOLO-NAS Training**: Requires Python 3.10 for `super-gradients` compatibility. When training YOLO-NAS models:
+2. **YOLO-NAS Training**: Requires Python 3.10 for `super-gradients` compatibility
    - Use `python3.10` instead of `python3.12`
-   - Install super-gradients with: `python3.10 -m pip install super-gradients`
-   - Training scripts in `converted_models/` should be run with Python 3.10:
-     ```bash
-     python3.10 converted_models/train_yolo_nas.py
-     python3.10 converted_models/complete_yolo_nas_pipeline.py
-     ```
+   - Install: `python3.10 -m pip install super-gradients`
+   - Training scripts: `python3.10 converted_models/train_yolo_nas.py`
 
 ### Service Management
 ```bash
@@ -195,33 +148,25 @@ mqtt_broker (core)
 - Models stored in `converted_models/` with conversion script
 - Supports Coral TPU (.tflite), Hailo (.hef), ONNX, TensorRT formats
 - Update `security_nvr/nvr_base_config.yml` for new models
-- **Model sizes**: Export in multiple sizes - 640x640 (optimal accuracy), 416x416 (balanced), 320x320 (edge devices)
-- **Default model size: 640x640** for optimal fire detection accuracy
-- **Fallback to 320x320** for hardware-limited devices (Raspberry Pi, Coral TPU)
-- Performance benchmarking required for each accelerator type
-- **Note:** Coral TPU requires Python 3.8 for tflite_runtime compatibility
-- **Always use QAT (Quantization-Aware Training) for INT8 formats when available**
-- Model accuracy validation ensures <2% degradation for production deployment
-- **Calibration data**: Download from https://huggingface.co/datasets/mailseth/wildfire-watch/resolve/main/wildfire_calibration_data.tar.gz?download=true
+- **Model sizes**: 640x640 (optimal accuracy), 416x416 (balanced), 320x320 (edge devices)
+- **Default**: 640x640 for optimal fire detection accuracy
+- **Coral TPU requires Python 3.8** for tflite_runtime compatibility
+- **Always use QAT (Quantization-Aware Training)** for INT8 formats when available
+- Model accuracy validation ensures <2% degradation for production
+- **Calibration data**: https://huggingface.co/datasets/mailseth/wildfire-watch/resolve/main/wildfire_calibration_data.tar.gz?download=true
 
 #### Model Conversion Timeouts
-Due to the complexity of neural network compilation and optimization, model conversions can take significant time:
-- **ONNX**: ~2-5 minutes (includes simplification)
-- **TFLite**: ~15-30 minutes (includes INT8 quantization with calibration data)
-- **TensorRT**: ~30-60 minutes (engine optimization is compute-intensive)
-- **OpenVINO**: ~10-30 minutes (includes IR generation and optimization)
-- **Hailo**: ~20-40 minutes (requires Docker and specialized compilation)
+- **ONNX**: ~2-5 minutes
+- **TFLite**: ~15-30 minutes (INT8 quantization)
+- **TensorRT**: ~30-60 minutes (engine optimization)
+- **OpenVINO**: ~10-30 minutes
+- **Hailo**: ~20-40 minutes (Docker compilation)
 
-All conversion scripts have been configured with appropriate timeouts:
-- Standard conversions: 30 minutes
-- TensorRT engine building: 60 minutes
-- Quantization with large calibration datasets: 30 minutes
-
-If conversions timeout, consider:
-1. Using smaller model sizes (320x320 instead of 640x640)
-2. Reducing calibration dataset size for quantization
-3. Running conversions on more powerful hardware
-4. Using pre-converted models when available
+If conversions timeout:
+1. Use smaller model sizes (320x320 instead of 640x640)
+2. Reduce calibration dataset size
+3. Run on more powerful hardware
+4. Use pre-converted models when available
 
 ### GPIO Safety Systems
 - All pump control in `gpio_trigger/trigger.py` uses state machine pattern
@@ -259,47 +204,27 @@ If conversions timeout, consider:
 - Supports multiple credential sets: `CAMERA_CREDENTIALS=username:password,username2:password2`
 - Automatic credential testing during discovery
 - MAC address tracking prevents IP-based spoofing
+- **NEVER hardcode credentials in code files** - Always use environment variables
+- Pass credentials via environment when running tests: `CAMERA_CREDENTIALS=admin:password pytest tests/`
 
 ## Testing Strategy
 
-### Unit Tests (`tests/`)
-- `test_consensus.py` - Multi-camera validation logic
-- `test_detect.py` - Camera discovery and RTSP validation
-- `test_trigger.py` - GPIO state machine and safety systems
-- `test_telemetry.py` - Health monitoring
-
-### Integration Tests
-- `test_integration_e2e.py` - Full system workflow
-- `test_hardware_integration.py` - Requires physical hardware
-- `test_model_converter.py` - AI model format conversion
-
-### Development Testing
-- Use `GPIO_SIMULATION=true` for pump control testing
-- Mock MQTT broker available for unit tests
-- Camera discovery can be tested with fake RTSP streams
+### Test Categories
+- **Unit Tests**: `test_consensus.py`, `test_detect.py`, `test_trigger.py`
+- **Integration Tests**: `test_integration_e2e.py`, `test_hardware_integration.py`
+- **Development Testing**: Use `GPIO_SIMULATION=true`, mock MQTT broker available
 
 ### Test Fixing Guidelines
-When fixing failing tests, follow these principles:
-1. **Test the actual code, not a mock** - Ensure tests exercise the real implementation
-   - If testing `mqtt_connect()`, call the actual function, not a simplified version
-   - Only mock external dependencies (network, hardware, time.sleep)
-2. **Fix the code, not just the test** - If a test reveals a bug, fix the source code
-   - Example: Add retry limits to prevent infinite recursion in network code
-   - Make functions testable by adding optional parameters (e.g., `max_retries`)
-3. **Preserve test intent** - Understand what the test is trying to verify
-   - Don't remove assertions to make tests pass
-   - Don't mock away the functionality being tested
-4. **Minimal mocking** - Only mock what's necessary
-   - Mock external I/O (files, network, hardware)
-   - Don't mock the module or functions under test
-5. **Test real behavior** - Tests should reflect actual usage
-   - If a function is called with certain parameters in production, test those
-   - Include edge cases and error conditions
+1. **Test the actual code, not a mock** - Only mock external dependencies
+2. **Fix the code, not just the test** - If test reveals bug, fix source code
+3. **Preserve test intent** - Don't remove assertions to make tests pass
+4. **Minimal mocking** - Only mock external I/O (files, network, hardware)
+5. **Test real behavior** - Include edge cases and error conditions
 
 ### Integration Testing Philosophy
-**Avoid mocking functions and files within wildfire-watch**. We want to perform integration tests that actually test our system without mocking out important functionality:
+**Avoid mocking functions and files within wildfire-watch**:
 
-1. **Never mock internal modules** - Don't mock wildfire-watch modules like `consensus`, `trigger`, `detect`, etc.
+1. **Never mock internal modules** - Don't mock `consensus`, `trigger`, `detect`, etc.
    - ❌ Bad: `@patch('consensus.FireConsensus')`
    - ✅ Good: Actually instantiate and use `FireConsensus` class
 
@@ -307,35 +232,173 @@ When fixing failing tests, follow these principles:
    - ✅ Mock: `RPi.GPIO`, `docker`, `requests`
    - ✅ Mock: File I/O, network calls, hardware interfaces
    - ✅ Mock: Time delays (`time.sleep`) for faster tests
-   - ❌ **DO NOT Mock: `paho.mqtt.client`** - Use real MQTT broker for testing
+   - ❌ **DO NOT Mock: `paho.mqtt.client`** - Use real MQTT broker
 
 3. **MQTT Integration Testing Requirements**:
-   - **Always use real MQTT broker** - Start and teardown actual MQTT server for proper integration testing
-   - Use `TestMQTTBroker` class from `tests/mqtt_test_broker.py` for broker lifecycle management
-   - Test actual MQTT message flow between components with real pub/sub
-   - Verify real MQTT connection handling, reconnection logic, and message delivery
+   - **Always use real MQTT broker** - Use `TestMQTTBroker` class
+   - Test actual MQTT message flow between components
+   - Verify real connection handling and reconnection logic
    - **Never mock MQTT client** - This prevents testing the actual communication layer
 
-4. **Test real interactions**:
-   - Test actual MQTT message flow between components
-   - Test real state transitions and validation logic
-   - Test actual configuration loading and parsing
+### Container Management and Test Isolation Best Practices
 
-5. **Use test fixtures properly**:
-   - Create real instances of classes under test
-   - Set up proper test environments (temp dirs, real MQTT broker)
-   - Use `test_mqtt_broker` fixture to provide actual MQTT server
-   - Clean up resources properly after tests
+#### Use DockerContainerManager for Container Tests
+When writing tests that use Docker containers, always use `DockerContainerManager` for proper isolation and cleanup:
 
-6. **Integration test examples**:
-   ```python
-   # Good: Testing real consensus logic
-   consensus = FireConsensus()  # Real instance
-   consensus.process_detection(detection)  # Real method call
-   
-   # Bad: Mocking internal functionality
-   @patch('consensus.FireConsensus.process_detection')  # Don't do this
-   ```
+```python
+# ✅ Good: Proper container management with isolation
+@pytest.fixture
+def mqtt_broker(self, docker_container_manager):
+    container = docker_container_manager.start_container(
+        image="eclipse-mosquitto:2.0",
+        name=docker_container_manager.get_container_name("mqtt"),
+        config={'ports': {'1883/tcp': None}}  # Dynamic port allocation
+    )
+    return container
+
+# ❌ Bad: Manual container management without isolation
+def test_something():
+    client = docker.from_env()
+    container = client.containers.run("image", name="test", detach=True)
+    # No cleanup, no isolation, conflicts with parallel tests
+```
+
+#### Use ParallelTestContext for Multi-Service Tests
+For complex tests involving multiple services, use `ParallelTestContext` to get proper topic namespacing and environment variables:
+
+```python
+# ✅ Good: Parallel test context with automatic topic prefixing
+@pytest.fixture(autouse=True)
+def setup_parallel_context(self, parallel_test_context, test_mqtt_broker, docker_container_manager):
+    self.parallel_context = parallel_test_context
+    self.mqtt_broker = test_mqtt_broker
+    self.docker_manager = docker_container_manager
+    
+    # Services get proper environment with topic prefixes
+    env_vars = self.parallel_context.get_service_env('fire_consensus')
+    # env_vars includes MQTT_TOPIC_PREFIX=test/worker_id automatically
+
+# ❌ Bad: Manual environment setup without test isolation
+def test_services():
+    env = {'MQTT_BROKER': 'localhost', 'MQTT_PORT': '1883'}
+    # No topic prefixing = tests conflict with each other
+```
+
+#### Topic Namespace Strategy for Test Isolation
+All MQTT topics must be namespaced to prevent test interference:
+
+```python
+# ✅ Good: Proper topic namespacing
+def test_fire_detection(self, parallel_test_context):
+    topic_prefix = parallel_test_context.get_topic_prefix()  # Returns "test/worker_id"
+    
+    # Publish to namespaced topic
+    mqtt_client.publish(f"{topic_prefix}/fire/detection", payload)
+    
+    # Subscribe to namespaced topics
+    mqtt_client.subscribe(f"{topic_prefix}/fire/trigger")
+    
+    # Services automatically use prefixed topics via MQTT_TOPIC_PREFIX env var
+
+# ❌ Bad: No topic namespacing
+def test_fire_detection():
+    mqtt_client.publish("fire/detection", payload)  # Conflicts with other tests
+    mqtt_client.subscribe("fire/trigger")  # Gets messages from other tests
+```
+
+#### Container Environment Best Practices
+Always set proper environment variables for container isolation:
+
+```python
+# ✅ Good: Complete environment setup with topic prefixing
+def start_consensus_service(self, docker_container_manager):
+    worker_id = docker_container_manager.worker_id
+    topic_prefix = f"test/{worker_id}"
+    
+    config = {
+        'environment': {
+            'MQTT_BROKER': 'localhost',
+            'MQTT_PORT': str(self.mqtt_broker.port),
+            'MQTT_TOPIC_PREFIX': topic_prefix,  # Critical for test isolation
+            'CONSENSUS_THRESHOLD': '1',  # Test-specific config
+            'LOG_LEVEL': 'DEBUG'
+        },
+        'network_mode': 'host'  # Required for localhost MQTT access
+    }
+    
+    return docker_container_manager.start_container("service:latest", name, config)
+
+# ❌ Bad: Missing topic prefix and test-specific configuration
+def start_service():
+    config = {
+        'environment': {
+            'MQTT_BROKER': 'localhost',
+            'MQTT_PORT': '1883'
+            # Missing MQTT_TOPIC_PREFIX = topic conflicts
+            # Missing test-specific timeouts = tests hang
+        }
+    }
+```
+
+#### Test Data Isolation Patterns
+Ensure test data doesn't interfere between parallel workers:
+
+```python
+# ✅ Good: Worker-specific temporary directories
+@pytest.fixture
+def temp_config_dir(self, docker_container_manager):
+    temp_dir = tempfile.mkdtemp(prefix=f"test_{docker_container_manager.worker_id}_")
+    yield temp_dir
+    shutil.rmtree(temp_dir, ignore_errors=True)
+
+# ✅ Good: Worker-specific container names
+container_name = docker_container_manager.get_container_name('frigate')
+# Returns: wf-{worker_id}-frigate
+
+# ❌ Bad: Hardcoded names and paths cause conflicts
+temp_dir = "/tmp/test_config"  # Multiple workers conflict
+container_name = "test_frigate"  # Name collision between workers
+```
+
+#### Error Handling and Cleanup
+Always implement proper cleanup even when tests fail:
+
+```python
+# ✅ Good: Comprehensive cleanup with try/finally
+def test_complex_pipeline(self, docker_container_manager):
+    containers = {}
+    try:
+        containers['service1'] = docker_container_manager.start_container(...)
+        containers['service2'] = docker_container_manager.start_container(...)
+        
+        # Test logic here
+        
+    finally:
+        # DockerContainerManager handles container cleanup automatically
+        # But clean up other resources manually
+        for resource in test_resources:
+            try:
+                resource.cleanup()
+            except:
+                pass  # Don't fail cleanup due to cleanup errors
+```
+
+#### When to Use Each Testing Approach
+
+**Use `DockerContainerManager` when:**
+- Testing individual services with containers
+- Need proper container isolation and cleanup
+- Want dynamic port allocation to avoid conflicts
+
+**Use `ParallelTestContext` when:**
+- Testing multiple interacting services
+- Need complete environment variable setup
+- Want automatic MQTT topic namespacing
+
+**Use both together when:**
+- Running complex E2E tests
+- Testing complete system integration
+- Need maximum test isolation and reliability
 
 ## Common Environment Variables
 
@@ -371,90 +434,45 @@ When fixing failing tests, follow these principles:
 
 ## File Organization Guidelines
 
-### Directory Structure for Claude-Generated Files
-- **tmp/** - All temporary files including test scripts, debugging files, and intermediate outputs
-- **output/** - Final output files, test results, generated reports, and converted models
-- **scripts/** - Permanent utility scripts that should be kept in the repository
+### Directory Structure
+- **tmp/** - Temporary test scripts, debugging files, intermediate outputs
+- **output/** - Final test results, reports, converted models
+- **scripts/** - Permanent utility scripts (kept in repository)
 - **docs/** - Documentation files and guides
+- **converted_models/** - Model conversion scripts and utilities
+- **tests/** - Test files (must start with `test_` prefix)
 
 ### Examples:
 ```bash
-# Temporary test scripts
+# Temporary files
 tmp/test_tensorrt_fix.py
 tmp/debug_yolov9.py
-tmp/test_conversion.py
 
 # Output files
 output/test_results.log
 output/model_conversion_report.md
-output/converted_models/
-output/comprehensive_test_results.log
 
-# Permanent scripts (kept in repo)
+# Permanent scripts
 scripts/validate_models.py
-scripts/run_all_tests.py
-scripts/demo_accuracy_validation.py
+scripts/generate_certs.sh
 ```
-
-### Scripts (`scripts/`)
-- Utility and demo scripts belong in the `scripts/` directory
-- Executable scripts should have proper shebang (e.g., `#!/usr/bin/env python3.12`)
-- Examples:
-  - `scripts/generate_certs.sh` - Certificate generation
-  - `scripts/build_multiplatform.sh` - Docker build utilities
-  - `scripts/demo_accuracy_validation.py` - Model accuracy demo
-  - `scripts/startup_coordinator.py` - Service coordination
-
-### Temporary Files (`tmp/`)
-- All testing scripts, debugging files, and temporary utilities belong in `tmp/`
-- This includes validation scripts, quick tests, and experimental code
-- Examples:
-  - `tmp/test_tensorrt_fix.py` - Temporary test scripts
-  - `tmp/debug_yolov9.py` - Debugging utilities
-  - `tmp/quick_validation.py` - Quick validation tests
-
-### Documentation (`docs/`)
-- Technical documentation and guides belong in the `docs/` directory
-- Use descriptive filenames with lowercase and underscores
-- Examples:
-  - `docs/configuration.md` - Configuration guide
-  - `docs/hardware.md` - Hardware requirements
-  - `docs/accuracy_validation.md` - Model accuracy validation guide
-  - `docs/troubleshooting.md` - Common issues and solutions
-
-### Models (`converted_models/`)
-- Model conversion scripts and utilities stay in `converted_models/`
-- Converted model outputs organized by model name and size
-- Calibration data in subdirectories
-- Model conversion logs and reports generated here
-
-### Tests (`tests/`)
-- All test files must start with `test_` prefix
-- Integration tests should be clearly named (e.g., `test_integration_e2e.py`)
-- Hardware-specific tests marked appropriately
 
 ## Development Workflow for Non-Trivial Work
 
-### Planning Methodology
-For any non-trivial work (>30 minutes or involving multiple files), follow this structured approach:
+For any work >30 minutes or involving multiple files:
 
 1. **Create a Plan File**
-   - Name: `[feature_name]_plan.md` in the appropriate directory
+   - Name: `[feature_name]_plan.md` in appropriate directory
    - Include: Overview, phases, timeline, technical requirements
-   - Structure with clear phases and deliverables
 
 2. **Execute Plan with Progress Updates**
-   - Mark each phase as: `## Phase X: [Name] - ⏳ IN PROGRESS` when starting
-   - Update to: `## Phase X: [Name] - ✅ COMPLETE` when finished
-   - Add progress notes with what was accomplished
-   - Document any deviations or issues encountered
+   - Mark phases: `## Phase X: [Name] - ⏳ IN PROGRESS` → `✅ COMPLETE`
+   - Document deviations or issues encountered
 
 3. **Testing Requirements**
-   - **At the end of each plan**: Run all tests related to the changed code
-   - **Test failure priority**: Fix the program's code first, not the test
-   - **Change tests only if**: The test itself is incorrect or outdated
-   - **Skip tests only if**: They cannot reasonably be made to pass
-   - **Document skipped tests**: Note at end of plan with specific reasons
+   - Run all tests related to changed code
+   - Fix the program's code first, not the test
+   - Document skipped tests with specific reasons
 
 ### Plan File Template
 ```markdown
@@ -468,217 +486,174 @@ Brief description of what will be accomplished
 - Task 1
 - Task 2
 
-### Phase 2: [Name] - ⏳ PENDING  
-- Task 1
-- Task 2
-
 ## Testing
 - List of test files that will be affected
 - Expected test changes
-
-## Timeline
-- Estimated completion time per phase
 
 ## Progress Notes
 [Add progress updates here as work proceeds]
 
 ## Test Results
-[Add test results at completion]
 - Tests run: X
 - Tests passed: Y
 - Tests failed: Z
 - Tests skipped: N (with reasons)
 ```
 
-### Examples of Non-Trivial Work
-- Adding new model architectures
-- Implementing new conversion formats
-- Multi-service integrations
-- Complex refactoring across multiple files
-- New testing frameworks or validation systems
-
 ## Documentation Best Practices
 
 ### Sphinx-Compatible Documentation
-All Python code in this repository should follow Sphinx documentation standards for automatic documentation generation. Documentation should be insightful and helpful for debugging and understanding the system architecture.
-
-Reference: https://www.sphinx-doc.org/en/master/usage/quickstart.html
+All Python code should follow Sphinx documentation standards. Use Google-style docstrings.
 
 #### Documentation Principles
-1. **Component Connectivity**: Clearly document how each component connects to other services via MQTT topics
-2. **Parameter Implications**: Document non-obvious effects of parameter values
-3. **Side Effects**: Document any side effects of function calls, especially MQTT publishes
-4. **Error Handling**: Document what exceptions can be raised and under what conditions
-5. **Thread Safety**: Document if functions/classes are thread-safe or require synchronization
-6. **MQTT Topics**: Document all MQTT topics published to or subscribed from
+1. **Component Connectivity**: Document MQTT topic connections
+2. **Parameter Implications**: Document non-obvious effects
+3. **Side Effects**: Document MQTT publishes
+4. **Error Handling**: Document exceptions
+5. **Thread Safety**: Document synchronization requirements
+6. **MQTT Topics**: Document all pub/sub topics
 
-#### Docstring Format
-Use Google-style docstrings for consistency:
-
+#### Example Docstring
 ```python
 def process_detection(self, detection: Dict[str, Any]) -> bool:
     """Process a fire detection from a camera and update consensus state.
     
-    This method handles incoming fire/smoke detections from the security NVR
-    (Frigate) and maintains a sliding window of detections for multi-camera
-    consensus. When consensus is reached, it publishes a trigger command.
-    
     Args:
         detection: Detection data containing:
-            - camera_id (str): Unique camera identifier (MAC address preferred)
-            - confidence (float): Detection confidence score (0.0-1.0)
+            - camera_id (str): Unique camera identifier
+            - confidence (float): Detection confidence (0.0-1.0)
             - object_type (str): 'fire' or 'smoke'
-            - timestamp (float): Unix timestamp of detection
-            - bbox (dict, optional): Bounding box coordinates
     
     Returns:
-        bool: True if consensus threshold is met, False otherwise
-        
-    Raises:
-        ValueError: If detection data is missing required fields
+        bool: True if consensus threshold is met
         
     Side Effects:
         - Updates internal detection history
         - May publish to 'trigger/fire_detected' if consensus reached
-        - Logs detection details to configured logger
         
     MQTT Topics:
         - Subscribes to: frigate/+/fire, frigate/+/smoke
         - Publishes to: trigger/fire_detected (on consensus)
         
     Thread Safety:
-        This method is thread-safe due to internal locking on detection_history
+        This method is thread-safe due to internal locking
     """
-```
-
-#### Class Documentation
-```python
-class FireConsensus:
-    """Multi-camera fire detection consensus manager.
-    
-    This service subscribes to fire/smoke detections from multiple cameras
-    and implements a voting mechanism to reduce false positives. It requires
-    a configurable number of cameras to agree before triggering the suppression
-    system.
-    
-    The consensus algorithm uses a sliding time window and confidence weighting
-    to evaluate detections. Recent detections are weighted more heavily than
-    older ones within the window.
-    
-    Attributes:
-        consensus_threshold (int): Number of cameras required for consensus
-        time_window (float): Time window in seconds for valid detections
-        detection_history (Dict[str, List[Detection]]): Per-camera detection history
-        mqtt_client (mqtt.Client): MQTT client for pub/sub operations
-        
-    MQTT Integration:
-        - Broker: Connects to MQTT_BROKER:MQTT_PORT (default: localhost:1883)
-        - Client ID: 'fire_consensus_service'
-        - Topics:
-            - Subscribes: cameras/discovered, frigate/+/fire, frigate/+/smoke
-            - Publishes: trigger/fire_detected, consensus/status
-            
-    Thread Model:
-        - Main thread: MQTT message handling
-        - Background thread: Cleanup of old detections (runs every 60s)
-        
-    Configuration:
-        Environment variables:
-        - CONSENSUS_THRESHOLD: Number of cameras for consensus (default: 2)
-        - TIME_WINDOW: Detection validity window in seconds (default: 30)
-        - MIN_CONFIDENCE: Minimum confidence score (default: 0.7)
-    """
-```
-
-#### Module Documentation
-Add module-level docstrings at the top of each Python file:
-
-```python
-"""Fire detection consensus service for multi-camera validation.
-
-This module implements the consensus logic for the Wildfire Watch system.
-It aggregates fire/smoke detections from multiple cameras running through
-the Frigate NVR and determines when to trigger the suppression system.
-
-The consensus mechanism helps reduce false positives by requiring multiple
-cameras to detect fire before activation. This is critical for preventing
-unnecessary water discharge.
-
-Communication Flow:
-    1. Camera Detector publishes discovered cameras to 'cameras/discovered'
-    2. Frigate processes video streams and publishes to 'frigate/{camera}/fire'
-    3. This service aggregates detections and evaluates consensus
-    4. On consensus, publishes to 'trigger/fire_detected'
-    5. GPIO Trigger receives command and activates sprinkler system
-
-Integration Points:
-    - Upstream: camera_detector (camera discovery), security_nvr (AI detection)
-    - Downstream: gpio_trigger (pump control), cam_telemetry (monitoring)
-    - Lateral: mqtt_broker (message bus)
-
-Example:
-    Run standalone::
-    
-        $ python3.12 consensus.py
-        
-    Run in Docker::
-    
-        $ docker-compose up fire-consensus
-"""
 ```
 
 ## AI Assistant Guidelines
 
-### Debugging and Code Analysis
-For complex debugging and code analysis tasks, use specialized AI models to leverage their unique strengths:
+### MCP Tool Usage for Enhanced Development
 
-**Use Gemini (Google) for:**
-- **Large context analysis** - Gemini can handle extensive codebases and multiple files simultaneously
-- **Complex debugging** - Deep investigation of multi-file issues and complex system interactions
-- **Architecture analysis** - Understanding large-scale system relationships and dependencies
-- **Code review** - Comprehensive analysis of extensive code changes
-- **Performance analysis** - Analyzing performance across multiple components
-- **Large context code reviews** - When reviewing multiple files or entire modules
+#### Critical Safety and Security Analysis
+For a safety-critical fire suppression system, use specialized tools:
 
-**Use ChatGPT o3 for:**
-- **Tricky logic problems** - Complex algorithmic and mathematical reasoning
-- **Small context debugging** - Focused analysis of specific functions or modules
-- **Logic flow analysis** - Understanding complex control flow and state management
-- **Algorithm optimization** - Improving specific algorithmic implementations
-- **Edge case identification** - Finding subtle bugs in focused code sections
-- **Small context code reviews** - When reviewing specific functions or algorithms
-- **Logic evaluation** - Verifying correctness of specific logic implementations
+- **`mcp__zen__secaudit`** - Comprehensive security audit for OWASP analysis, vulnerability assessment
+  - Use for GPIO control code, MQTT authentication, certificate management
+  - Choose `pro` model for deep security analysis
+  - Focus on hardware control safety and network security
 
-**Model Selection Guidelines:**
-- **Context size**: >10 files or >5000 lines → Gemini
-- **Logic complexity**: Algorithmic puzzles, mathematical problems → o3
-- **System scope**: Multi-service interactions → Gemini
-- **Function scope**: Single function debugging → o3
-- **Code review scope**: Multiple files → Gemini, Single function → o3
-- **Unknown complexity**: Start with Gemini for broader analysis, then o3 for specific issues
+- **`mcp__zen__codereview`** - Professional code review for bugs, security, performance
+  - Essential for pump control logic, consensus algorithms, camera detection
+  - Use for safety-critical paths and hardware interfaces
+  - Identifies subtle issues that could cause system failures
+
+#### Development Workflow Tools
+Follow the recommended workflow: **Design → Review → Implement → Test → Precommit**
+
+- **`mcp__zen__planner`** - Interactive step-by-step planning for complex features
+  - Use for new AI model integrations, multi-service features
+  - Break down complex tasks like Hailo integration or Coral TPU support
+
+- **`mcp__zen__debug`** - Systematic investigation and root cause analysis
+  - Use when encountering specific errors or mysterious behaviors
+  - Provides step-by-step investigation workflow
+
+- **`mcp__zen__analyze`** - Architecture and code pattern analysis
+  - Use to understand microservices communication patterns
+  - Analyze MQTT message flows and service dependencies
+
+- **`mcp__zen__testgen`** - Comprehensive test generation with edge cases
+  - Create test suites for hardware interfaces, consensus logic
+  - Generate tests for edge cases in fire detection algorithms
+
+- **`mcp__zen__precommit`** - Pre-commit validation of git changes
+  - Validate changes before commits, especially for safety-critical code
+  - Ensure test coverage and documentation updates
+
+#### Collaborative Analysis and Decision Making
+
+- **`mcp__zen__challenge`** - Critical challenge prompt to question assumptions
+  - Use before implementing safety-critical features
+  - Challenge design decisions for pump control, fire detection thresholds
+  - Prevents automatic agreement, encourages thorough analysis
+
+- **`mcp__zen__consensus`** - Multi-model perspective gathering
+  - Get diverse expert opinions on architectural decisions
+  - Use for complex design choices like consensus algorithms
+  - Combine different AI models for comprehensive analysis
+
+- **`mcp__zen__chat`** - Collaborative thinking and brainstorming
+  - Bounce ideas for new features, optimization strategies
+  - Get second opinions on technical approaches
+  - Use for general development discussions
+
+#### Model Selection Strategy
+Choose models based on task complexity and domain:
+
+- **Gemini Pro**: Large context analysis, architecture decisions, security reviews
+- **o3**: Logic problems, algorithmic optimization, mathematical reasoning
+- **Enable web search**: For current API documentation, best practices, error solutions
+
+#### Plan Review Requirements
+**All implementation plans MUST be reviewed by advanced models before finalization:**
+
+- **Use o3 or Gemini Pro** to review plans created by other models
+- **Critical for safety systems**: Fire suppression, GPIO control, consensus algorithms
+- **Review focus areas**:
+  - Technical feasibility and approach
+  - Safety considerations and edge cases
+  - Resource requirements and timelines
+  - Integration points and dependencies
+  - Testing and validation strategies
+- **Implementation**: Use `mcp__zen__consensus` with o3 and Gemini as reviewers
+
+#### Tool Selection Decision Flow
+1. **Specific error or bug?** → `mcp__zen__debug`
+2. **Want to find code issues?** → `mcp__zen__codereview`
+3. **Need security analysis?** → `mcp__zen__secaudit`
+4. **Understand code architecture?** → `mcp__zen__analyze`
+5. **Need comprehensive tests?** → `mcp__zen__testgen`
+6. **Complex feature planning?** → `mcp__zen__planner`
+7. **Want to challenge assumptions?** → `mcp__zen__challenge`
+8. **Need multiple perspectives?** → `mcp__zen__consensus`
+9. **Ready to commit changes?** → `mcp__zen__precommit`
+
+### Traditional Model Usage Guidelines
+
+#### Debugging and Code Analysis
+**Use Gemini for:**
+- Large context analysis (>10 files or >5000 lines)
+- Complex debugging across multiple files
+- Architecture analysis
+- Performance analysis across components
+
+**Use o3 for:**
+- Tricky logic problems
+- Algorithm optimization
+- Single function debugging
+- Mathematical reasoning
+- Edge case identification
 
 ### Information Accuracy Guidelines
+**Always use web search for:**
+- **All uncertain APIs** - Never guess API parameters, methods, or usage patterns
+- Library features and compatibility
+- Error message solutions
+- Breaking changes between versions
 
-#### Web Search for Technical Details
-When encountering uncertainty about facts, current information, or technical details, always use web search to verify and provide accurate information rather than speculating or admitting uncertainty without investigation.
+**For difficult debugging problems:**
+- **Search local .md files first** - Look for similar problems and solutions in project documentation
+- Use `Glob` tool to find relevant docs: `*.md`, `docs/*.md`, `*SUMMARY.md`
+- Check `*_PLAN.md`, `*_SUMMARY.md`, `*_GUIDE.md` files for past solutions
 
-**Required for web search:**
-1. **API Documentation**: When working with specific APIs or libraries, search for current documentation rather than assuming knowledge
-2. **Library Features**: Verify available methods, parameters, and usage patterns
-3. **Version Compatibility**: Check compatibility between different library versions
-4. **Error Messages**: Search for specific error messages to find solutions
-5. **Best Practices**: Look up current best practices for frameworks and tools
-6. **Breaking Changes**: Verify if APIs have changed between versions
-
-**Examples requiring web search:**
-- "What parameters does super-gradients trainer.train() accept?"
-- "How to configure YOLO-NAS dataloader in super-gradients 3.6+"
-- "What's the correct import path for DetectionMetrics_050?"
-- "How to enable QAT in super-gradients?"
-- "What are the supported transforms in super-gradients detection?"
-
-**Process:**
-1. Use WebSearch tool to find official documentation
-2. Verify information from multiple authoritative sources
-3. Provide accurate, up-to-date information with source references
-4. Update code examples based on current API documentation
+**Never speculate** - Search and verify all technical details.

@@ -1,0 +1,32 @@
+Person
+Bicycle
+Car
+Motorcycle
+Bus
+Truck
+Bird
+Cat
+Dog
+Horse
+Sheep
+Cattle
+Bear
+Deer
+Rabbit
+Raccoon
+Fox
+Skunk
+Squirrel
+Pig
+Chicken
+Boat
+Vehicle registration plate
+Snowmobile
+Human face
+Armadillo
+Fire
+Package
+Rodent
+Child
+Weapon
+Backpack

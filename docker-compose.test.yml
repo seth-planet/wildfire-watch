@@ -1,0 +1,111 @@
+version: '3.8'
+
+# Test environment for running integration tests
+# Lightweight configuration with mock services
+
+services:
+  mqtt_broker:
+    image: eclipse-mosquitto:2
+    container_name: test-mqtt-broker
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+    volumes:
+      - ./mqtt_broker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./certs:/mosquitto/certs:ro
+    environment:
+      - MQTT_TLS=${MQTT_TLS:-false}
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$$SYS/#", "-C", "1", "-i", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - test_net
+
+  mock_camera:
+    image: python:3.12-slim
+    container_name: test-mock-camera
+    command: >
+      bash -c "
+      pip install paho-mqtt numpy &&
+      python -c \"
+      import time; import json; import random; import paho.mqtt.client as mqtt;
+      client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, 'mock_camera');
+      client.connect('mqtt_broker', 1883, 60);
+      client.loop_start();
+      print('Mock camera started');
+      discovery = {'camera_id': 'mock_cam_1', 'name': 'Mock Camera 1', 'ip': '192.168.100.10', 'mac': 'AA:BB:CC:DD:EE:FF', 'rtsp_url': 'rtsp://192.168.100.10/stream', 'online': True};
+      client.publish('cameras/discovered/mock_cam_1', json.dumps(discovery), retain=True);
+      fire_id = 1;
+      while True:
+          time.sleep(5);
+          if random.random() > 0.7:
+              size = random.randint(50, 150);
+              detection = {'camera_id': 'mock_cam_1', 'object_id': f'fire_{fire_id}', 'confidence': random.uniform(0.7, 0.95), 'bounding_box': [100, 100, 100 + size, 100 + size], 'timestamp': time.time()};
+              client.publish('fire/detection', json.dumps(detection));
+              print(f'Published fire detection: {detection}');
+              for i in range(5):
+                  time.sleep(1);
+                  size += random.randint(5, 15);
+                  detection['bounding_box'] = [100, 100, 100 + size, 100 + size];
+                  detection['timestamp'] = time.time();
+                  client.publish('fire/detection', json.dumps(detection));
+              fire_id += 1;
+      \""
+    depends_on:
+      mqtt_broker:
+        condition: service_healthy
+    networks:
+      - test_net
+    restart: unless-stopped
+
+  # Minimal consensus service for testing
+  fire_consensus:
+    build:
+      context: ./fire_consensus
+      dockerfile: Dockerfile
+    container_name: test-fire-consensus
+    environment:
+      - MQTT_BROKER=mqtt_broker
+      - MQTT_TLS=${MQTT_TLS:-false}
+      - CONSENSUS_THRESHOLD=1
+      - LOG_LEVEL=DEBUG
+      - NODE_ID=test-node
+    depends_on:
+      mqtt_broker:
+        condition: service_healthy
+    networks:
+      - test_net
+    restart: unless-stopped
+
+  # Mock GPIO trigger for testing
+  gpio_trigger:
+    build:
+      context: ./gpio_trigger
+      dockerfile: Dockerfile
+    container_name: test-gpio-trigger
+    environment:
+      - MQTT_BROKER=mqtt_broker
+      - MQTT_TLS=${MQTT_TLS:-false}
+      - GPIO_SIMULATION=true
+      - MAX_ENGINE_RUNTIME=30
+      - LOG_LEVEL=DEBUG
+      - NODE_ID=test-node
+    depends_on:
+      mqtt_broker:
+        condition: service_healthy
+    networks:
+      - test_net
+    restart: unless-stopped
+
+networks:
+  test_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.100.0/24
+
+volumes:
+  test_mqtt_data:
+  test_mqtt_logs:

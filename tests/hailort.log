@@ -1,0 +1,4 @@
+[2025-06-27 23:11:28.313] [766039] [HailoRT] [info] [vdevice.cpp:535] [create] Creating vdevice with params: device_count: 1, scheduling_algorithm: NONE, multi_process_service: false
+[2025-06-27 23:11:28.329] [766039] [HailoRT] [info] [device.cpp:51] [Device] OS Version: Linux 5.15.0-139-generic #149~20.04.1-Ubuntu SMP Wed Apr 16 08:29:56 UTC 2025 x86_64
+[2025-06-27 23:11:28.329] [766039] [HailoRT] [info] [control.cpp:113] [control__parse_identify_results] firmware_version is: 4.21.0
+[2025-06-27 23:11:28.329] [766039] [HailoRT] [info] [vdevice.cpp:681] [create] VDevice Infos: 0000:41:00.0

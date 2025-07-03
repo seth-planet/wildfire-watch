@@ -1,0 +1,89 @@
+2025-06-08 07:54:57,014 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 07:54:57,014 [INFO] ============================================================
+2025-06-08 07:54:57,014 [INFO] Checking requirements...
+2025-06-08 07:54:57,014 [INFO] PyTorch version: 2.5.0+cu124
+2025-06-08 07:54:57,069 [INFO] CUDA available: True
+2025-06-08 07:54:57,087 [INFO] CUDA device: NVIDIA RTX A2000 12GB
+2025-06-08 07:54:57,087 [INFO] CUDA memory: 12.5 GB
+2025-06-08 07:54:57,699 [ERROR] Missing packages: ['super-gradients']
+2025-06-08 07:54:57,699 [INFO] Installing missing packages...
+2025-06-08 07:55:53,808 [ERROR] Training pipeline failed: Command '['/usr/bin/python3.12', '-m', 'pip', 'install', 'super-gradients']' returned non-zero exit status 1.
+2025-06-08 08:54:39,531 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 08:54:39,531 [INFO] ============================================================
+2025-06-08 08:54:39,531 [INFO] Checking requirements...
+2025-06-08 10:03:37,444 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:03:37,444 [INFO] ============================================================
+2025-06-08 10:03:37,444 [INFO] Checking requirements...
+2025-06-08 10:11:00,655 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:11:00,655 [INFO] ============================================================
+2025-06-08 10:11:00,655 [INFO] Checking requirements...
+2025-06-08 10:11:00,655 [INFO] PyTorch version: 2.5.0+cu124
+2025-06-08 10:11:00,691 [INFO] CUDA available: True
+2025-06-08 10:11:00,725 [INFO] CUDA device: NVIDIA RTX A2000 12GB
+2025-06-08 10:11:00,725 [INFO] CUDA memory: 12.5 GB
+2025-06-08 10:11:01,345 [ERROR] Missing packages: ['super-gradients']
+2025-06-08 10:11:01,345 [INFO] Installing missing packages...
+2025-06-08 10:11:55,833 [ERROR] Training pipeline failed: Command '['/usr/bin/python3.12', '-m', 'pip', 'install', 'super-gradients']' returned non-zero exit status 1.
+2025-06-08 10:12:08,740 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:12:08,740 [INFO] ============================================================
+2025-06-08 10:12:08,740 [INFO] Checking requirements...
+2025-06-08 10:43:24,148 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:43:24,148 [INFO] ============================================================
+2025-06-08 10:43:24,148 [INFO] Checking requirements...
+2025-06-08 10:44:33,930 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:44:33,931 [INFO] ============================================================
+2025-06-08 10:44:33,931 [INFO] Checking requirements...
+2025-06-08 10:45:15,480 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:45:15,480 [INFO] ============================================================
+2025-06-08 10:45:15,480 [INFO] Checking requirements...
+2025-06-08 10:46:01,388 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 10:46:01,388 [INFO] ============================================================
+2025-06-08 10:46:01,388 [INFO] Checking requirements...
+2025-06-08 12:18:53,215 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 12:18:53,215 [INFO] ============================================================
+2025-06-08 12:18:53,215 [INFO] Checking requirements...
+2025-06-08 12:24:49,862 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 12:24:49,862 [INFO] ============================================================
+2025-06-08 12:24:49,862 [INFO] Checking requirements...
+2025-06-08 18:10:33,921 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 18:10:33,921 [INFO] ============================================================
+2025-06-08 18:10:33,921 [INFO] Checking requirements...
+2025-06-08 18:34:49,930 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 18:34:49,930 [INFO] ============================================================
+2025-06-08 18:34:49,930 [INFO] Checking requirements...
+2025-06-08 18:35:39,835 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 18:35:39,835 [INFO] ============================================================
+2025-06-08 18:35:39,835 [INFO] Checking requirements...
+2025-06-08 19:42:57,559 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:42:57,559 [INFO] ============================================================
+2025-06-08 19:42:57,559 [INFO] Checking requirements...
+2025-06-08 19:51:53,291 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:51:53,291 [INFO] ============================================================
+2025-06-08 19:51:53,291 [INFO] Checking requirements...
+2025-06-08 19:52:45,509 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:52:45,509 [INFO] ============================================================
+2025-06-08 19:52:45,509 [INFO] Checking requirements...
+2025-06-08 19:55:00,952 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:55:00,952 [INFO] ============================================================
+2025-06-08 19:55:00,952 [INFO] Checking requirements...
+2025-06-08 19:57:31,350 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:57:31,350 [INFO] ============================================================
+2025-06-08 19:57:31,350 [INFO] Checking requirements...
+2025-06-08 19:58:25,727 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:58:25,728 [INFO] ============================================================
+2025-06-08 19:58:25,728 [INFO] Checking requirements...
+2025-06-08 19:59:59,194 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 19:59:59,194 [INFO] ============================================================
+2025-06-08 19:59:59,194 [INFO] Checking requirements...
+2025-06-08 20:04:55,008 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 20:04:55,008 [INFO] ============================================================
+2025-06-08 20:04:55,008 [INFO] Checking requirements...
+2025-06-08 20:19:50,093 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 20:19:50,093 [INFO] ============================================================
+2025-06-08 20:19:50,093 [INFO] Checking requirements...
+2025-06-08 20:25:02,039 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 20:25:02,040 [INFO] ============================================================
+2025-06-08 20:25:02,040 [INFO] Checking requirements...
+2025-06-08 20:43:07,524 [INFO] YOLO-NAS Training Pipeline for Wildfire Watch
+2025-06-08 20:43:07,524 [INFO] ============================================================
+2025-06-08 20:43:07,524 [INFO] Checking requirements...

@@ -1,0 +1,323 @@
+2025-06-19 07:51:04,134 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-19 07:51:04,134 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-19 07:51:04,206 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-19 07:51:04,206 [INFO] convert_model: Converting to ONNX (Size: 640x640, QAT: False)...
+2025-06-19 09:52:31,461 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-19 09:52:31,461 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-19 09:52:31,557 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-24 07:27:52,350 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 07:27:52,351 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-24 07:27:52,423 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-24 07:27:52,423 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 07:27:52,423 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-24 07:27:52,423 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-24 07:27:52,423 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-24 07:27:52,424 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-24 07:28:03,799 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 07:28:03,799 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-24 07:28:03,869 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-24 07:28:03,870 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-24 21:36:49,506 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 21:36:49,506 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-24 21:36:49,580 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-24 21:36:49,581 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 09:45:44,823 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 09:45:44,823 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-25 09:45:45,233 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 09:45:45,233 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 09:45:45,234 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 13:38:55,903 [INFO] convert_model: Model sizes to convert: [(320, 320)]
+2025-06-25 13:38:55,903 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-25 13:38:55,903 [DEBUG] convert_model: Starting hardware detection...
+2025-06-25 13:38:55,931 [DEBUG] convert_model: Checking for NVIDIA GPU...
+2025-06-25 13:38:56,349 [DEBUG] convert_model: nvidia-smi result: returncode=0
+2025-06-25 13:38:56,395 [DEBUG] convert_model: TensorRT Python package found
+2025-06-25 13:38:56,441 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-25 13:38:57,517 [INFO] convert_model: Model info: unknown (Unknown license)
+2025-06-25 13:38:57,517 [INFO] convert_model: Classes: 0, NMS: False
+2025-06-25 13:38:58,614 [INFO] convert_model: QAT compatibility: False
+2025-06-25 13:38:58,614 [INFO] convert_model: 
+============================================================
+2025-06-25 13:38:58,614 [INFO] convert_model: Converting size: 320x320
+2025-06-25 13:38:58,614 [INFO] convert_model: ============================================================
+2025-06-25 13:38:58,614 [INFO] convert_model: Converting to onnx...
+2025-06-25 13:38:58,614 [INFO] convert_model: Converting to ONNX (Size: 320x320, QAT: False)...
+2025-06-25 13:39:00,276 [DEBUG] convert_model: ONNX conversion stdout: FAILED: Ran out of input
+
+2025-06-25 13:39:00,276 [DEBUG] convert_model: ONNX conversion stderr: 
+2025-06-25 13:39:00,277 [ERROR] convert_model: ONNX conversion failed: FAILED: Ran out of input
+ 
+2025-06-25 13:39:00,277 [INFO] convert_model: Generating optimized Frigate configuration...
+2025-06-25 13:39:01,367 [INFO] convert_model: Model info: unknown (Unknown license)
+2025-06-25 13:39:01,367 [INFO] convert_model: Classes: 0, NMS: False
+2025-06-25 13:39:01,368 [INFO] convert_model: Created deployment script: /tmp/tmp48fdg5js/320x320/deploy_wildfire_to_frigate.sh
+2025-06-25 13:39:01,369 [INFO] convert_model: Frigate configuration saved: /tmp/tmp48fdg5js/320x320/wildfire_frigate_config.yml
+2025-06-25 13:39:01,369 [INFO] convert_model: Starting model validation and benchmarking...
+2025-06-25 13:39:01,371 [INFO] convert_model: Multi-size README saved: /tmp/tmp48fdg5js/README.md
+2025-06-25 13:39:01,371 [INFO] convert_model: 
+Conversion complete! Total time: 4.9s
+2025-06-25 13:39:01,371 [INFO] convert_model: Summary saved to: /tmp/tmp48fdg5js/conversion_summary.json
+2025-06-25 15:47:21,379 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 15:47:21,379 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-25 15:47:21,806 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 15:47:21,806 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 16:43:50,387 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 16:43:50,387 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-25 16:43:50,960 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 16:43:50,960 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 16:43:50,961 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 16:43:50,961 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 17:39:28,105 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 17:39:28,113 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-25 17:39:28,541 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-25 17:39:28,541 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 17:39:28,542 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 21:17:03,019 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 21:17:03,019 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-25 21:17:03,405 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-25 21:17:03,405 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 21:17:03,405 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 21:17:03,405 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-25 21:17:03,405 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 21:17:03,405 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-25 21:17:03,406 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-26 00:04:13,395 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-26 00:04:13,395 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-26 00:04:13,759 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-26 00:04:13,759 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-26 22:10:32,390 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-26 22:10:32,390 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-26 22:10:32,803 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-26 22:10:32,803 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-27 00:05:21,165 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-27 00:05:21,165 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-27 00:05:21,491 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-27 00:05:21,492 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-27 00:29:34,270 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-27 00:29:34,270 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-27 00:29:34,681 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-27 00:29:34,681 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-27 00:29:34,681 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-27 00:29:34,681 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-27 00:29:34,681 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-27 00:29:34,681 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-27 00:29:34,681 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-27 00:29:34,682 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-27 00:29:34,682 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-27 00:29:34,682 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-27 00:29:34,682 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-27 00:29:34,682 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-27 00:29:34,682 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-28 09:21:57,436 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 09:21:57,436 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-28 09:21:57,905 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-28 09:21:57,905 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 09:21:57,905 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-28 09:21:57,905 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-28 09:21:57,905 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-28 09:21:57,905 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-28 09:21:57,906 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-28 09:21:57,906 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-28 09:21:57,906 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-28 09:21:57,906 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 09:21:57,906 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-28 09:21:57,906 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-28 09:21:57,907 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-28 13:21:03,461 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 13:21:03,462 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-28 13:21:03,982 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-28 13:21:03,982 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-28 21:26:36,792 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 21:26:36,792 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-28 21:26:37,272 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-28 21:26:37,272 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 21:26:37,272 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-28 21:26:37,272 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-28 21:26:37,272 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-28 21:26:37,272 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-28 21:26:37,273 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 16:54:11,133 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 16:54:11,133 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-29 16:54:11,637 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-29 16:54:11,637 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 16:54:11,638 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 22:18:25,325 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 22:18:25,325 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-29 22:18:26,154 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-29 22:18:26,154 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 22:18:26,154 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 22:18:26,155 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-29 22:18:26,155 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 22:18:26,156 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 22:23:25,556 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 22:23:25,556 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-29 22:23:26,099 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 22:23:26,099 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 23:10:13,552 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 23:10:13,553 [WARNING] convert_model: No calibration data provided. Quantization features will be limited.
+2025-06-29 23:10:14,036 [INFO] convert_model: Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': True, 'hailo8l': False}, 'nvidia': {'cuda': True, 'tensorrt': True}, 'intel': {'cpu': True, 'openvino': True}}
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(640, 640), (608, 608), (576, 576), (544, 544), (512, 512), (480, 480), (448, 448), (416, 416), (384, 384), (352, 352), (320, 320)]
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 256)]
+2025-06-29 23:10:14,036 [INFO] convert_model: Model sizes to convert: [(416, 320)]
+2025-06-29 23:10:14,037 [INFO] convert_model: Model sizes to convert: [(320, 256), (640, 512)]
+2025-06-29 23:10:14,037 [INFO] convert_model: Model sizes to convert: [(640, 640)]
+2025-06-29 23:10:14,037 [INFO] convert_model: Model sizes to convert: [(640, 480)]
+2025-06-29 23:10:14,037 [INFO] convert_model: Model sizes to convert: [(640, 640), (320, 320)]
+2025-06-29 23:10:14,037 [INFO] convert_model: Model sizes to convert: [(640, 480), (320, 320)]

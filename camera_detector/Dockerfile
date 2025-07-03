@@ -46,7 +46,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY camera_detector/copy_wsdl.py .
 
 # Copy WSDL files from onvif-zeep package to expected location
-RUN python3 copy_wsdl.py
+RUN python3.12 copy_wsdl.py
 
 # Copy application files
 COPY camera_detector/detect.py .
@@ -63,7 +63,7 @@ USER detector
 
 # Health check
 HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import json; import sys; sys.path.append('/app'); from detect import CameraDetector; d=CameraDetector(); sys.exit(0 if d.get_health()['healthy'] else 1)"
+    CMD python3.12 -c "import json; import sys; sys.path.append('/app'); from detect import CameraDetector; d=CameraDetector(); sys.exit(0 if d.get_health()['healthy'] else 1)"
 
 ENTRYPOINT ["entrypoint.sh"]
-CMD ["python", "-u", "detect.py"]
+CMD ["python3.12", "-u", "detect.py"]

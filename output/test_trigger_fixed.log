@@ -1,0 +1,36 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.11, pytest-8.4.0, pluggy-1.6.0 -- /usr/bin/python3.12
+cachedir: .pytest_cache
+rootdir: /home/seth/wildfire-watch
+plugins: cov-6.1.1, timeout-2.4.0, mock-3.14.1, asyncio-1.0.0, anyio-4.4.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 44 items
+
+tests/test_trigger.py::TestBasicOperation::test_initialization PASSED    [  2%]
+tests/test_trigger.py::TestBasicOperation::test_fire_trigger_starts_sequence PASSED [  4%]
+tests/test_trigger.py::TestBasicOperation::test_normal_shutdown_sequence FAILED [  6%]
+tests/test_trigger.py::TestBasicOperation::test_multiple_triggers_extend_runtime PASSED [  9%]
+tests/test_trigger.py::TestSafety::test_valve_must_be_open_for_ignition PASSED [ 11%]
+tests/test_trigger.py::TestSafety::test_max_runtime_enforcement PASSED   [ 13%]
+tests/test_trigger.py::TestSafety::test_rpm_reduction_before_shutdown PASSED [ 15%]
+tests/test_trigger.py::TestSafety::test_emergency_valve_open_on_trigger PASSED [ 18%]
+tests/test_trigger.py::TestSafety::test_refill_valve_runtime_multiplier PASSED [ 20%]
+tests/test_trigger.py::TestConcurrency::test_concurrent_triggers PASSED  [ 22%]
+tests/test_trigger.py::TestConcurrency::test_trigger_during_shutdown PASSED [ 25%]
+tests/test_trigger.py::TestConcurrency::test_trigger_during_cooldown PASSED [ 27%]
+tests/test_trigger.py::TestConcurrency::test_state_transitions_are_atomic PASSED [ 29%]
+tests/test_trigger.py::TestErrorHandling::test_gpio_failure_handling PASSED [ 31%]
+tests/test_trigger.py::TestErrorHandling::test_error_state_ignores_triggers PASSED [ 34%]
+tests/test_trigger.py::TestErrorHandling::test_mqtt_disconnection_handling PASSED [ 36%]
+tests/test_trigger.py::TestErrorHandling::test_timer_exception_handling PASSED [ 38%]
+tests/test_trigger.py::TestMQTT::test_mqtt_connection_and_subscription PASSED [ 40%]
+tests/test_trigger.py::TestMQTT::test_fire_trigger_via_mqtt PASSED       [ 43%]
+tests/test_trigger.py::TestMQTT::test_telemetry_events_published PASSED  [ 45%]
+tests/test_trigger.py::TestMQTT::test_health_reports_published PASSED    [ 47%]
+tests/test_trigger.py::TestMQTT::test_lwt_configuration PASSED           [ 50%]
+tests/test_trigger.py::TestIntegration::test_complete_fire_cycle FAILED  [ 52%]
+tests/test_trigger.py::TestIntegration::test_rapid_on_off_cycles PASSED  [ 54%]
+tests/test_trigger.py::TestIntegration::test_cleanup_from_various_states PASSED [ 56%]
+tests/test_trigger.py::TestPerformance::test_timer_scheduling_performance PASSED [ 59%]
+tests/test_trigger.py::TestPerformance::test_concurrent_event_handling PASSED [ 61%]
+tests/test_trigger.py::TestREADMECompliance::test_fire_detection_sprinkler_activation_sequence PASSED [ 63%]

@@ -1,0 +1,9 @@
+# GPIO Trigger Service Requirements for Testing
+# Python 3.12 compatible
+
+# Core dependencies
+paho-mqtt>=2.0.0
+python-dotenv>=1.0.0
+
+# For simulation on non-Pi systems
+fake-rpi>=0.7.1

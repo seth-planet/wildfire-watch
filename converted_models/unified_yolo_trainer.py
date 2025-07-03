@@ -70,7 +70,7 @@ class UnifiedYOLOTrainer:
                 'pretrained_weights': None
             },
             'dataset': {
-                'data_dir': str(Path.home() / "fiftyone" / "train_yolo"),
+                'data_dir': '/media/seth/SketchScratch/fiftyone/train_yolo',
                 'format': 'coco',  # coco, yolo, custom
                 'train_split': 'train',
                 'val_split': 'validation',
@@ -232,7 +232,7 @@ class UnifiedYOLOTrainer:
     
     def validate_dataset_labels(self) -> Dict[str, Any]:
         """Validate dataset labels for class index consistency"""
-        if not self.config['dataset']['validate_labels']:
+        if not self.config['dataset'].get('validate_labels', True):
             self.logger.info("Label validation disabled")
             return {'validation_skipped': True}
         
@@ -330,7 +330,9 @@ class UnifiedYOLOTrainer:
             from super_gradients.common.object_names import Models
             from super_gradients.training.transforms.detection import (
                 DetectionLongestMaxSize, 
-                DetectionPadIfNeeded,
+                DetectionPadIfNeeded
+            )
+            from super_gradients.training.transforms.transforms import (
                 DetectionStandardize,
                 DetectionTargetsFormatTransform
             )
@@ -380,7 +382,14 @@ class UnifiedYOLOTrainer:
             coco_detection_yolo_format_train, 
             coco_detection_yolo_format_val
         )
-        from super_gradients.training.transforms.detection import DetectionLongestMaxSize, DetectionPadIfNeeded
+        from super_gradients.training.transforms.detection import (
+            DetectionLongestMaxSize, 
+            DetectionPadIfNeeded
+        )
+        from super_gradients.training.transforms.transforms import (
+            DetectionStandardize,
+            DetectionTargetsFormatTransform
+        )
         
         # Fix class index issues first
         dataset_dir = self.config['dataset']['data_dir']
@@ -389,7 +398,7 @@ class UnifiedYOLOTrainer:
         
         # Check if dataset needs preprocessing
         try:
-            from .dataset_preprocessor import preprocess_dataset
+            from dataset_preprocessor import preprocess_dataset
             
             # First analyze the dataset
             self.logger.info("Checking dataset for invalid class indices...")
@@ -418,7 +427,7 @@ class UnifiedYOLOTrainer:
             self.logger.warning("Dataset preprocessor not available, attempting class index fixer")
             # Fallback to class index fixer
             try:
-                from .class_index_fixer import fix_yolo_nas_class_issues
+                from class_index_fixer import fix_yolo_nas_class_issues
                 fix_result = fix_yolo_nas_class_issues(dataset_dir, num_classes)
                 
                 if not fix_result['is_fixed']:
@@ -616,6 +625,10 @@ class UnifiedYOLOTrainer:
         elif config['lr_scheduler'] == 'cosine':
             training_params["cosine_final_lr_ratio"] = 0.1
         
+        # Add max train batches if specified (for testing)
+        if config.get('max_train_batches'):
+            training_params['max_train_batches'] = config['max_train_batches']
+        
         return training_params
     
     def _create_ultralytics_trainer(self):
@@ -705,7 +718,9 @@ class UnifiedYOLOTrainer:
             return report
             
         except Exception as e:
+            import traceback
             self.logger.error(f"Training failed: {e}")
+            self.logger.error(f"Full traceback:\n{traceback.format_exc()}")
             raise
     
     def _save_final_model(self, trainer) -> str:

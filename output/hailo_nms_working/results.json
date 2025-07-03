@@ -1,0 +1,1977 @@
+{
+  "video": "/tmp/wildfire_test_videos/fire1.mov",
+  "frames_processed": 50,
+  "frames_with_detections": 49,
+  "total_detections": 147,
+  "avg_inference_ms": 63.82930715997645,
+  "p95_inference_ms": 65.67010540111369,
+  "fps": 15.666784499065349,
+  "results": [
+    {
+      "frame_id": 0,
+      "inference_time": 99.75012200084166,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            109,
+            63,
+            151,
+            152
+          ],
+          "score": 0.7051505446434021,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            218,
+            215,
+            267,
+            303
+          ],
+          "score": 0.6797069907188416,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 1,
+      "inference_time": 62.473310998029774,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            221,
+            216,
+            269,
+            305
+          ],
+          "score": 0.7233245372772217,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            109,
+            65,
+            152,
+            155
+          ],
+          "score": 0.6324546337127686,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            359,
+            0,
+            479,
+            299
+          ],
+          "score": 0.3077561855316162,
+          "class_id": 0,
+          "class_name": "Person"
+        }
+      ]
+    },
+    {
+      "frame_id": 2,
+      "inference_time": 60.920163999981014,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            152,
+            186,
+            165,
+            216
+          ],
+          "score": 0.38528844714164734,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            110,
+            67,
+            151,
+            154
+          ],
+          "score": 0.27624455094337463,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 3,
+      "inference_time": 60.8716619972256,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            109,
+            65,
+            152,
+            154
+          ],
+          "score": 0.3562100827693939,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            153,
+            186,
+            165,
+            217
+          ],
+          "score": 0.2508009672164917,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 4,
+      "inference_time": 62.39076599740656,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            296,
+            380,
+            309,
+            513
+          ],
+          "score": 0.4361756145954132,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            110,
+            66,
+            152,
+            154
+          ],
+          "score": 0.24716617166996002,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 5,
+      "inference_time": 63.368974999320926,
+      "num_detections": 5,
+      "detections": [
+        {
+          "bbox": [
+            152,
+            187,
+            165,
+            216
+          ],
+          "score": 0.47615838050842285,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            297,
+            391,
+            311,
+            512
+          ],
+          "score": 0.4543495774269104,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            113,
+            69,
+            152,
+            153
+          ],
+          "score": 0.4070972204208374,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            343,
+            528,
+            385,
+            720
+          ],
+          "score": 0.20718340575695038,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            225,
+            221,
+            273,
+            305
+          ],
+          "score": 0.20336271822452545,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 6,
+      "inference_time": 64.18907699844567,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            115,
+            74,
+            152,
+            153
+          ],
+          "score": 0.378018856048584,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            343,
+            523,
+            387,
+            721
+          ],
+          "score": 0.24716617166996002,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            153,
+            188,
+            164,
+            215
+          ],
+          "score": 0.23989658057689667,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            353,
+            0,
+            480,
+            292
+          ],
+          "score": 0.21158239245414734,
+          "class_id": 0,
+          "class_name": "Person"
+        }
+      ]
+    },
+    {
+      "frame_id": 7,
+      "inference_time": 63.90892700073891,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            116,
+            80,
+            153,
+            153
+          ],
+          "score": 0.6360894441604614,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            343,
+            521,
+            390,
+            710
+          ],
+          "score": 0.5706630945205688,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            226,
+            222,
+            277,
+            310
+          ],
+          "score": 0.5306802988052368,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 8,
+      "inference_time": 65.3933749999851,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            111,
+            69,
+            153,
+            153
+          ],
+          "score": 0.47252357006073,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            229,
+            222,
+            277,
+            309
+          ],
+          "score": 0.26055848598480225,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 9,
+      "inference_time": 63.94892299795174,
+      "num_detections": 6,
+      "detections": [
+        {
+          "bbox": [
+            347,
+            529,
+            398,
+            743
+          ],
+          "score": 0.559758722782135,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            229,
+            221,
+            281,
+            313
+          ],
+          "score": 0.5488542914390564,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            304,
+            397,
+            315,
+            511
+          ],
+          "score": 0.5161411166191101,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            109,
+            66,
+            151,
+            151
+          ],
+          "score": 0.330766499042511,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            304,
+            398,
+            311,
+            426
+          ],
+          "score": 0.31986209750175476,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            304,
+            439,
+            314,
+            512
+          ],
+          "score": 0.25443577766418457,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 10,
+      "inference_time": 63.459687000431586,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            348,
+            528,
+            398,
+            718
+          ],
+          "score": 0.6688026189804077,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            304,
+            398,
+            316,
+            514
+          ],
+          "score": 0.5343151092529297,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            108,
+            66,
+            152,
+            152
+          ],
+          "score": 0.49433234333992004,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 11,
+      "inference_time": 63.561459002812626,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            230,
+            220,
+            281,
+            312
+          ],
+          "score": 0.7524029016494751,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            348,
+            528,
+            400,
+            734
+          ],
+          "score": 0.567028284072876,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            109,
+            72,
+            151,
+            150
+          ],
+          "score": 0.27260974049568176,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            304,
+            402,
+            318,
+            523
+          ],
+          "score": 0.2653401494026184,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 12,
+      "inference_time": 62.7454060013406,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            230,
+            221,
+            283,
+            315
+          ],
+          "score": 0.7669420838356018,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            107,
+            60,
+            151,
+            148
+          ],
+          "score": 0.378018856048584,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            351,
+            531,
+            402,
+            749
+          ],
+          "score": 0.28714895248413086,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            307,
+            403,
+            321,
+            520
+          ],
+          "score": 0.2035486102104187,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 13,
+      "inference_time": 65.20923700009007,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            229,
+            218,
+            284,
+            313
+          ],
+          "score": 0.6760721802711487,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            107,
+            58,
+            151,
+            145
+          ],
+          "score": 0.44707998633384705,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 14,
+      "inference_time": 61.930032999953255,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            230,
+            218,
+            284,
+            313
+          ],
+          "score": 0.7887508869171143,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            308,
+            402,
+            331,
+            555
+          ],
+          "score": 0.23989658057689667,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            107,
+            57,
+            150,
+            142
+          ],
+          "score": 0.2326269894838333,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 15,
+      "inference_time": 63.39285099966219,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            230,
+            217,
+            285,
+            315
+          ],
+          "score": 0.7051505446434021,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            105,
+            54,
+            148,
+            140
+          ],
+          "score": 0.2944185435771942,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 16,
+      "inference_time": 61.43579899799079,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            232,
+            217,
+            286,
+            314
+          ],
+          "score": 0.7633073329925537,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            310,
+            442,
+            324,
+            527
+          ],
+          "score": 0.35257527232170105,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 17,
+      "inference_time": 61.146771997300675,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            229,
+            214,
+            287,
+            315
+          ],
+          "score": 0.7996552586555481,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            103,
+            50,
+            148,
+            133
+          ],
+          "score": 0.41436681151390076,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            311,
+            407,
+            329,
+            529
+          ],
+          "score": 0.25443577766418457,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 18,
+      "inference_time": 61.70896600087872,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            222,
+            212,
+            295,
+            319
+          ],
+          "score": 0.6906113624572754,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            309,
+            415,
+            328,
+            534
+          ],
+          "score": 0.330766499042511,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            323,
+            0,
+            479,
+            300
+          ],
+          "score": 0.25774580240249634,
+          "class_id": 6,
+          "class_name": "Bird"
+        },
+        {
+          "bbox": [
+            359,
+            548,
+            392,
+            642
+          ],
+          "score": 0.21081821620464325,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 19,
+      "inference_time": 62.99451700033387,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            234,
+            222,
+            288,
+            318
+          ],
+          "score": 0.7414985299110413,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 20,
+      "inference_time": 65.77426600051695,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            234,
+            221,
+            291,
+            318
+          ],
+          "score": 0.5888370871543884,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            399,
+            659,
+            418,
+            781
+          ],
+          "score": 0.3125925064086914,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            377,
+            586,
+            397,
+            653
+          ],
+          "score": 0.27260974049568176,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 21,
+      "inference_time": 64.33225799992215,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            232,
+            220,
+            294,
+            320
+          ],
+          "score": 0.5888370871543884,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            314,
+            417,
+            330,
+            536
+          ],
+          "score": 0.22172260284423828,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 22,
+      "inference_time": 65.54279800184304,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            232,
+            218,
+            290,
+            319
+          ],
+          "score": 0.7451333403587341,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            316,
+            412,
+            331,
+            537
+          ],
+          "score": 0.4979671537876129,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 23,
+      "inference_time": 64.82239500110154,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            233,
+            215,
+            289,
+            317
+          ],
+          "score": 0.7051505446434021,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            372,
+            564,
+            403,
+            662
+          ],
+          "score": 0.29078373312950134,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 24,
+      "inference_time": 61.55924199993024,
+      "num_detections": 5,
+      "detections": [
+        {
+          "bbox": [
+            234,
+            211,
+            292,
+            318
+          ],
+          "score": 0.8396380543708801,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            373,
+            566,
+            403,
+            655
+          ],
+          "score": 0.38528844714164734,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            372,
+            567,
+            423,
+            812
+          ],
+          "score": 0.30168813467025757,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            316,
+            414,
+            332,
+            538
+          ],
+          "score": 0.2798793613910675,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            142,
+            164,
+            154,
+            188
+          ],
+          "score": 0.25443577766418457,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 25,
+      "inference_time": 61.86606300252606,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            234,
+            209,
+            290,
+            315
+          ],
+          "score": 0.8469076156616211,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            372,
+            565,
+            420,
+            725
+          ],
+          "score": 0.4361756145954132,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            142,
+            164,
+            153,
+            184
+          ],
+          "score": 0.38528844714164734,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            372,
+            567,
+            417,
+            683
+          ],
+          "score": 0.283514142036438,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 26,
+      "inference_time": 64.02352399891242,
+      "num_detections": 5,
+      "detections": [
+        {
+          "bbox": [
+            234,
+            206,
+            292,
+            315
+          ],
+          "score": 0.8723512291908264,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            376,
+            572,
+            405,
+            657
+          ],
+          "score": 0.4652539789676666,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            376,
+            570,
+            409,
+            680
+          ],
+          "score": 0.283514142036438,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            319,
+            1,
+            480,
+            308
+          ],
+          "score": 0.24235799908638,
+          "class_id": 0,
+          "class_name": "Person"
+        },
+        {
+          "bbox": [
+            141,
+            160,
+            152,
+            182
+          ],
+          "score": 0.22899219393730164,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 27,
+      "inference_time": 63.58447299862746,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            233,
+            204,
+            292,
+            313
+          ],
+          "score": 0.7960205078125,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            319,
+            413,
+            335,
+            541
+          ],
+          "score": 0.5524891018867493,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            373,
+            562,
+            407,
+            660
+          ],
+          "score": 0.38528844714164734,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 28,
+      "inference_time": 62.563551000494044,
+      "num_detections": 6,
+      "detections": [
+        {
+          "bbox": [
+            232,
+            203,
+            291,
+            310
+          ],
+          "score": 0.7851160764694214,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            320,
+            414,
+            333,
+            542
+          ],
+          "score": 0.5016019344329834,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            138,
+            154,
+            151,
+            178
+          ],
+          "score": 0.29078373312950134,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            383,
+            585,
+            416,
+            688
+          ],
+          "score": 0.24716617166996002,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            310,
+            0,
+            477,
+            303
+          ],
+          "score": 0.23466409742832184,
+          "class_id": 0,
+          "class_name": "Person"
+        },
+        {
+          "bbox": [
+            321,
+            466,
+            333,
+            542
+          ],
+          "score": 0.22878305613994598,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 29,
+      "inference_time": 62.26894499923219,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            233,
+            201,
+            293,
+            316
+          ],
+          "score": 0.7778465151786804,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            320,
+            414,
+            332,
+            548
+          ],
+          "score": 0.47979316115379333,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            384,
+            589,
+            418,
+            697
+          ],
+          "score": 0.2617053687572479,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 30,
+      "inference_time": 63.86841100174934,
+      "num_detections": 6,
+      "detections": [
+        {
+          "bbox": [
+            231,
+            203,
+            292,
+            318
+          ],
+          "score": 0.7414985299110413,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            379,
+            582,
+            417,
+            696
+          ],
+          "score": 0.43254080414772034,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            320,
+            467,
+            332,
+            549
+          ],
+          "score": 0.36711445450782776,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            319,
+            413,
+            332,
+            444
+          ],
+          "score": 0.25443577766418457,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            136,
+            152,
+            145,
+            173
+          ],
+          "score": 0.2508009672164917,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            319,
+            414,
+            333,
+            548
+          ],
+          "score": 0.21445301175117493,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 31,
+      "inference_time": 62.927089998993324,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            229,
+            201,
+            291,
+            315
+          ],
+          "score": 0.7742117047309875,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            320,
+            467,
+            333,
+            552
+          ],
+          "score": 0.47979316115379333,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            85,
+            4,
+            133,
+            100
+          ],
+          "score": 0.3089577257633209,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 32,
+      "inference_time": 62.65206899843179,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            229,
+            201,
+            292,
+            317
+          ],
+          "score": 0.6869765520095825,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            83,
+            2,
+            133,
+            95
+          ],
+          "score": 0.5488542914390564,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            320,
+            467,
+            333,
+            553
+          ],
+          "score": 0.4070972204208374,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            132,
+            140,
+            143,
+            169
+          ],
+          "score": 0.25443577766418457,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 33,
+      "inference_time": 61.40181500086328,
+      "num_detections": 5,
+      "detections": [
+        {
+          "bbox": [
+            229,
+            200,
+            291,
+            312
+          ],
+          "score": 0.8941599726676941,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            320,
+            468,
+            334,
+            556
+          ],
+          "score": 0.4216364324092865,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            380,
+            588,
+            420,
+            704
+          ],
+          "score": 0.3743840754032135,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            80,
+            0,
+            131,
+            95
+          ],
+          "score": 0.2980533242225647,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            131,
+            139,
+            140,
+            166
+          ],
+          "score": 0.27624455094337463,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 34,
+      "inference_time": 64.30838300002506,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            230,
+            196,
+            297,
+            318
+          ],
+          "score": 0.7233245372772217,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            318,
+            414,
+            334,
+            558
+          ],
+          "score": 0.2980533242225647,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 35,
+      "inference_time": 61.38021400329308,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            229,
+            194,
+            296,
+            318
+          ],
+          "score": 0.8105596899986267,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 36,
+      "inference_time": 65.83656200018595,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            230,
+            191,
+            296,
+            315
+          ],
+          "score": 0.6906113624572754,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            318,
+            384,
+            334,
+            548
+          ],
+          "score": 0.3562100827693939,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            291,
+            0,
+            476,
+            299
+          ],
+          "score": 0.27698057889938354,
+          "class_id": 6,
+          "class_name": "Bird"
+        }
+      ]
+    },
+    {
+      "frame_id": 37,
+      "inference_time": 62.760515000263695,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            227,
+            187,
+            296,
+            311
+          ],
+          "score": 0.6688026189804077,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            317,
+            386,
+            333,
+            553
+          ],
+          "score": 0.4361756145954132,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            122,
+            115,
+            133,
+            146
+          ],
+          "score": 0.25807055830955505,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 38,
+      "inference_time": 63.09543800307438,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            225,
+            182,
+            295,
+            310
+          ],
+          "score": 0.8360032439231873,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            120,
+            111,
+            132,
+            151
+          ],
+          "score": 0.4870627522468567,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 39,
+      "inference_time": 62.31179600217729,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            223,
+            179,
+            295,
+            309
+          ],
+          "score": 0.7524029016494751,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            118,
+            102,
+            132,
+            145
+          ],
+          "score": 0.5779326558113098,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            134,
+            169,
+            141,
+            191
+          ],
+          "score": 0.25443577766418457,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 40,
+      "inference_time": 63.05278700165218,
+      "num_detections": 3,
+      "detections": [
+        {
+          "bbox": [
+            227,
+            174,
+            293,
+            305
+          ],
+          "score": 0.6760721802711487,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            115,
+            96,
+            128,
+            139
+          ],
+          "score": 0.4688887894153595,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            279,
+            -2,
+            397,
+            292
+          ],
+          "score": 0.22535739839076996,
+          "class_id": 6,
+          "class_name": "Bird"
+        }
+      ]
+    },
+    {
+      "frame_id": 41,
+      "inference_time": 61.22269600018626,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            219,
+            170,
+            292,
+            306
+          ],
+          "score": 0.6360894441604614,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            112,
+            86,
+            125,
+            132
+          ],
+          "score": 0.31986209750175476,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 42,
+      "inference_time": 62.97865699889371,
+      "num_detections": 5,
+      "detections": [
+        {
+          "bbox": [
+            218,
+            163,
+            291,
+            301
+          ],
+          "score": 0.7196897268295288,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            109,
+            82,
+            122,
+            127
+          ],
+          "score": 0.3634796738624573,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            145,
+            305,
+            157,
+            339
+          ],
+          "score": 0.3416709005832672,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            363,
+            562,
+            401,
+            675
+          ],
+          "score": 0.3162273168563843,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            270,
+            -1,
+            373,
+            282
+          ],
+          "score": 0.2653401494026184,
+          "class_id": 6,
+          "class_name": "Bird"
+        }
+      ]
+    },
+    {
+      "frame_id": 43,
+      "inference_time": 62.61275499855401,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            216,
+            156,
+            290,
+            301
+          ],
+          "score": 0.2944185435771942,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 44,
+      "inference_time": 62.04798700127867,
+      "num_detections": 4,
+      "detections": [
+        {
+          "bbox": [
+            262,
+            -1,
+            366,
+            273
+          ],
+          "score": 0.4070972204208374,
+          "class_id": 6,
+          "class_name": "Bird"
+        },
+        {
+          "bbox": [
+            214,
+            153,
+            290,
+            301
+          ],
+          "score": 0.378018856048584,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            359,
+            558,
+            400,
+            675
+          ],
+          "score": 0.22535739839076996,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            385,
+            619,
+            399,
+            674
+          ],
+          "score": 0.2035486102104187,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 45,
+      "inference_time": 60.783395001635654,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            259,
+            0,
+            363,
+            269
+          ],
+          "score": 0.3271317183971405,
+          "class_id": 6,
+          "class_name": "Bird"
+        }
+      ]
+    },
+    {
+      "frame_id": 46,
+      "inference_time": 61.163113998190966,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 47,
+      "inference_time": 65.33584599674214,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            212,
+            144,
+            287,
+            292
+          ],
+          "score": 0.4834279716014862,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            359,
+            562,
+            400,
+            683
+          ],
+          "score": 0.21081821620464325,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 48,
+      "inference_time": 65.47931699969922,
+      "num_detections": 1,
+      "detections": [
+        {
+          "bbox": [
+            211,
+            140,
+            287,
+            290
+          ],
+          "score": 0.47252357006073,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    },
+    {
+      "frame_id": 49,
+      "inference_time": 65.10896699910518,
+      "num_detections": 2,
+      "detections": [
+        {
+          "bbox": [
+            209,
+            140,
+            289,
+            299
+          ],
+          "score": 0.44344520568847656,
+          "class_id": 26,
+          "class_name": "Fire"
+        },
+        {
+          "bbox": [
+            382,
+            631,
+            416,
+            809
+          ],
+          "score": 0.22899219393730164,
+          "class_id": 26,
+          "class_name": "Fire"
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.12
 """
-Core Logic Tests - Tests functionality without MQTT connections
+Core Logic Tests - Tests functionality with real MQTT connections
 """
 
 import os
@@ -11,15 +11,19 @@ import pytest
 from unittest.mock import Mock, MagicMock, patch
 from pathlib import Path
 
-# Add modules to path
+# Add project paths
 sys.path.insert(0, str(Path(__file__).parent.parent / 'fire_consensus'))
+sys.path.insert(0, str(Path(__file__).parent))
 
-# Import individual functions and classes without initializing MQTT
-from consensus import Detection, CameraState, Config
+# Import test helpers
+from helpers import mqtt_test_environment, MqttMessageListener
+
+# Import consensus classes
+from consensus import Detection, CameraState, FireConsensusConfig, FireConsensus
 
 
 # Create mock config for CameraState
-mock_config = Mock(spec=Config)
+mock_config = Mock(spec=FireConsensusConfig)
 mock_config.CONSENSUS_THRESHOLD = 2
 mock_config.TIME_WINDOW = 30.0
 mock_config.MIN_CONFIDENCE = 0.7
@@ -33,15 +37,14 @@ mock_config.AREA_INCREASE_RATIO = 1.2
 mock_config.CAMERA_TIMEOUT = 300.0
 
 class TestCoreLogic:
-    """Test core logic without external dependencies"""
+    """Test core logic with real MQTT connections for integration testing"""
     
-    def test_detection_area_calculation(self):
+    def test_detection_area_calculation(self, test_mqtt_broker, monkeypatch):
         """Test detection area calculation logic"""
-        # Create a mock consensus instance to test _calculate_area
-        with patch('consensus.mqtt.Client'):
-            from consensus import FireConsensus
-            consensus = FireConsensus.__new__(FireConsensus)  # Don't call __init__
-            consensus.config = Config()
+        # Set up MQTT environment
+        with mqtt_test_environment(test_mqtt_broker, monkeypatch):
+            # Create real consensus instance with real MQTT
+            consensus = FireConsensus()
             
             # Test pixel format (values > 1)
             bbox_pixel = [100, 100, 200, 200]  # 100x100 pixels
@@ -58,13 +61,15 @@ class TestCoreLogic:
             bbox_invalid = [0, 0, 0, 0]
             area_invalid = consensus._calculate_area(bbox_invalid)
             assert area_invalid == 0, "Invalid bbox should return 0 area"
+            
+            # Cleanup
+            consensus.cleanup()
     
-    def test_detection_validation(self):
+    def test_detection_validation(self, test_mqtt_broker, monkeypatch):
         """Test detection validation logic"""
-        with patch('consensus.mqtt.Client'):
-            from consensus import FireConsensus
-            consensus = FireConsensus.__new__(FireConsensus)
-            consensus.config = Config()
+        with mqtt_test_environment(test_mqtt_broker, monkeypatch):
+            # Create real consensus instance
+            consensus = FireConsensus()
             
             # Valid detection
             valid = consensus._validate_detection(0.8, 0.01)
@@ -81,6 +86,9 @@ class TestCoreLogic:
             # Invalid size (too large)
             invalid_large = consensus._validate_detection(0.8, 0.6)
             assert not invalid_large, "Too large area should be invalid"
+            
+            # Cleanup
+            consensus.cleanup()
     
     def test_camera_state_detection_tracking(self):
         """Test camera state detection tracking"""
@@ -239,7 +247,7 @@ class TestCoreLogic:
             import consensus
             importlib.reload(consensus)
             
-            config = consensus.Config()
+            config = consensus.FireConsensusConfig()
             assert config.CONSENSUS_THRESHOLD == 3
             assert config.MIN_CONFIDENCE == 0.8
             assert config.MQTT_TLS is True

@@ -28,6 +28,9 @@ EXTRA_ARGS=""
 DRY_RUN=false
 VERBOSE=false
 PARALLEL=true
+COVERAGE=false
+COVERAGE_REPORT="term"
+COVERAGE_HTML=false
 
 # Function to print colored output
 print_status() {
@@ -70,6 +73,25 @@ run_python_tests() {
     fi
     
     local cmd="$python_cmd -m pytest -c $config_file"
+    
+    # Add coverage options if enabled
+    if [[ "$COVERAGE" == "true" ]]; then
+        # Cover the entire project, excluding test files and common non-source directories
+        cmd="$cmd --cov=. --cov-config=.coveragerc"
+        
+        # Add coverage report format
+        cmd="$cmd --cov-report=$COVERAGE_REPORT"
+        
+        # Add HTML report if requested
+        if [[ "$COVERAGE_HTML" == "true" ]]; then
+            cmd="$cmd --cov-report=html:htmlcov_python${version//.}"
+        fi
+        
+        # Add missing lines in terminal report
+        if [[ "$COVERAGE_REPORT" == "term" || "$COVERAGE_REPORT" == "term-missing" ]]; then
+            cmd="$cmd --cov-report=term-missing"
+        fi
+    fi
     
     # Add specific tests if provided
     if [[ -n "$SPECIFIC_TESTS" ]]; then
@@ -127,6 +149,16 @@ validate_environment() {
         print_status "$YELLOW" "Note: Some Python versions are missing. Some tests may be skipped."
     fi
     
+    # Check for camera credentials
+    if [[ -z "${CAMERA_CREDENTIALS:-}" ]]; then
+        print_status "$YELLOW" "⚠️  WARNING: CAMERA_CREDENTIALS environment variable not set"
+        print_status "$YELLOW" "   E2E camera tests will fail without camera credentials"
+        print_status "$YELLOW" "   Set CAMERA_CREDENTIALS=username:password to enable camera tests"
+        print_status "$YELLOW" ""
+    else
+        print_status "$GREEN" "✅ CAMERA_CREDENTIALS configured for E2E camera tests"
+    fi
+    
     print_status "$GREEN" "Environment validation complete ($available_count/3 versions available)"
 }
 
@@ -147,17 +179,19 @@ OPTIONS:
     --dry-run          Show what would be run without executing
     --verbose          Enable verbose output
     --timeout N        Set pytest timeout (0 = no timeout)
-    --no-cov           Disable coverage reporting
+    --coverage         Enable coverage reporting (covers entire project)
+    --coverage-html    Generate HTML coverage report in addition to terminal
     --no-parallel      Disable parallel test execution
     --help             Show this help message
 
 EXAMPLES:
     $0 --all                           # Run all tests with correct Python versions
-    $0 --python312                     # Run only Python 3.12 tests
+    $0 --all --coverage                # Run all tests with coverage analysis
+    $0 --python312 --coverage-html     # Run Python 3.12 tests with HTML coverage
     $0 --test tests/test_detect.py     # Run specific test file
     $0 --test test_yolo_nas --verbose  # Run YOLO-NAS tests with verbose output
     $0 --validate                      # Check Python environment
-    $0 --dry-run --all                 # Show what would be run
+    $0 --dry-run --all --coverage      # Show what would be run with coverage
 
 PYTHON VERSION MAPPING:
     Python 3.12: camera_detector, fire_consensus, gpio_trigger, telemetry, MQTT, integration
@@ -193,8 +227,13 @@ while [[ $# -gt 0 ]]; do
             EXTRA_ARGS="$EXTRA_ARGS --timeout $2"
             shift 2
             ;;
-        --no-cov)
-            EXTRA_ARGS="$EXTRA_ARGS --no-cov"
+        --coverage)
+            COVERAGE=true
+            shift
+            ;;
+        --coverage-html)
+            COVERAGE=true
+            COVERAGE_HTML=true
             shift
             ;;
         --no-parallel)

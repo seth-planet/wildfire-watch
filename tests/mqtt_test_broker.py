@@ -120,20 +120,31 @@ log_dest stdout
                     self.process.terminate()
                     try:
                         # Wait with short timeout
-                        self.process.wait(timeout=2)
+                        self.process.wait(timeout=3)
+                        print(f"Mosquitto process {self.process.pid} terminated gracefully")
                     except subprocess.TimeoutExpired:
                         # Force kill if termination fails
+                        print(f"Force killing mosquitto process {self.process.pid}")
                         try:
                             self.process.kill()
-                            # Don't wait after kill - let OS clean up
-                            # This prevents hanging on os.waitpid()
+                            # Wait briefly for kill to take effect
+                            self.process.wait(timeout=1)
                         except ProcessLookupError:
                             # Process already dead
                             pass
-                        except Exception:
-                            # Ignore other errors during kill
-                            pass
+                        except subprocess.TimeoutExpired:
+                            print(f"Warning: Failed to kill mosquitto process {self.process.pid}")
+                        except Exception as e:
+                            print(f"Error during kill: {e}")
+                else:
+                    print(f"Mosquitto process already terminated with code {self.process.returncode}")
                 
+                # Always wait for process cleanup
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    pass
+                    
                 # Set process to None to indicate it's handled
                 self.process = None
                 
@@ -195,6 +206,26 @@ log_dest stdout
                 
             time.sleep(0.5)
         
+        return False
+    
+    def wait_for_connection(self, timeout=5):
+        """Wait for MQTT broker to be ready for connections
+        
+        This method is expected by some tests and provides a simpler
+        interface than wait_for_ready.
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                test_client = mqtt.Client(
+                    mqtt.CallbackAPIVersion.VERSION2,
+                    client_id=f"test_connection_{int(time.time() * 1000)}"
+                )
+                test_client.connect(self.host, self.port)
+                test_client.disconnect()
+                return True
+            except:
+                time.sleep(0.1)
         return False
     
     def wait_for_connection_ready(self, client, timeout=10):

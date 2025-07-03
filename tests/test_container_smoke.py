@@ -59,7 +59,7 @@ class TestContainerSmoke:
         # Just test that the container can run and show help
         result = docker_client.containers.run(
             "python:3.12-slim",
-            command=["python", "-c", "print('GPIO trigger container test')"],
+            command=["python3.12", "-c", "print('GPIO trigger container test')"],
             remove=True
         )
         assert b'GPIO trigger container test' in result
@@ -69,7 +69,7 @@ class TestContainerSmoke:
         # Test basic Python environment
         result = docker_client.containers.run(
             "python:3.12-slim",
-            command=["python", "-c", "import json, time, logging; print('Imports OK')"],
+            command=["python3.12", "-c", "import json, time, logging; print('Imports OK')"],
             remove=True
         )
         assert b'Imports OK' in result

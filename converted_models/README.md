@@ -458,7 +458,7 @@ YOLO-NAS is specifically designed for efficient INT8 quantization, making it ide
 ```bash
 # Step 1: Train YOLO-NAS normally
 python3.10 converted_models/train_yolo_nas_with_qat.py \
-  --dataset_path /home/seth/fiftyone/train_yolo \
+  --dataset_path /media/seth/SketchScratch/fiftyone/train_yolo \
   --no_pretrained \
   --epochs 100 \
   --batch_size 16 \
@@ -479,7 +479,7 @@ For maximum accuracy with INT8 (adds complexity for ~0.5% improvement):
 ```bash
 # Note: This requires super-gradients QATTrainer setup
 python3.10 converted_models/train_yolo_nas_qat.py \
-  --dataset_path /home/seth/fiftyone/train_yolo \
+  --dataset_path /media/seth/SketchScratch/fiftyone/train_yolo \
   --no_pretrained \
   --epochs 100 \
   --batch_size 16 \
@@ -493,7 +493,7 @@ Here's a tested example that trains from scratch on the wildfire dataset:
 ```bash
 # Basic training from scratch
 python3.10 converted_models/train_custom_yolo_nas.py \
-  --dataset_path /home/seth/fiftyone/train_yolo \
+  --dataset_path /media/seth/SketchScratch/fiftyone/train_yolo \
   --no_pretrained \
   --epochs 100 \
   --batch_size 16 \
@@ -502,7 +502,7 @@ python3.10 converted_models/train_custom_yolo_nas.py \
 
 # For edge deployment (YOLO-NAS is inherently quantization-friendly)
 python3.10 converted_models/train_custom_yolo_nas.py \
-  --dataset_path /home/seth/fiftyone/train_yolo \
+  --dataset_path /media/seth/SketchScratch/fiftyone/train_yolo \
   --no_pretrained \
   --epochs 100 \
   --batch_size 16 \

@@ -1,0 +1,60 @@
+[2025-06-14 23:59:25] INFO - super_gradients.common.crash_handler.crash_tips_setup - Crash tips is enabled. You can set your environment variable to CRASH_HANDLER=FALSE to disable it
+[2025-06-14 23:59:26] DEBUG - matplotlib - matplotlib data path: /usr/local/lib/python3.10/dist-packages/matplotlib/mpl-data
+[2025-06-14 23:59:26] DEBUG - matplotlib - CONFIGDIR=/home/seth/.config/matplotlib
+[2025-06-14 23:59:26] DEBUG - matplotlib - interactive is False
+[2025-06-14 23:59:26] DEBUG - matplotlib - platform is linux
+[2025-06-14 23:59:26] DEBUG - matplotlib - CACHEDIR=/home/seth/.cache/matplotlib
+[2025-06-14 23:59:26] DEBUG - matplotlib.font_manager - Using fontManager instance from /home/seth/.cache/matplotlib/fontlist-v390.json
+[2025-06-14 23:59:26] DEBUG - super_gradients.common.sg_loggers.clearml_sg_logger - Failed to import clearml
+[2025-06-14 23:59:26] DEBUG - hydra.core.utils - Setting JobRuntime:name=UNKNOWN_NAME
+[2025-06-14 23:59:26] DEBUG - hydra.core.utils - Setting JobRuntime:name=app
+[2025-06-14 23:59:26] DEBUG - hydra.core.utils - Setting JobRuntime:name=app
+[2025-06-14 23:59:27] WARNING - unified_yolo_trainer - Missing packages: ['opencv-python', 'pyyaml']
+[2025-06-14 23:59:27] INFO - unified_yolo_trainer - Installing opencv-python...
+[2025-06-14 23:59:27] INFO - unified_yolo_trainer - Installing pyyaml...
+[2025-06-14 23:59:28] INFO - unified_yolo_trainer - Auto-detecting dataset classes...
+[2025-06-14 23:59:28] INFO - unified_yolo_trainer - Inferred 32 classes from names dict
+[2025-06-14 23:59:28] INFO - unified_yolo_trainer - Detected 32 classes: ['Person', 'Bicycle', 'Car', 'Motorcycle', 'Bus']...
+[2025-06-14 23:59:28] INFO - unified_yolo_trainer - Found 'Fire' class at index 26
+[2025-06-14 23:59:28] INFO - unified_yolo_trainer - Validating dataset labels...
+[2025-06-14 23:59:33] INFO - unified_yolo_trainer - train: 283631 valid, 0 invalid (100.0% success)
+[2025-06-14 23:59:33] INFO - unified_yolo_trainer - validation: 21322 valid, 0 invalid (100.0% success)
+[2025-06-14 23:59:33] INFO - unified_yolo_trainer - Using device: None
+[2025-06-14 23:59:33] DEBUG - hydra.core.utils - Setting JobRuntime:name=app
+[2025-06-14 23:59:34] WARNING - unified_yolo_trainer - Dataset preprocessor not available, attempting class index fixer
+[2025-06-14 23:59:34] WARNING - unified_yolo_trainer - No dataset validation available, proceeding with caution
+[2025-06-14 23:59:34] DEBUG - hydra.core.utils - Setting JobRuntime:name=app
+[2025-06-14 23:59:35] INFO - super_gradients.training.datasets.detection_datasets.detection_dataset - Dataset Initialization in progress. `ignore_empty_annotations=True` causes the process to take longer due to full dataset indexing.
+[2025-06-14 23:59:59] DEBUG - hydra.core.utils - Setting JobRuntime:name=app
+[2025-06-14 23:59:59] INFO - super_gradients.training.datasets.detection_datasets.detection_dataset - Dataset Initialization in progress. `cache_annotations=True` causes the process to take longer due to full dataset indexing.
+[2025-06-15 00:00:01] WARNING - unified_yolo_trainer - SafeDataLoaderWrapper not available, using standard dataloaders
+[2025-06-15 00:00:01] INFO - unified_yolo_trainer - Dataloaders created: 283618 train, 21287 val
+[2025-06-15 00:00:01] INFO - unified_yolo_trainer - ✓ Dataloaders wrapped with fixed collate function for target format
+[2025-06-15 00:00:01] INFO - unified_yolo_trainer - Starting training for 100 epochs...
+[2025-06-15 00:00:01] WARNING - super_gradients.training.sg_trainer.sg_trainer - Train dataset size % batch_size != 0 and drop_last=False, this might result in smaller last batch.
+[2025-06-15 00:00:01] INFO - super_gradients.training.sg_trainer.sg_trainer - Starting a new run with `run_id=RUN_20250615_000001_315728`
+[2025-06-15 00:00:01] INFO - super_gradients.training.sg_trainer.sg_trainer - Checkpoints directory: output/checkpoints/wildfire_scratch_qat/RUN_20250615_000001_315728
+[2025-06-15 00:00:01] INFO - super_gradients.training.sg_trainer.sg_trainer - Using EMA with params {'decay': 0.9999, 'decay_type': 'threshold'}
+[2025-06-15 00:00:03] INFO - super_gradients.training.utils.sg_trainer_utils - TRAINING PARAMETERS:
+    - Mode:                         OFF
+    - Number of GPUs:               1          (1 available on the machine)
+    - Full dataset size:            283618     (len(train_set))
+    - Batch size per GPU:           16         (batch_size)
+    - Batch Accumulate:             1          (batch_accumulate)
+    - Total batch size:             16         (num_gpus * batch_size)
+    - Effective Batch size:         16         (num_gpus * batch_size * batch_accumulate)
+    - Iterations per epoch:         17727      (len(train_loader))
+    - Gradient updates per epoch:   17727      (len(train_loader) / batch_accumulate)
+    - Model: YoloNAS_S  (19.03M parameters, 19.03M optimized)
+    - Learning Rates and Weight Decays:
+      - default: (19.03M parameters). LR: 0.001 (19.03M parameters) WD: 0.0, (42.22K parameters), WD: 0.0001, (18.99M parameters)
+
+[2025-06-15 00:00:03] INFO - super_gradients.training.sg_trainer.sg_trainer - Started training for 100 epochs (0/99)
+
+[2025-06-15 00:09:19] INFO - super_gradients.training.sg_trainer.sg_trainer - 
+[MODEL TRAINING EXECUTION HAS BEEN INTERRUPTED]... Please wait until SOFT-TERMINATION process finishes and saves all of the Model Checkpoints and log files before terminating...
+[2025-06-15 00:09:19] INFO - super_gradients.training.sg_trainer.sg_trainer - For HARD Termination - Stop the process again
+[2025-06-15 00:09:19] INFO - super_gradients.common.sg_loggers.base_sg_logger - [CLEANUP] - Successfully stopped system monitoring process
+[2025-06-15 00:09:19] INFO - unified_yolo_trainer - Training completed in 0.2 hours
+[2025-06-15 00:09:19] WARNING - unified_yolo_trainer - No best model found in checkpoints
+[2025-06-15 00:09:19] INFO - unified_yolo_trainer - Training report saved: output/wildfire_scratch_qat_training_report.json

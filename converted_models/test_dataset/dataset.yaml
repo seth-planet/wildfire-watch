@@ -1,0 +1,8 @@
+# Quick test dataset for YOLO-NAS pipeline validation
+path: /home/seth/wildfire-watch/converted_models/test_dataset
+train: images/train
+val: images/val
+
+# Classes
+nc: 4  # number of classes
+names: ['fire', 'smoke', 'person', 'vehicle']

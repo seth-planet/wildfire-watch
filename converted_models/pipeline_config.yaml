@@ -1,0 +1,42 @@
+model:
+  architecture: yolo_nas_s
+  num_classes: 32
+  input_size: [640, 640]
+  pretrained_weights: null
+
+dataset:
+  data_dir: /media/seth/SketchScratch/fiftyone/train_yolo
+  train_split: train
+  val_split: validation
+  class_names: []  # Will be auto-detected
+  validate_labels: true
+
+training:
+  epochs: 100
+  batch_size: 16
+  learning_rate: 0.001
+  warmup_epochs: 3
+  lr_scheduler: cosine
+  lr_decay_factor: 0.1
+  workers: 4
+  mixed_precision: false
+  gradient_accumulation: 1
+  early_stopping: true
+  patience: 50
+  weight_decay: 0.0001
+  optimizer: Adam
+
+qat:
+  enabled: true
+  start_epoch: 75
+  calibration_batches: 100
+
+validation:
+  interval: 10
+  conf_threshold: 0.25
+  iou_threshold: 0.45
+  max_predictions: 300
+
+output_dir: ../output
+experiment_name: yolo_nas_wildfire
+log_level: INFO

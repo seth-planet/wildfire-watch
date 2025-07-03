@@ -1,0 +1,69 @@
+dataset:
+  class_names:
+  - Person
+  - Bicycle
+  - Car
+  - Motorcycle
+  - Bus
+  - Truck
+  - Bird
+  - Cat
+  - Dog
+  - Horse
+  - Sheep
+  - Cattle
+  - Bear
+  - Deer
+  - Rabbit
+  - Raccoon
+  - Fox
+  - Skunk
+  - Squirrel
+  - Pig
+  - Chicken
+  - Boat
+  - Vehicle registration plate
+  - Snowmobile
+  - Human face
+  - Armadillo
+  - Fire
+  - Package
+  - Rodent
+  - Child
+  - Weapon
+  - Backpack
+  data_dir: /media/seth/SketchScratch/fiftyone/train_yolo
+  nc: 32
+  train_images_dir: images/train
+  train_labels_dir: labels/train
+  val_images_dir: images/validation
+  val_labels_dir: labels/validation
+model:
+  architecture: yolo_nas_s
+  input_size:
+  - 640
+  - 640
+  num_classes: 32
+  pretrained_weights: null
+qat:
+  calibration_batches: 100
+  enabled: true
+  start_epoch: 150
+training:
+  batch_size: 8
+  checkpoints_dir: ../output/checkpoints
+  cos_lr: true
+  epochs: 5
+  experiment_name: wildfire_yolo_nas_s
+  learning_rate: 0.001
+  save_ckpt_epoch_list:
+  - 50
+  - 100
+  - 150
+  - 200
+  warmup_epochs: 5
+  workers: 4
+validation:
+  conf_threshold: 0.25
+  iou_threshold: 0.45
+  max_predictions_per_image: 300

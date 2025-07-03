@@ -1,3 +1,7 @@
+import pytest
+
+pytestmark = pytest.mark.model_conversion
+
 #!/usr/bin/env python3
 """
 Integration Tests for Model Converter Validation

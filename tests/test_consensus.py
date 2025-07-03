@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../f
 
 # Import after path setup
 import consensus
-from consensus import FireConsensus, Detection, CameraState, Config
+from consensus import FireConsensus, Detection, CameraState, FireConsensusConfig
 
 # ─────────────────────────────────────────────────────────────
 # Test Fixtures and Mocks
@@ -274,17 +274,17 @@ def wait_for_condition(condition_func, timeout=2):
 class TestBasicOperation:
     def test_fire_consensus_initialization(self, consensus_service):
         """Test FireConsensus service initializes correctly"""
-        assert consensus_service.config.CONSENSUS_THRESHOLD == 2
+        assert consensus_service.config.consensus_threshold == 2
         assert consensus_service.cameras == {}
         assert consensus_service.trigger_count == 0
         assert consensus_service.mqtt_client.is_connected()
         
         # Check MQTT service configuration
         expected_topics = [
-            consensus_service.config.TOPIC_DETECTION,
-            consensus_service.config.TOPIC_FRIGATE,
-            consensus_service.config.TOPIC_CAMERA_TELEMETRY,
-            f"{consensus_service.config.TOPIC_DETECTION}/+"
+            consensus_service.config.topic_detection,
+            consensus_service.config.topic_frigate,
+            consensus_service.config.topic_camera_telemetry,
+            f"{consensus_service.config.topic_detection}/+"
         ]
         # In real implementation, subscriptions are internal - verify config exists
         assert hasattr(consensus_service, 'config')
@@ -314,8 +314,7 @@ class TestBasicOperation:
     def test_camera_state_tracking(self):
         """Test CameraState class functionality"""
         # Create a minimal config for the camera state
-        from consensus import Config
-        config = Config()
+        config = FireConsensusConfig()
         camera = CameraState("test_camera", config)
         
         assert camera.camera_id == "test_camera"
@@ -344,7 +343,7 @@ class TestDetectionProcessing:
         
         # Send real MQTT message
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -366,7 +365,7 @@ class TestDetectionProcessing:
         }
         
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -386,7 +385,7 @@ class TestDetectionProcessing:
         }
         
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -397,7 +396,7 @@ class TestDetectionProcessing:
         # Test area too large
         detection_data['bounding_box'] = [0, 0, 0.8, 0.8]  # area = 0.64, too large
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -411,7 +410,7 @@ class TestDetectionProcessing:
         invalid_data = {'camera_id': 'test_cam'}
         
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(invalid_data),
             qos=1
         )
@@ -428,7 +427,7 @@ class TestDetectionProcessing:
         }
         
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(invalid_data),
             qos=1
         )
@@ -452,7 +451,7 @@ class TestDetectionProcessing:
         # Use improved message delivery
         delivered = test_mqtt_broker.publish_and_wait(
             mqtt_publisher,
-            consensus_service.config.TOPIC_FRIGATE,
+            consensus_service.config.topic_frigate,
             json.dumps(frigate_event),
             qos=1
         )
@@ -479,7 +478,7 @@ class TestDetectionProcessing:
         }
         
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_FRIGATE,
+            consensus_service.config.topic_frigate,
             json.dumps(frigate_event),
             qos=1
         )
@@ -497,7 +496,7 @@ class TestDetectionProcessing:
         }
         
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_CAMERA_TELEMETRY,
+            consensus_service.config.topic_camera_telemetry,
             json.dumps(telemetry_data),
             qos=1
         )
@@ -793,7 +792,7 @@ class TestConsensusAlgorithm:
         if 'cam2' not in consensus_service.cameras:
             consensus_service.cameras['cam2'] = CameraState('cam2', consensus_service.config)
         # Set telemetry way in the past to ensure camera is considered offline
-        consensus_service.cameras['cam2'].last_telemetry = current_time - consensus_service.config.CAMERA_TIMEOUT - 60
+        consensus_service.cameras['cam2'].last_telemetry = current_time - consensus_service.config.camera_timeout - 60
         
         # Add growing fire detections to the offline camera
         base_area = 0.01
@@ -857,7 +856,7 @@ class TestErrorHandling:
         """Test handling of malformed JSON messages"""
         # Simulate malformed JSON with bytes payload
         msg = Mock()
-        msg.topic = consensus_service.config.TOPIC_DETECTION
+        msg.topic = consensus_service.config.topic_detection
         msg.payload = b"invalid json {"  # Use bytes, not string
         
         # Should not crash
@@ -885,7 +884,7 @@ class TestErrorHandling:
         
         for detection_data in invalid_detections:
             mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -912,7 +911,7 @@ class TestErrorHandling:
             }
             
             mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -958,7 +957,7 @@ class TestErrorHandling:
                     'timestamp': time.time()
                 }
                 mqtt_publisher.publish(
-                    consensus_service.config.TOPIC_DETECTION,
+                    consensus_service.config.topic_detection,
                     json.dumps(detection_data),
                     qos=1
                 )
@@ -987,7 +986,7 @@ class TestHealthMonitoring:
     def test_health_report_generation(self, consensus_service, mqtt_publisher, message_monitor):
         """Test health report generation and publishing"""
         # Start monitoring health topic
-        message_monitor.start_monitoring(consensus_service.config.TOPIC_HEALTH)
+        message_monitor.start_monitoring(consensus_service.config.topic_health)
         message_monitor.clear()
         
         # Add some test data
@@ -998,7 +997,7 @@ class TestHealthMonitoring:
         consensus_service._publish_health()
         
         # Wait for and check health report was published
-        health_reports = message_monitor.wait_for_message(consensus_service.config.TOPIC_HEALTH, timeout=2)
+        health_reports = message_monitor.wait_for_message(consensus_service.config.topic_health, timeout=2)
         assert len(health_reports) >= 1
         
         # Validate health report structure
@@ -1098,13 +1097,13 @@ class TestHealthMonitoring:
 class TestConfiguration:
     def test_config_class_loading(self):
         """Test configuration loading from environment"""
-        config = Config()
+        config = FireConsensusConfig()
         
-        # Test default values
-        assert config.CONSENSUS_THRESHOLD >= 1
-        assert config.DETECTION_WINDOW > 0
-        assert config.MIN_CONFIDENCE >= 0 and config.MIN_CONFIDENCE <= 1
-        assert config.MQTT_BROKER is not None
+        # Test default values using new attribute names
+        assert config.consensus_threshold >= 1
+        assert config.detection_window > 0
+        assert config.min_confidence >= 0 and config.min_confidence <= 1
+        assert config.mqtt_broker is not None
     
     def test_area_calculation(self, consensus_service):
         """Test bounding box area calculation"""
@@ -1152,7 +1151,7 @@ class TestConfiguration:
     def test_moving_average_calculation(self, consensus_service):
         """Test moving average calculation helper method"""
         # Create a camera state to access the method
-        config = Config()
+        config = FireConsensusConfig()
         camera = CameraState('test', config)
         
         # Test normal case
@@ -1171,7 +1170,7 @@ class TestConfiguration:
     
     def test_growth_trend_checking(self, consensus_service):
         """Test growth trend checking helper method"""
-        config = Config()
+        config = FireConsensusConfig()
         camera = CameraState('test', config)
         
         # Test clear growth trend
@@ -1237,13 +1236,13 @@ class TestConfiguration:
         assert consensus_service.mqtt_client.will_payload is not None
         
         # Verify LWT topic format
-        expected_topic = f"{consensus_service.config.TOPIC_HEALTH}/{consensus_service.config.NODE_ID}/lwt"
+        expected_topic = f"{consensus_service.config.topic_health}/{consensus_service.config.node_id}/lwt"
         assert consensus_service.mqtt_client.will_topic == expected_topic
         
         # Verify LWT payload
         import json
         lwt_data = json.loads(consensus_service.mqtt_client.will_payload)
-        assert lwt_data['node_id'] == consensus_service.config.NODE_ID
+        assert lwt_data['node_id'] == consensus_service.config.node_id
         assert lwt_data['service'] == 'fire_consensus'
         assert lwt_data['status'] == 'offline'
         assert 'timestamp' in lwt_data
@@ -1269,9 +1268,9 @@ class TestAdditionalFeatures:
             
             # Verify the config loads TLS settings correctly
             import consensus
-            config = consensus.Config()
-            assert config.MQTT_TLS is True
-            assert config.TLS_CA_PATH == dummy_cert_path
+            config = FireConsensusConfig()
+            assert config.mqtt_tls is True
+            assert config.tls_ca_path == dummy_cert_path
             
             # Don't actually create service as it would try to connect
             # The important thing is that the configuration is loaded correctly
@@ -1297,17 +1296,17 @@ class TestAdditionalFeatures:
         
         # Should resubscribe to topics
         expected_topics = [
-            consensus_service.config.TOPIC_DETECTION,
-            consensus_service.config.TOPIC_FRIGATE,
-            consensus_service.config.TOPIC_CAMERA_TELEMETRY,
-            f"{consensus_service.config.TOPIC_DETECTION}/+"
+            consensus_service.config.topic_detection,
+            consensus_service.config.topic_frigate,
+            consensus_service.config.topic_camera_telemetry,
+            f"{consensus_service.config.topic_detection}/+"
         ]
         
         # Check subscriptions are configured (actual MQTT subscriptions are internal)
         # We can verify the service has the correct topic configuration
-        assert consensus_service.config.TOPIC_DETECTION in expected_topics
-        assert consensus_service.config.TOPIC_FRIGATE in expected_topics
-        assert consensus_service.config.TOPIC_CAMERA_TELEMETRY in expected_topics
+        assert consensus_service.config.topic_detection in expected_topics
+        assert consensus_service.config.topic_frigate in expected_topics
+        assert consensus_service.config.topic_camera_telemetry in expected_topics
         # The service should be ready to receive messages on these topics
 
 # ─────────────────────────────────────────────────────────────
@@ -1323,7 +1322,7 @@ class TestIntegration:
         # Simulate camera telemetry (cameras coming online)
         for cam_id in ['north_cam', 'south_cam']:
             mqtt_publisher.publish(
-            consensus_service.config.TOPIC_CAMERA_TELEMETRY,
+            consensus_service.config.topic_camera_telemetry,
             json.dumps({'camera_id': cam_id, 'status': 'online'}),
             qos=1
         )
@@ -1342,7 +1341,7 @@ class TestIntegration:
                     'object_id': 'fire_growing'  # Same object ID for growth tracking
                 }
                 mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -1372,7 +1371,7 @@ class TestIntegration:
             'timestamp': time.time()
         }
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_DETECTION,
+            consensus_service.config.topic_detection,
             json.dumps(detection_data),
             qos=1
         )
@@ -1390,7 +1389,7 @@ class TestIntegration:
             }
         }
         mqtt_publisher.publish(
-            consensus_service.config.TOPIC_FRIGATE,
+            consensus_service.config.topic_frigate,
             json.dumps(frigate_event),
             qos=1
         )

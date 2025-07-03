@@ -1,0 +1,39 @@
+cameras:
+  backyard:
+    detect:
+      fps: 5
+      height: 1080
+      width: 1920
+    ffmpeg:
+      inputs:
+      - path: rtsp://user:pass@192.168.5.176:554/stream1
+        roles:
+        - detect
+        - record
+    objects:
+      filters:
+        fire:
+          min_area: 100
+          min_score: 0.5
+          threshold: 0.6
+        smoke:
+          min_area: 200
+          min_score: 0.4
+          threshold: 0.5
+      track:
+      - fire
+      - smoke
+detectors:
+  coral:
+    device: pci:0
+    type: edgetpu
+model:
+  height: 320
+  input_pixel_format: rgb
+  input_tensor: nhwc
+  labelmap:
+    0: person
+    26: fire
+    27: smoke
+  path: /models/yolov8n_320_int8_edgetpu.tflite
+  width: 320

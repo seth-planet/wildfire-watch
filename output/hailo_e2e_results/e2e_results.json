@@ -1,0 +1,46 @@
+{
+  "metrics": {
+    "avg_inference_ms": 59.47674008406466,
+    "p95_inference_ms": 61.78034067415865,
+    "p99_inference_ms": 62.93251371855149,
+    "fps": 16.813295392225534,
+    "per_video": {
+      "fire1.mov": {
+        "total_detections": 96,
+        "fire_detections": 93,
+        "unique_frames_with_fire": 47,
+        "avg_inference_ms": 59.92461316054687,
+        "fps": 16.687633799501594
+      },
+      "fire2.mov": {
+        "total_detections": 0,
+        "fire_detections": 0,
+        "unique_frames_with_fire": 0,
+        "avg_inference_ms": 59.08801031997427,
+        "fps": 16.923907144356107
+      },
+      "fire3.mp4": {
+        "total_detections": 0,
+        "fire_detections": 0,
+        "unique_frames_with_fire": 0,
+        "avg_inference_ms": 59.480881677009165,
+        "fps": 16.81212469966673
+      },
+      "fire4.mp4": {
+        "total_detections": 0,
+        "fire_detections": 0,
+        "unique_frames_with_fire": 0,
+        "avg_inference_ms": 59.41345517872833,
+        "fps": 16.831204261590024
+      }
+    }
+  },
+  "model_path": "hailo_qat_output/yolo8l_fire_640x640_hailo8l_nms.hef",
+  "videos_processed": [
+    "fire1.mov",
+    "fire2.mov",
+    "fire3.mp4",
+    "fire4.mp4"
+  ],
+  "total_frames_processed": 200
+}

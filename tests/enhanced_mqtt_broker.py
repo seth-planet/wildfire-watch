@@ -8,6 +8,7 @@ import threading
 import subprocess
 import tempfile
 import socket
+import signal
 import logging
 from pathlib import Path
 from typing import Dict, Optional, Set
@@ -205,22 +206,39 @@ protocol mqtt
         with open(self.config_file, 'w') as f:
             f.write(config_content)
         
-        # Start mosquitto broker
-        self.process = subprocess.Popen([
-            'mosquitto', '-c', self.config_file
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # Start mosquitto broker with process group for better cleanup
+        try:
+            self.process = subprocess.Popen([
+                'mosquitto', '-c', self.config_file
+            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+               preexec_fn=os.setsid if hasattr(os, 'setsid') else None)
+        except FileNotFoundError:
+            raise RuntimeError("mosquitto binary not found. Install with: sudo apt-get install mosquitto")
         
         # Wait for broker to start
-        time.sleep(1.0)
+        time.sleep(1.5)
         
         # Check if process is running
         if self.process.poll() is not None:
             stdout, stderr = self.process.communicate()
-            raise RuntimeError(f"Failed to start mosquitto: {stderr.decode()}")
+            error_msg = stderr.decode() if stderr else "Unknown error"
+            # Check for common issues
+            if "bind" in error_msg.lower() or "address already in use" in error_msg.lower():
+                # Port conflict - try to allocate a different port
+                new_port = self._find_free_port()
+                logger.warning(f"Port {self.port} in use, retrying with port {new_port}")
+                self.port = new_port
+                return self._start_mosquitto()  # Retry with new port
+            raise RuntimeError(f"Failed to start mosquitto: {error_msg}")
         
-        # Verify connection
+        # Verify connection with better error reporting
         if not self.wait_for_ready(timeout=10):
-            raise RuntimeError("MQTT broker failed to become ready")
+            if self.process.poll() is not None:
+                stdout, stderr = self.process.communicate()
+                error_msg = stderr.decode() if stderr else "Process exited"
+                raise RuntimeError(f"MQTT broker failed to become ready: {error_msg}")
+            else:
+                raise RuntimeError("MQTT broker failed to become ready: timeout")
             
         logger.info(f"Mosquitto broker started for worker {self.worker_id} on port {self.port}")
     
@@ -239,24 +257,35 @@ protocol mqtt
             self.connection_pool.cleanup()
             
         if self.process:
+            pid = self.process.pid
             try:
                 if self.process.poll() is None:
                     # First try graceful termination
+                    logger.debug(f"Terminating mosquitto process {pid}")
                     self.process.terminate()
                     try:
                         self.process.wait(timeout=3)
-                        logger.debug(f"Mosquitto process {self.process.pid} terminated gracefully")
+                        logger.debug(f"Mosquitto process {pid} terminated gracefully")
                     except subprocess.TimeoutExpired:
                         # Force kill if graceful termination fails
-                        logger.warning(f"Force killing mosquitto process {self.process.pid}")
-                        self.process.kill()
+                        logger.warning(f"Force killing mosquitto process {pid}")
+                        try:
+                            # Kill process group if possible
+                            if hasattr(os, 'killpg'):
+                                os.killpg(os.getpgid(pid), signal.SIGKILL)
+                            else:
+                                self.process.kill()
+                        except (ProcessLookupError, OSError):
+                            # Process already dead
+                            pass
                         try:
                             # Wait a bit for kill to take effect
-                            self.process.wait(timeout=1)
+                            self.process.wait(timeout=2)
+                            logger.debug(f"Mosquitto process {pid} killed successfully")
                         except subprocess.TimeoutExpired:
-                            logger.error(f"Failed to kill mosquitto process {self.process.pid}")
+                            logger.error(f"Failed to kill mosquitto process {pid}")
                 else:
-                    logger.debug(f"Mosquitto process already terminated with code {self.process.returncode}")
+                    logger.debug(f"Mosquitto process {pid} already terminated with code {self.process.returncode}")
                     
                 # Always wait for process cleanup
                 try:
@@ -266,7 +295,7 @@ protocol mqtt
                     
                 self.process = None
             except Exception as e:
-                logger.error(f"Error stopping mosquitto process: {e}")
+                logger.error(f"Error stopping mosquitto process {pid}: {e}")
                 # Force set to None to prevent further attempts
                 self.process = None
         
@@ -390,20 +419,35 @@ protocol mqtt
                     broker._stop_broker()
                 cls._worker_brokers.clear()
                 
-        # Additional cleanup: kill any stray mosquitto processes
-        import subprocess
+        # Additional cleanup: kill any stray mosquitto processes from tests
         try:
-            # Find mosquitto processes from our test temp directories
+            # Find mosquitto processes using test temp directories
             result = subprocess.run(['pgrep', '-f', 'mqtt_test_'], 
                                   capture_output=True, text=True)
             if result.returncode == 0:
                 pids = result.stdout.strip().split('\n')
+                stray_count = 0
                 for pid in pids:
                     if pid.strip():
                         try:
-                            subprocess.run(['kill', '-TERM', pid.strip()], timeout=2)
-                            logger.debug(f"Terminated stray mosquitto process {pid}")
-                        except:
+                            pid_num = int(pid.strip())
+                            # First try graceful termination
+                            os.kill(pid_num, signal.SIGTERM)
+                            time.sleep(0.5)
+                            # Check if still running
+                            try:
+                                os.kill(pid_num, 0)  # Check if process exists
+                                # Still running, force kill
+                                os.kill(pid_num, signal.SIGKILL)
+                                logger.warning(f"Force killed stray mosquitto process {pid_num}")
+                            except ProcessLookupError:
+                                # Process already terminated
+                                logger.debug(f"Terminated stray mosquitto process {pid_num}")
+                            stray_count += 1
+                        except (ValueError, ProcessLookupError, OSError):
+                            # Invalid PID or process already gone
                             pass
+                if stray_count > 0:
+                    logger.info(f"Cleaned up {stray_count} stray mosquitto processes")
         except Exception as e:
             logger.warning(f"Error cleaning up stray processes: {e}")

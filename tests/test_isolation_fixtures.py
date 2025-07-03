@@ -53,6 +53,8 @@ class ThreadManager:
                     thread.stop()
                 elif hasattr(thread, 'cancel') and callable(thread.cancel):
                     thread.cancel()
+                elif hasattr(thread, '_stop_event'):
+                    thread._stop_event.set()
         
         # Wait for threads to finish
         start_time = time.time()
@@ -60,12 +62,27 @@ class ThreadManager:
             test_threads = [t for t in test_threads if t.is_alive()]
             if test_threads:
                 time.sleep(0.1)
-                
-        if test_threads:
-            logger.warning(f"Failed to cleanup {len(test_threads)} threads: "
-                         f"{[t.name for t in test_threads]}")
+        
+        # Force cleanup remaining threads
+        remaining_threads = [t for t in test_threads if t.is_alive()]
+        if remaining_threads:
+            logger.warning(f"Force terminating {len(remaining_threads)} stubborn threads")
+            for thread in remaining_threads:
+                try:
+                    if hasattr(thread, '_delete'):
+                        thread._delete()
+                    # Force daemon status to allow process exit
+                    thread.daemon = True
+                except Exception as e:
+                    logger.debug(f"Error force-cleaning thread {thread.name}: {e}")
+                    
+        final_test_threads = [t for t in threading.enumerate() 
+                             if t.ident not in self._initial_threads and t.is_alive()]
+        if final_test_threads:
+            logger.error(f"Failed to cleanup {len(final_test_threads)} threads: "
+                        f"{[t.name for t in final_test_threads]}")
                          
-        return len(test_threads) == 0
+        return len(final_test_threads) == 0
 
 # ─────────────────────────────────────────────────────────────
 # State Management

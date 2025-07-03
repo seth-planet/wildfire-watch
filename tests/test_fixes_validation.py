@@ -59,7 +59,7 @@ def test_mqtt_broker_attributes():
 
 def test_calculate_area_signature():
     """Test that _calculate_area uses camera_resolution parameter."""
-    from fire_consensus.consensus import FireConsensus, Config
+    from fire_consensus.consensus import FireConsensus, FireConsensusConfig
     from unittest.mock import Mock, patch
     
     # Mock MQTT connection

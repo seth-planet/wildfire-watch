@@ -1,0 +1,10 @@
+{
+  "model": "/home/seth/wildfire-watch/converted_models/output/yolo8l_fire_640x640.onnx",
+  "target": "hailo8l",
+  "batch_size": 8,
+  "optimization": "PTQ",
+  "calibration_samples": "augmented",
+  "optimize_for_accuracy": true,
+  "file_size_mb": 64.95913410186768,
+  "quantization_params": {}
+}

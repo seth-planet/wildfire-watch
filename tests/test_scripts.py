@@ -56,10 +56,6 @@ class TestCertificateGeneration:
         assert script_path.exists()
         assert os.access(script_path, os.X_OK)
     
-    @pytest.mark.skipif(
-        os.geteuid() != 0,
-        reason="Certificate generation may require root"
-    )
     def test_generate_default_certs(self):
         """Test generating default certificates"""
         script_path = SCRIPTS_DIR / "generate_certs.sh"
@@ -69,20 +65,40 @@ class TestCertificateGeneration:
             env = os.environ.copy()
             env['CERT_DIR'] = tmpdir
             
+            # Use 'all' command instead of 'default' (which doesn't exist)
             result = subprocess.run(
-                [str(script_path), "default"],
+                [str(script_path), "all"],
                 capture_output=True,
                 text=True,
                 env=env,
                 cwd=tmpdir
             )
             
+            # Print output for debugging if test fails
+            if result.returncode != 0:
+                print(f"Script stdout: {result.stdout}")
+                print(f"Script stderr: {result.stderr}")
+            
+            # Script should succeed
+            assert result.returncode == 0, f"Certificate generation failed: {result.stderr}"
+            
             # Check if certificates were created
             expected_files = ["ca.crt", "ca.key", "server.crt", "server.key"]
             for cert_file in expected_files:
                 cert_path = Path(tmpdir) / cert_file
-                if result.returncode == 0:
-                    assert cert_path.exists(), f"Certificate not created: {cert_file}"
+                assert cert_path.exists(), f"Certificate not created: {cert_file}"
+                
+            # Check that client certificates were also created
+            clients_dir = Path(tmpdir) / "clients"
+            assert clients_dir.exists(), "Clients directory not created"
+            
+            # Should have client certs for each service
+            expected_services = ["frigate", "gpio_trigger", "fire_consensus", "cam_telemetry", "camera_detector"]
+            for service in expected_services:
+                service_dir = clients_dir / service
+                assert service_dir.exists(), f"Client directory not created: {service}"
+                assert (service_dir / "client.crt").exists(), f"Client cert not created: {service}"
+                assert (service_dir / "client.key").exists(), f"Client key not created: {service}"
 
 
 class TestSecurityConfiguration:

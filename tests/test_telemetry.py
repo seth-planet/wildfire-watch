@@ -101,15 +101,19 @@ def telemetry_service(test_mqtt_broker, monkeypatch):
     monkeypatch.setenv("TELEMETRY_INTERVAL", "5")
     monkeypatch.setenv("DETECTOR", "test_detector")
     
-    # Reload telemetry module configuration
-    telemetry.MQTT_BROKER = conn_params['host']
-    telemetry.CAMERA_ID = "test_camera_01"
-    telemetry.DETECTOR_BACKEND = "test_detector"
-    telemetry.TOPIC_INFO = "system/telemetry"
-    telemetry.LWT_TOPIC = f"system/telemetry/test_camera_01/lwt"
+    # Reload telemetry module configuration with worker isolation
+    worker_id = os.getenv('PYTEST_CURRENT_TEST', 'default').split('::')[-1]
+    camera_id = f"test_camera_{worker_id}"
     
-    # Create new MQTT client with updated config
-    telemetry.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=telemetry.CAMERA_ID, clean_session=True)
+    telemetry.MQTT_BROKER = conn_params['host']
+    telemetry.CAMERA_ID = camera_id
+    telemetry.DETECTOR_BACKEND = "test_detector"
+    telemetry.TOPIC_INFO = f"system/telemetry/{worker_id}"
+    telemetry.LWT_TOPIC = f"system/telemetry/{camera_id}/lwt"
+    
+    # Create new MQTT client with updated config and unique client ID
+    unique_client_id = f"{camera_id}_{hash(worker_id) % 10000}"
+    telemetry.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=unique_client_id, clean_session=True)
     telemetry.client.will_set(
         telemetry.LWT_TOPIC,
         json.dumps({
@@ -318,17 +322,28 @@ def test_mqtt_connection_parameters(telemetry_service):
     """Test that MQTT connection uses correct parameters"""
     # Verify the client is configured correctly
     assert telemetry_service.client.is_connected()
-    assert telemetry_service.client._client_id.decode() == telemetry_service.CAMERA_ID
+    
+    # Handle different client ID formats (string vs bytes)
+    client_id = telemetry_service.client._client_id
+    if isinstance(client_id, bytes):
+        client_id = client_id.decode()
+    
+    # The client ID should contain the camera ID (unique due to worker ID)
+    assert telemetry_service.CAMERA_ID in client_id
     
     # Verify LWT is configured
     assert telemetry_service.client._will is not None
 
 def test_config_environment_variables(telemetry_service):
     """Test that configuration properly loads from environment variables"""
-    assert telemetry_service.CAMERA_ID == "test_camera_01"
+    # With worker isolation, camera ID contains worker ID
+    assert "test_camera_" in telemetry_service.CAMERA_ID
     assert telemetry_service.DETECTOR_BACKEND == "test_detector"
-    assert telemetry_service.TOPIC_INFO == "system/telemetry"
-    assert "test_camera_01" in telemetry_service.LWT_TOPIC
+    
+    # Topic should include worker ID for isolation
+    worker_id = os.getenv('PYTEST_CURRENT_TEST', 'default').split('::')[-1]
+    assert worker_id in telemetry_service.TOPIC_INFO
+    assert telemetry_service.CAMERA_ID in telemetry_service.LWT_TOPIC
 
 def test_real_mqtt_publish_qos_and_retain(telemetry_service, mqtt_monitor, mock_psutil):
     """Test that real MQTT messages use correct QoS and retain flags"""

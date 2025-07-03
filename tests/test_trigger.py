@@ -11,12 +11,13 @@ import threading
 import pytest
 from unittest.mock import Mock, MagicMock, patch, call
 
-# Add trigger module to path
+# Add module paths
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))  
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../gpio_trigger")))
 
 # Import after path setup
-import trigger
-from trigger import PumpController, GPIO, CONFIG, PumpState
+import gpio_trigger.trigger as trigger
+from gpio_trigger.trigger import PumpController, GPIO, CONFIG, PumpState
 
 # ─────────────────────────────────────────────────────────────
 # Test Fixtures and Mocks
@@ -138,10 +139,14 @@ def mock_gpio():
         GPIO._state.clear()
 
 @pytest.fixture
-def controller(mock_gpio, monkeypatch, test_mqtt_broker):
+def controller(mock_gpio, monkeypatch, test_mqtt_broker, mqtt_topic_factory):
     """Create controller with real MQTT broker and fast test timings"""
     # Get connection parameters from the test broker
     conn_params = test_mqtt_broker.get_connection_params()
+    
+    # Get unique topic prefix for test isolation
+    full_topic = mqtt_topic_factory("dummy")
+    topic_prefix = full_topic.rsplit('/', 1)[0]
     
     # Speed up timings for tests
     monkeypatch.setenv("VALVE_PRE_OPEN_DELAY", "0.1")
@@ -165,28 +170,26 @@ def controller(mock_gpio, monkeypatch, test_mqtt_broker):
     monkeypatch.setenv("MQTT_BROKER", conn_params['host'])
     monkeypatch.setenv("MQTT_PORT", str(conn_params['port']))
     monkeypatch.setenv("MQTT_TLS", "false")
+    monkeypatch.setenv("MQTT_TOPIC_PREFIX", topic_prefix)  # Add topic isolation
     
-    # Reload config
-    trigger.CONFIG.update({
-        'PRE_OPEN_DELAY': 0.1,
-        'IGNITION_START_DURATION': 0.05,
-        'FIRE_OFF_DELAY': 0.5,
-        'VALVE_CLOSE_DELAY': 0.3,
-        'IGNITION_OFF_DURATION': 0.1,
-        'MAX_ENGINE_RUNTIME': 2.0,
-        'REFILL_MULTIPLIER': 2,
-        'PRIMING_DURATION': 0.2,
-        'RPM_REDUCTION_LEAD': 0.5,
-        'HEALTH_INTERVAL': 10,
-        # Disable optional monitoring features (dry run protection is always on)
-        'RESERVOIR_FLOAT_PIN': None,
-        'EMERGENCY_BUTTON_PIN': None,
-        'HARDWARE_VALIDATION_ENABLED': False,
-        # Configure MQTT for testing (real broker)
-        'MQTT_BROKER': conn_params['host'],
-        'MQTT_PORT': conn_params['port'],
-        'MQTT_TLS': False,
-    })
+    # Reload module to pick up new environment
+    import importlib
+    import sys
+    if 'gpio_trigger.trigger' in sys.modules:
+        del sys.modules['gpio_trigger.trigger']
+    if 'trigger' in sys.modules:
+        del sys.modules['trigger']
+    
+    # Re-import to get fresh config
+    import gpio_trigger.trigger as trigger
+    from gpio_trigger.trigger import PumpController, GPIO, CONFIG, PumpState
+    
+    # Update globals
+    globals()['trigger'] = trigger
+    globals()['PumpController'] = PumpController
+    globals()['GPIO'] = GPIO
+    globals()['CONFIG'] = CONFIG
+    globals()['PumpState'] = PumpState
     
     # Ensure no lingering controller exists
     if hasattr(trigger, 'controller') and trigger.controller:
@@ -1431,6 +1434,7 @@ class TestStateMachineCompliance:
 # ─────────────────────────────────────────────────────────────
 # Emergency Bypass Tests
 # ─────────────────────────────────────────────────────────────
+@pytest.mark.skip(reason="Emergency bypass feature disabled - tests kept for future reference")
 class TestEmergencyBypass_DISABLED:
     """Test emergency bypass features with real MQTT"""
     

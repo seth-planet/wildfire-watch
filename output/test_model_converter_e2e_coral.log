@@ -1,0 +1,78 @@
+============================= test session starts ==============================
+platform linux -- Python 3.8.10, pytest-8.3.5, pluggy-1.5.0 -- /usr/bin/python3.8
+cachedir: .pytest_cache
+rootdir: /home/seth/wildfire-watch
+plugins: timeout-2.4.0
+timeout: 1800.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 11 items / 10 deselected / 1 selected
+
+tests/test_model_converter_e2e.py::ModelConverterE2ETests::test_tflite_conversion FAILED [100%]
+
+=================================== FAILURES ===================================
+________________ ModelConverterE2ETests.test_tflite_conversion _________________
+
+self = <test_model_converter_e2e.ModelConverterE2ETests testMethod=test_tflite_conversion>
+
+    def test_tflite_conversion(self):
+        """Test conversion to TFLite format for Coral TPU"""
+        converter = EnhancedModelConverter(
+            model_path=str(self.test_model_path),
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+    
+        # Convert to TFLite
+        results = converter.convert_all(formats=['tflite'], validate=False)
+    
+        # Check TFLite files exist
+        tflite_path = self.output_dir / '320x320' / 'yolov8n_320x320.tflite'
+        edge_tpu_path = self.output_dir / '320x320' / 'yolov8n_320x320_edgetpu.tflite'
+    
+        # At least the base TFLite should exist
+>       self.assertTrue(
+            tflite_path.exists() or edge_tpu_path.exists(),
+            f"No TFLite files found in {self.output_dir / '320x320'}"
+        )
+E       AssertionError: False is not true : No TFLite files found in /tmp/tmpfkjom5m_/320x320
+
+tests/test_model_converter_e2e.py:141: AssertionError
+---------------------------- Captured stdout setup -----------------------------
+Downloading test model...
+----------------------------- Captured stdout call -----------------------------
+
+============================================================
+VALIDATION AND BENCHMARK RESULTS
+============================================================
+============================================================
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmp18fq5rkp
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+INFO     convert_model:convert_model.py:2215 QAT compatibility: False
+INFO     convert_model:convert_model.py:2312 
+============================================================
+INFO     convert_model:convert_model.py:2313 Converting size: 320x320
+INFO     convert_model:convert_model.py:2314 ============================================================
+INFO     convert_model:convert_model.py:2335 Converting to tflite...
+INFO     convert_model:convert_model.py:1245 Converting to TFLite with optimizations...
+INFO     convert_model:convert_model.py:399 Converting to ONNX (Size: 320x320, QAT: False)...
+DEBUG    convert_model:convert_model.py:1096 ONNX conversion stdout: FAILED: No module named 'ultralytics'
+
+DEBUG    convert_model:convert_model.py:1097 ONNX conversion stderr: 
+ERROR    convert_model:convert_model.py:1101 ONNX conversion failed: FAILED: No module named 'ultralytics'
+ 
+ERROR    convert_model:convert_model.py:3598 ONNX to TensorFlow conversion failed: SKIP_TF_CONVERSION: Neither onnx2tf nor onnx-tf available
+
+INFO     convert_model:convert_model.py:2496 Generating optimized Frigate configuration...
+ERROR    convert_model:convert_model.py:2453 Error generating Frigate config: 'NoneType' object is not iterable
+INFO     convert_model:convert_model.py:2858 Starting model validation and benchmarking...
+INFO     convert_model:convert_model.py:2846 Multi-size README saved: /tmp/tmpfkjom5m_/README.md
+INFO     convert_model:convert_model.py:2489 
+Conversion complete! Total time: 0.3s
+INFO     convert_model:convert_model.py:2490 Summary saved to: /tmp/tmpfkjom5m_/conversion_summary.json
+=========================== short test summary info ============================
+FAILED tests/test_model_converter_e2e.py::ModelConverterE2ETests::test_tflite_conversion
+======================= 1 failed, 10 deselected in 1.46s =======================

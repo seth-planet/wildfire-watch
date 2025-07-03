@@ -19,6 +19,11 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # Create app directory
 WORKDIR /app
 
+# Copy utils module
+COPY utils /utils
+# Add root to Python path so utils can be imported
+ENV PYTHONPATH=/
+
 # Install Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

@@ -1,0 +1,338 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.18, pytest-8.4.0, pluggy-1.6.0 -- /usr/bin/python3.10
+cachedir: .pytest_cache
+rootdir: /home/seth/wildfire-watch
+plugins: hydra-core-1.3.2, anyio-4.4.0
+collecting ... collected 55 items
+
+tests/test_api_usage.py::SuperGradientsAPITests::test_dataloader_factory_api FAILED [  1%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_loss_function_api PASSED [  3%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_metrics_api FAILED [  5%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_model_get_api FAILED [  7%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_no_deprecated_apis PASSED [  9%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_trainer_train_api_signature PASSED [ 10%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_training_params_dict_structure FAILED [ 12%]
+tests/test_api_usage.py::SuperGradientsAPITests::test_transforms_api PASSED [ 14%]
+tests/test_api_usage.py::DataloaderWrapperTests::test_dataloader_wrapper_preserves_functionality PASSED [ 16%]
+tests/test_api_usage.py::DataloaderWrapperTests::test_safe_dataloader_wrapper PASSED [ 18%]
+tests/test_api_usage.py::ErrorHandlingTests::test_class_mismatch_handling PASSED [ 20%]
+tests/test_api_usage.py::ErrorHandlingTests::test_invalid_architecture PASSED [ 21%]
+tests/test_api_usage.py::ErrorHandlingTests::test_missing_dataset_yaml PASSED [ 23%]
+tests/test_api_usage.py::IntegrationTests::test_training_pipeline_integration FAILED [ 25%]
+tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_dataloader_api_parameters FAILED [ 27%]
+tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_model_creation_api FAILED [ 29%]
+tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_trainer_api_parameters FAILED [ 30%]
+tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_training_params_structure FAILED [ 32%]
+tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_transform_usage FAILED [ 34%]
+tests/test_yolo_nas_training.py::DatasetValidationTests::test_dataset_filtering_strategy PASSED [ 36%]
+tests/test_yolo_nas_training.py::DatasetValidationTests::test_dataset_stats_logging PASSED [ 38%]
+tests/test_yolo_nas_training.py::DatasetValidationTests::test_label_validation_function PASSED [ 40%]
+tests/test_yolo_nas_training.py::TrainingPipelineIntegrationTests::test_training_pipeline_with_mocked_components FAILED [ 41%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_class_index_validation_integration PASSED [ 43%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_dataloader_correct_api_parameters FAILED [ 45%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_loss_function_configuration PASSED [ 47%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_model_creation_with_correct_api FAILED [ 49%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_trainer_train_uses_dict_not_training_params FAILED [ 50%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_transform_usage_for_variable_size_images FAILED [ 52%]
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_validation_metrics_configuration FAILED [ 54%]
+tests/test_yolo_nas_training_updated.py::QATTests::test_qat_configuration PASSED [ 56%]
+tests/test_yolo_nas_training_updated.py::QATTests::test_qat_disabled_by_default PASSED [ 58%]
+tests/test_yolo_nas_training_updated.py::FrigateIntegrationTests::test_all_classes_in_frigate_config PASSED [ 60%]
+tests/test_yolo_nas_training_updated.py::FrigateIntegrationTests::test_fire_class_detection FAILED [ 61%]
+tests/test_yolo_nas_training_updated.py::FrigateIntegrationTests::test_model_export_for_frigate PASSED [ 63%]
+tests/test_yolo_nas_training_updated.py::APIRegressionTests::test_correct_dataloader_api PASSED [ 65%]
+tests/test_yolo_nas_training_updated.py::APIRegressionTests::test_logger_configuration PASSED [ 67%]
+tests/test_yolo_nas_training_updated.py::APIRegressionTests::test_no_training_params_object FAILED [ 69%]
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_can_be_disabled PASSED [ 70%]
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_configuration_in_training_script FAILED [ 72%]
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_default_configuration PASSED [ 74%]
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_start_epoch_validation FAILED [ 76%]
+tests/test_qat_functionality.py::QATCallbackTests::test_qat_affects_model_export PASSED [ 78%]
+tests/test_qat_functionality.py::QATCallbackTests::test_qat_callback_placeholder FAILED [ 80%]
+tests/test_qat_functionality.py::QATQuantizationTests::test_int8_export_with_qat FAILED [ 81%]
+tests/test_qat_functionality.py::QATQuantizationTests::test_qat_calibration_data_usage PASSED [ 83%]
+tests/test_qat_functionality.py::QATQuantizationTests::test_qat_model_quantization_aware PASSED [ 85%]
+tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_inference_speed PASSED [ 87%]
+tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_model_accuracy_benchmark PASSED [ 89%]
+tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_model_size PASSED [ 90%]
+tests/test_qat_functionality.py::QATIntegrationTests::test_qat_documentation PASSED [ 92%]
+tests/test_qat_functionality.py::QATIntegrationTests::test_qat_export_pipeline FAILED [ 94%]
+tests/test_qat_functionality.py::QATIntegrationTests::test_qat_training_flow PASSED [ 96%]
+tests/test_qat_functionality.py::QATValidationTests::test_qat_affects_frigate_deployment PASSED [ 98%]
+tests/test_qat_functionality.py::QATValidationTests::test_verify_qat_enabled_in_model PASSED [100%]
+
+=================================== FAILURES ===================================
+______________ SuperGradientsAPITests.test_dataloader_factory_api ______________
+tests/test_api_usage.py:94: in test_dataloader_factory_api
+    dataloaders = trainer._create_yolo_nas_dataloaders()
+converted_models/unified_yolo_trainer.py:492: in _create_yolo_nas_dataloaders
+    train_loader = wrap_dataloader_with_fixed_collate(train_loader, num_classes)
+converted_models/fixed_yolo_nas_collate.py:157: in wrap_dataloader_with_fixed_collate
+    if num_workers > 0:
+E   TypeError: '>' not supported between instances of 'MagicMock' and 'int'
+----------------------------- Captured stdout call -----------------------------
+The console stream is logged into /home/seth/sg_logs/console.log
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:25] INFO - crash_tips_setup.py - Crash tips is enabled. You can set your environment variable to CRASH_HANDLER=FALSE to disable it
+[2025-06-15 00:35:27] WARNING - unified_yolo_trainer.py - Dataset preprocessor not available, attempting class index fixer
+[2025-06-15 00:35:27] WARNING - unified_yolo_trainer.py - No dataset validation available, proceeding with caution
+[2025-06-15 00:35:27] WARNING - unified_yolo_trainer.py - SafeDataLoaderWrapper not available, using standard dataloaders
+[2025-06-15 00:35:27] INFO - unified_yolo_trainer.py - Dataloaders created: 0 train, 0 val
+___________________ SuperGradientsAPITests.test_metrics_api ____________________
+tests/test_api_usage.py:187: in test_metrics_api
+    self.assertEqual(metric.score_thres, 0.25)
+../.local/lib/python3.10/site-packages/torch/nn/modules/module.py:1940: in __getattr__
+    raise AttributeError(
+E   AttributeError: 'DetectionMetrics_050' object has no attribute 'score_thres'. Did you mean: 'score_threshold'?
+__________________ SuperGradientsAPITests.test_model_get_api ___________________
+tests/test_api_usage.py:138: in test_model_get_api
+    trainer._create_yolo_nas_trainer()
+converted_models/unified_yolo_trainer.py:362: in _create_yolo_nas_trainer
+    training_params = self._create_yolo_nas_training_params()
+converted_models/unified_yolo_trainer.py:506: in _create_yolo_nas_training_params
+    config = self.config['training']
+E   KeyError: 'training'
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:27] INFO - unified_yolo_trainer.py - Using device: None
+------------------------------ Captured log call -------------------------------
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:337 Using device: None
+__________ SuperGradientsAPITests.test_training_params_dict_structure __________
+tests/test_api_usage.py:246: in test_training_params_dict_structure
+    self.assertEqual(params['lr_mode'], 'cosine')
+E   AssertionError: 'CosineLRScheduler' != 'cosine'
+E   - CosineLRScheduler
+E   + cosine
+_____________ IntegrationTests.test_training_pipeline_integration ______________
+tests/test_api_usage.py:449: in test_training_pipeline_integration
+    mock_save.return_value = str(tmpdir / 'model.pth')
+E   TypeError: unsupported operand type(s) for /: 'str' and 'str'
+____________ YoloNasTrainingAPITests.test_dataloader_api_parameters ____________
+tests/test_yolo_nas_training.py:171: in test_dataloader_api_parameters
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:472: in create_training_script
+    logger.info(f"QAT will start at epoch {config['qat']['start_epoch']}")
+E   KeyError: 'start_epoch'
+_______________ YoloNasTrainingAPITests.test_model_creation_api ________________
+tests/test_yolo_nas_training.py:249: in test_model_creation_api
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:293: in create_training_script
+    original_data_dir = "{config['dataset']['data_dir']}"
+E   KeyError: 'data_dir'
+_____________ YoloNasTrainingAPITests.test_trainer_api_parameters ______________
+tests/test_yolo_nas_training.py:118: in test_trainer_api_parameters
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:472: in create_training_script
+    logger.info(f"QAT will start at epoch {config['qat']['start_epoch']}")
+E   KeyError: 'start_epoch'
+____________ YoloNasTrainingAPITests.test_training_params_structure ____________
+tests/test_yolo_nas_training.py:281: in test_training_params_structure
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:293: in create_training_script
+    original_data_dir = "{config['dataset']['data_dir']}"
+E   KeyError: 'data_dir'
+_________________ YoloNasTrainingAPITests.test_transform_usage _________________
+tests/test_yolo_nas_training.py:218: in test_transform_usage
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:324: in create_training_script
+    ckpt_root_dir="{config['training']['checkpoints_dir']}"
+E   KeyError: 'checkpoints_dir'
+_ TrainingPipelineIntegrationTests.test_training_pipeline_with_mocked_components _
+/usr/lib/python3.10/unittest/mock.py:1376: in patched
+    with self.decoration_helper(patched,
+/usr/lib/python3.10/contextlib.py:135: in __enter__
+    return next(self.gen)
+/usr/lib/python3.10/unittest/mock.py:1358: in decoration_helper
+    arg = exit_stack.enter_context(patching)
+/usr/lib/python3.10/contextlib.py:492: in enter_context
+    result = _cm_type.__enter__(cm)
+/usr/lib/python3.10/unittest/mock.py:1447: in __enter__
+    original, local = self.get_original()
+/usr/lib/python3.10/unittest/mock.py:1420: in get_original
+    raise AttributeError(
+E   AttributeError: <module 'converted_models.train_yolo_nas' from '/home/seth/wildfire-watch/converted_models/train_yolo_nas.py'> does not have the attribute 'models'
+________ YoloNasCorrectAPITests.test_dataloader_correct_api_parameters _________
+tests/test_yolo_nas_training_updated.py:162: in test_dataloader_correct_api_parameters
+    dataloaders = trainer._create_yolo_nas_dataloaders()
+converted_models/unified_yolo_trainer.py:492: in _create_yolo_nas_dataloaders
+    train_loader = wrap_dataloader_with_fixed_collate(train_loader, num_classes)
+converted_models/fixed_yolo_nas_collate.py:157: in wrap_dataloader_with_fixed_collate
+    if num_workers > 0:
+E   TypeError: '>' not supported between instances of 'MagicMock' and 'int'
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:28] WARNING - unified_yolo_trainer.py - Dataset preprocessor not available, attempting class index fixer
+[2025-06-15 00:35:28] WARNING - unified_yolo_trainer.py - No dataset validation available, proceeding with caution
+[2025-06-15 00:35:28] WARNING - unified_yolo_trainer.py - SafeDataLoaderWrapper not available, using standard dataloaders
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Dataloaders created: 0 train, 0 val
+------------------------------ Captured log call -------------------------------
+WARNING  unified_yolo_trainer:unified_yolo_trainer.py:413 Dataset preprocessor not available, attempting class index fixer
+WARNING  unified_yolo_trainer:unified_yolo_trainer.py:424 No dataset validation available, proceeding with caution
+WARNING  unified_yolo_trainer:unified_yolo_trainer.py:482 SafeDataLoaderWrapper not available, using standard dataloaders
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:484 Dataloaders created: 0 train, 0 val
+_________ YoloNasCorrectAPITests.test_model_creation_with_correct_api __________
+tests/test_yolo_nas_training_updated.py:254: in test_model_creation_with_correct_api
+    components = trainer._create_yolo_nas_trainer()
+converted_models/unified_yolo_trainer.py:362: in _create_yolo_nas_trainer
+    training_params = self._create_yolo_nas_training_params()
+converted_models/unified_yolo_trainer.py:506: in _create_yolo_nas_training_params
+    config = self.config['training']
+E   KeyError: 'training'
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Using device: None
+------------------------------ Captured log call -------------------------------
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:337 Using device: None
+___ YoloNasCorrectAPITests.test_trainer_train_uses_dict_not_training_params ____
+tests/test_yolo_nas_training_updated.py:127: in test_trainer_train_uses_dict_not_training_params
+    self.assertEqual(training_params['lr_mode'], 'cosine')
+E   AssertionError: 'CosineLRScheduler' != 'cosine'
+E   - CosineLRScheduler
+E   + cosine
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Auto-detecting dataset classes...
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Inferred 32 classes from names dict
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Detected 32 classes: ['class_0', 'class_1', 'class_2', 'class_3', 'class_4']...
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Found 'Fire' class at index 26
+------------------------------ Captured log call -------------------------------
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:185 Auto-detecting dataset classes...
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:203 Inferred 32 classes from names dict
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:213 Detected 32 classes: ['class_0', 'class_1', 'class_2', 'class_3', 'class_4']...
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:224 Found 'Fire' class at index 26
+_____ YoloNasCorrectAPITests.test_transform_usage_for_variable_size_images _____
+tests/test_yolo_nas_training_updated.py:291: in test_transform_usage_for_variable_size_images
+    trainer._create_yolo_nas_dataloaders()
+converted_models/unified_yolo_trainer.py:470: in _create_yolo_nas_dataloaders
+    val_loader = coco_detection_yolo_format_val(
+../.local/lib/python3.10/site-packages/super_gradients/training/dataloaders/dataloaders.py:362: in coco_detection_yolo_format_val
+    return get_data_loader(
+../.local/lib/python3.10/site-packages/super_gradients/training/dataloaders/dataloaders.py:82: in get_data_loader
+    dataset = dataset_cls(**dataset_params)
+../.local/lib/python3.10/site-packages/super_gradients/training/datasets/detection_datasets/yolo_format_detection.py:124: in __init__
+    super().__init__(data_dir=data_dir, show_all_warnings=show_all_warnings, *args, **kwargs)
+../.local/lib/python3.10/site-packages/super_gradients/common/decorators/factory_decorator.py:27: in wrapper
+    kwargs[param_name] = factory.get(kwargs[param_name])
+../.local/lib/python3.10/site-packages/super_gradients/common/factories/list_factory.py:14: in get
+    all.append(self.factory.get(conf))
+../.local/lib/python3.10/site-packages/super_gradients/common/factories/transforms_factory.py:28: in get
+    return super().get(conf)
+../.local/lib/python3.10/site-packages/super_gradients/common/factories/base_factory.py:53: in get
+    raise UnknownTypeException(conf, list(self.type_dict.keys()))
+E   super_gradients.common.exceptions.factory_exceptions.UnknownTypeException: Unknown object type: max_size_transform in configuration. valid types are: ['Compose', 'ToTensor', 'PILToTensor', 'ConvertImageDtype', 'ToPILImage', 'Normalize', 'Resize', 'CenterCrop', 'Pad', 'Lambda', 'RandomApply', 'RandomChoice', 'RandomOrder', 'RandomCrop', 'RandomHorizontalFlip', 'RandomVerticalFlip', 'RandomResizedCrop', 'FiveCrop', 'TenCrop', 'LinearTransformation', 'ColorJitter', 'RandomRotation', 'RandomAffine', 'Grayscale', 'RandomGrayscale', 'RandomPerspective', 'RandomErasing', 'GaussianBlur', 'InterpolationMode', 'RandomInvert', 'RandomPosterize', 'RandomSolarize', 'RandomAdjustSharpness', 'RandomAutocontrast', 'RandomEqualize', 'Lighting', 'RandomErase', 'DetectionPadIfNeeded', 'DetectionLongestMaxSize', 'SegResize', 'SegRandomFlip', 'SegRescale', 'SegRandomRescale', 'SegRandomRotate', 'SegCropImageAndMask', 'SegRandomGaussianBlur', 'SegPadShortToCropSize', 'SegPadToDivisible', 'SegColorJitter', 'DetectionStandardize', 'DetectionMosaic', 'DetectionRandomAffine', 'DetectionMixup', 'SegToTensor', 'SegConvertToTensor', 'SegStandardize', 'SegNormalize', 'DetectionImagePermute', 'DetectionPadToSize', 'DetectionPaddedRescale', 'DetectionHorizontalFlip', 'DetectionVerticalFlip', 'DetectionRescale', 'DetectionRandomRotate90', 'DetectionRGB2BGR', 'DetectionHSV', 'DetectionNormalize', 'DetectionTargetsFormatTransform', 'Standardize', 'KeypointsBrightnessContrast', 'KeypointsHSV', 'KeypointsImageNormalize', 'KeypointsImageStandardize', 'KeypointsLongestMaxSize', 'KeypointsMixup', 'KeypointsMosaic', 'KeypointsPadIfNeeded', 'KeypointsRandomAffineTransform', 'KeypointsRandomHorizontalFlip', 'KeypointsRandomVerticalFlip', 'KeypointsRescale', 'KeypointsRandomRotate90', 'KeypointsImageToTensor', 'KeypointsRemoveSmallObjects', 'KeypointsReverseImageChannels', 'RandAugmentTransform', 'RandomResizedCropAndInterpolation']
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:28] WARNING - unified_yolo_trainer.py - Dataset preprocessor not available, attempting class index fixer
+[2025-06-15 00:35:28] WARNING - unified_yolo_trainer.py - No dataset validation available, proceeding with caution
+------------------------------ Captured log call -------------------------------
+WARNING  unified_yolo_trainer:unified_yolo_trainer.py:413 Dataset preprocessor not available, attempting class index fixer
+WARNING  unified_yolo_trainer:unified_yolo_trainer.py:424 No dataset validation available, proceeding with caution
+DEBUG    hydra.core.utils:utils.py:279 Setting JobRuntime:name=app
+_________ YoloNasCorrectAPITests.test_validation_metrics_configuration _________
+tests/test_yolo_nas_training_updated.py:351: in test_validation_metrics_configuration
+    training_params = trainer._create_yolo_nas_training_params()
+converted_models/unified_yolo_trainer.py:534: in _create_yolo_nas_training_params
+    "mixed_precision": config['mixed_precision'],
+E   KeyError: 'mixed_precision'
+______________ FrigateIntegrationTests.test_fire_class_detection _______________
+tests/test_yolo_nas_training_updated.py:429: in test_fire_class_detection
+    class_info = trainer.auto_detect_classes()
+converted_models/unified_yolo_trainer.py:216: in auto_detect_classes
+    self.config['model']['num_classes'] = num_classes
+E   KeyError: 'model'
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Auto-detecting dataset classes...
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Inferred 4 classes from names dict
+[2025-06-15 00:35:28] INFO - unified_yolo_trainer.py - Detected 4 classes: ['Person', 'Car', 'class_2', 'class_3']...
+------------------------------ Captured log call -------------------------------
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:185 Auto-detecting dataset classes...
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:203 Inferred 4 classes from names dict
+INFO     unified_yolo_trainer:unified_yolo_trainer.py:213 Detected 4 classes: ['Person', 'Car', 'class_2', 'class_3']...
+______________ APIRegressionTests.test_no_training_params_object _______________
+tests/test_yolo_nas_training_updated.py:511: in test_no_training_params_object
+    self.assertNotIn('from super_gradients.training.params import TrainingParams', content)
+E   AssertionError: 'from super_gradients.training.params import TrainingParams' unexpectedly found in '#!/usr/bin/env python3.10\n"""\nYOLO-NAS Training Script for Wildfire Watch\nTrains YOLO-NAS-S model on custom COCO dataset with QAT support\n\nIMPORTANT: This script requires Python 3.10 for super-gradients compatibility\nRun with: python3.10 train_yolo_nas.py\n"""\nimport os\nimport sys\nimport logging\nimport yaml\nimport torch\nimport time\nfrom pathlib import Path\nfrom typing import Dict, Any\n\n# Setup logging to output directory\noutput_dir = Path("../output")\noutput_dir.mkdir(exist_ok=True)\n\nlogging.basicConfig(\n    level=logging.INFO,\n    format="%(asctime)s [%(levelname)s] %(message)s",\n    handlers=[\n        logging.StreamHandler(),\n        logging.FileHandler(output_dir / "yolo_nas_training.log")\n    ]\n)\nlogger = logging.getLogger(__name__)\n\ndef check_requirements():\n    """Check and install required packages"""\n    logger.info("Checking requirements...")\n    \n    required_packages = [\n        "super-gradients",\n        "torch",\n        "torchvision", \n        "opencv-python",\n        "pyyaml",\n        "tensorboard"\n    ]\n    \n    missing_packages = []\n    \n    for package in required_packages:\n        try:\n            if package == "super-gradients":\n                import super_gradients\n            elif package == "torch":\n                import torch\n                logger.info(f"PyTorch version: {torch.__version__}")\n                logger.info(f"CUDA available: {torch.cuda.is_available()}")\n                if torch.cuda.is_available():\n                    logger.info(f"CUDA device: {torch.cuda.get_device_name()}")\n                    logger.info(f"CUDA memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")\n            elif package == "torchvision":\n                import torchvision\n            elif package == "opencv-python":\n                import cv2\n            elif package == "pyyaml":\n                import yaml\n            elif package == "tensorboard":\n                import tensorboard\n        except ImportError:\n            missing_packages.append(package)\n    \n    if missing_packages:\n        logger.error(f"Missing packages: {missing_packages}")\n        logger.info("Installing missing packages...")\n        import subprocess\n        for package in missing_packages:\n            subprocess.check_call([sys.executable, "-m", "pip", "install", package])\n    \n    return True\n\ndef setup_yolo_nas():\n    """Setup YOLO-NAS repository"""\n    logger.info("Setting up YOLO-NAS...")\n    \n    repo_dir = Path("YOLO-NAS-pytorch")\n    \n    if not repo_dir.exists():\n        logger.info("Cloning YOLO-NAS repository...")\n        import subprocess\n        subprocess.run([\n            "git", "clone", \n            "https://github.com/Andrewhsin/YOLO-NAS-pytorch.git"\n        ], check=True)\n    \n    # Add to Python path\n    sys.path.insert(0, str(repo_dir.absolute()))\n    \n    return repo_dir\n\ndef prepare_dataset_config():\n    """Prepare dataset configuration for training"""\n    logger.info("Preparing dataset configuration...")\n    \n    dataset_path = Path.home() / "fiftyone" / "train_yolo"\n    \n    if not dataset_path.exists():\n        raise FileNotFoundError(f"Dataset not found at {dataset_path}")\n    \n    # Read original dataset.yaml\n    with open(dataset_path / "dataset.yaml", \'r\') as f:\n        dataset_config = yaml.safe_load(f)\n    \n    logger.info(f"Dataset classes: {len(dataset_config[\'names\'])}")\n    logger.info("Key classes for wildfire detection:")\n    for idx, name in dataset_config[\'names\'].items():\n        if name.lower() in [\'fire\', \'person\', \'car\', \'building\']:\n            logger.info(f"  {idx}: {name}")\n    \n    # Create training config\n    training_config = {\n        \'dataset\': {\n            \'data_dir\': str(dataset_path),\n            \'train_images_dir\': \'images/train\',\n            \'train_labels_dir\': \'labels/train\', \n            \'val_images_dir\': \'images/validation\',\n            \'val_labels_dir\': \'labels/validation\',\n            \'class_names\': list(dataset_config[\'names\'].values()),\n            \'nc\': len(dataset_config[\'names\'])\n        },\n        \'model\': {\n            \'architecture\': \'yolo_nas_s\',\n            \'num_classes\': len(dataset_config[\'names\']),\n            \'input_size\': [640, 640],\n            \'pretrained_weights\': None  # Changed to None to avoid internet dependency\n        },\n        \'training\': {\n            \'epochs\': 5,  # Reduced for quick testing\n            \'batch_size\': 8,  # Adjust based on GPU memory\n            \'learning_rate\': 0.001,\n            \'warmup_epochs\': 5,\n            \'cos_lr\': True,\n            \'workers\': 4,\n            \'save_ckpt_epoch_list\': [50, 100, 150, 200],\n            \'checkpoints_dir\': str(output_dir / "checkpoints"),\n            \'experiment_name\': \'wildfire_yolo_nas_s\'\n        },\n        \'qat\': {\n            \'enabled\': True,\n            \'start_epoch\': 150,  # Start QAT in last 50 epochs\n            \'calibration_batches\': 100\n        },\n        \'validation\': {\n            \'conf_threshold\': 0.25,\n            \'iou_threshold\': 0.45,\n            \'max_predictions_per_image\': 300\n        }\n    }\n    \n    # Save training config\n    config_path = output_dir / "training_config.yaml"\n    with open(config_path, \'w\') as f:\n        yaml.dump(training_config, f, indent=2)\n    \n    logger.info(f"Training configuration saved to: {config_path}")\n    return training_config\n\ndef create_training_script(config: Dict[str, Any]):\n    """Create the actual training script using super-gradients"""\n    \n    training_script = f\'\'\'\nimport os\nimport torch\nimport logging\nimport shutil\nfrom pathlib import Path\nfrom super_gradients import Trainer\nfrom super_gradients.training import models\nfrom super_gradients.training.dataloaders.dataloaders import (\n    coco_detection_yolo_format_train, \n    coco_detection_yolo_format_val\n)\nfrom super_gradients.training.losses import PPYoloELoss\nfrom super_gradients.training.metrics import DetectionMetrics_050\nfrom super_gradients.training.models.detection_models.pp_yolo_e import PPYoloEPostPredictionCallback\nfrom super_gradients.training.utils.distributed_training_utils import setup_device\nfrom super_gradients.common.object_names import Models\nfrom super_gradients.training.params import TrainingParams\nfrom super_gradients.training.utils.callbacks import (\n    ModelConversionCheckCallback,\n    LRCallbackBase,\n    PhaseCallback,\n    LRSchedulerCallback\n)\n\n# Setup logging\nlogger = logging.getLogger(__name__)\n\ndef validate_dataset_labels(dataset_dir, num_classes, split=\'train\'):\n    \\"\\"\\"Validate dataset labels and create a list of valid image files\\"\\"\\"\n    logger.info(f"Validating {{split}} dataset labels...")\n    \n    images_dir = Path(dataset_dir) / f\'images/{{split}}\'\n    labels_dir = Path(dataset_dir) / f\'labels/{{split}}\'\n    \n    if not images_dir.exists() or not labels_dir.exists():\n        logger.error(f"Dataset directories not found: {{images_dir}}, {{labels_dir}}")\n        return None, None\n    \n    valid_images = []\n    valid_labels = []\n    valid_count = 0\n    invalid_count = 0\n    \n    # Process each image and its label\n    for image_file in images_dir.glob(\'*.jpg\'):\n        label_file = labels_dir / (image_file.stem + \'.txt\')\n        \n        if not label_file.exists():\n            if invalid_count < 10:  # Only log first 10 warnings\n                logger.warning(f"No label file for {{image_file.name}}")\n            invalid_count += 1\n            continue\n        \n        # Validate label file\n        is_valid = True\n        try:\n            with open(label_file, \'r\') as f:\n                for line_num, line in enumerate(f, 1):\n                    line = line.strip()\n                    if not line:\n                        continue\n                    \n                    parts = line.split()\n                    if len(parts) < 5:\n                        if invalid_count < 10:  # Only log first 10 warnings\n                            logger.warning(f"Invalid format in {{label_file.name}} line {{line_num}}: expected 5 values, got {{len(parts)}}")\n                        is_valid = False\n                        break\n                    \n                    try:\n                        class_id = int(parts[0])\n                        if class_id < 0 or class_id >= num_classes:\n                            if invalid_count < 10:  # Only log first 10 warnings\n                                logger.warning(f"Invalid class ID {{class_id}} in {{label_file.name}} line {{line_num}}: valid range is 0-{{num_classes-1}}")\n                            is_valid = False\n                            break\n                    except ValueError as e:\n                        if invalid_count < 10:  # Only log first 10 warnings\n                            logger.warning(f"Cannot parse class ID in {{label_file.name}} line {{line_num}}: {{e}}")\n                        is_valid = False\n                        break\n        \n        except IOError as e:\n            logger.error(f"Cannot read label file {{label_file}}: {{e}}")\n            is_valid = False\n        \n        # Track valid files without copying\n        if is_valid:\n            valid_images.append(str(image_file))\n            valid_labels.append(str(label_file))\n            valid_count += 1\n        else:\n            invalid_count += 1\n    \n    logger.info(f"Dataset validation complete for {{split}}:")\n    logger.info(f"  Valid images: {{valid_count}}")\n    logger.info(f"  Invalid images: {{invalid_count}}")\n    if valid_count + invalid_count > 0:\n        logger.info(f"  Success rate: {{valid_count / (valid_count + invalid_count) * 100:.1f}}%")\n    \n    if valid_count == 0:\n        logger.error(f"No valid images found in {{split}} split!")\n        return None, None\n    \n    # Save valid file lists for reference\n    valid_files_info = {{\n        \'images\': valid_images,\n        \'labels\': valid_labels,\n        \'total_valid\': valid_count,\n        \'total_invalid\': invalid_count\n    }}\n    \n    return str(dataset_dir), valid_files_info\n\ndef main():\n    logger.info("Starting YOLO-NAS training...")\n    \n    # Setup device\n    device = setup_device(\n        multi_gpu="auto",\n        num_gpus=None\n    )\n    logger.info(f"Using device: {{device}}")\n    \n    # Validate dataset labels (but don\'t copy files to save disk space)\n    original_data_dir = "{config[\'dataset\'][\'data_dir\']}"\n    train_data_dir, train_valid_info = validate_dataset_labels(\n        original_data_dir, \n        {config[\'model\'][\'num_classes\']}, \n        \'train\'\n    )\n    \n    if train_data_dir is None:\n        logger.error("Failed to validate training dataset")\n        return None\n    \n    # Also validate validation split\n    val_data_dir, val_valid_info = validate_dataset_labels(\n        original_data_dir, \n        {config[\'model\'][\'num_classes\']}, \n        \'validation\'\n    )\n    \n    if val_data_dir is None:\n        logger.error("Failed to validate validation dataset")\n        return None\n    \n    # Use original dataset directory (validation passed)\n    data_dir = original_data_dir\n    logger.info(f"Dataset validation passed - using original dataset: {{data_dir}}")\n    logger.info(f"Training images validated: {{train_valid_info[\'total_valid\']}} valid, {{train_valid_info[\'total_invalid\']}} invalid")\n    logger.info(f"Validation images validated: {{val_valid_info[\'total_valid\']}} valid, {{val_valid_info[\'total_invalid\']}} invalid")\n    \n    # Create trainer\n    trainer = Trainer(\n        experiment_name="{config[\'training\'][\'experiment_name\']}",\n        ckpt_root_dir="{config[\'training\'][\'checkpoints_dir\']}"\n    )\n    \n    # Create proper super-gradients dataloaders with correct API\n    logger.info("Creating YOLO-NAS dataloaders with filtered dataset...")\n    \n    # Dataset parameters for super-gradients dataloaders\n    # Use available transforms to handle variable image sizes\n    from super_gradients.training.transforms.detection import DetectionLongestMaxSize, DetectionPadIfNeeded\n    \n    # Transforms to normalize image sizes for batching\n    transforms = [\n        DetectionLongestMaxSize(max_height={config[\'model\'][\'input_size\'][0]}, max_width={config[\'model\'][\'input_size\'][1]}),\n        DetectionPadIfNeeded(min_height={config[\'model\'][\'input_size\'][0]}, min_width={config[\'model\'][\'input_size\'][1]}, pad_value=114)\n    ]\n    \n    dataset_params = {{\n        "data_dir": data_dir,\n        "images_dir": "{config[\'dataset\'][\'train_images_dir\']}",\n        "labels_dir": "{config[\'dataset\'][\'train_labels_dir\']}",\n        "classes": {config[\'dataset\'][\'class_names\']},\n        "input_dim": {config[\'model\'][\'input_size\']},\n        "ignore_empty_annotations": True,\n        "transforms": transforms\n    }}\n    \n    # Dataloader parameters\n    dataloader_params = {{\n        "batch_size": {config[\'training\'][\'batch_size\']},\n        "num_workers": {config[\'training\'].get(\'workers\', 4)},\n        "shuffle": True,\n        "drop_last": False,\n        "pin_memory": True\n    }}\n    \n    # Create training dataloader\n    logger.info("Creating training dataloader...")\n    train_dataloader = coco_detection_yolo_format_train(\n        dataset_params=dataset_params,\n        dataloader_params=dataloader_params\n    )\n    \n    # Validation dataloader parameters (no shuffle)\n    val_dataloader_params = dataloader_params.copy()\n    val_dataloader_params["shuffle"] = False\n    \n    # Update dataset params for validation\n    val_dataset_params = dataset_params.copy()\n    val_dataset_params.update({{\n        "images_dir": "{config[\'dataset\'][\'val_images_dir\']}",\n        "labels_dir": "{config[\'dataset\'][\'val_labels_dir\']}"\n    }})\n    \n    # Create validation dataloader\n    logger.info("Creating validation dataloader...")\n    val_dataloader = coco_detection_yolo_format_val(\n        dataset_params=val_dataset_params,\n        dataloader_params=val_dataloader_params\n    )\n    \n    logger.info("✓ Filtered dataset dataloaders created successfully")\n    logger.info(f"Training samples: {{len(train_dataloader.dataset) if hasattr(train_dataloader, \'dataset\') else \'Unknown\'}}")\n    logger.info(f"Validation samples: {{len(val_dataloader.dataset) if hasattr(val_dataloader, \'dataset\') else \'Unknown\'}}")\n    \n    # Create model\n    model = models.get(\n        Models.{config[\'model\'][\'architecture\'].upper()},\n        num_classes={config[\'model\'][\'num_classes\']},\n        pretrained_weights={repr(config[\'model\'][\'pretrained_weights\'])}\n    )\n    \n    logger.info(f"Model architecture: {{type(model).__name__}}")\n    logger.info(f"Number of classes: {config[\'model\'][\'num_classes\']}")\n    \n    # Training parameters - use dict format for Trainer.train()\n    training_params = {{\n        # Required parameters\n        "max_epochs": {config[\'training\'][\'epochs\']},\n        "lr_mode": "cosine" if {config[\'training\'][\'cos_lr\']} else "step",\n        "initial_lr": {config[\'training\'][\'learning_rate\']},\n        "loss": PPYoloELoss(\n            use_static_assigner=False,\n            num_classes={config[\'model\'][\'num_classes\']},\n            reg_max=16\n        ),\n        \n        # Warmup parameters\n        "lr_warmup_epochs": {config[\'training\'][\'warmup_epochs\']},\n        "warmup_mode": "LinearEpochLRWarmup",\n        "warmup_initial_lr": 1e-6,\n        \n        # Optimizer parameters\n        "optimizer": "AdamW",\n        "optimizer_params": {{"weight_decay": 0.0001}},\n        "zero_weight_decay_on_bias_and_bn": True,\n        \n        # Training settings\n        "mixed_precision": True,\n        "average_best_models": True,\n        "ema": True,\n        "ema_params": {{"decay": 0.9999, "decay_type": "threshold"}},\n        \n        # Cosine LR settings\n        "cosine_final_lr_ratio": 0.1,\n        \n        # Validation and metrics\n        "valid_metrics_list": [\n            DetectionMetrics_050(\n                score_thres=0.1,\n                top_k_predictions=300,\n                num_cls={config[\'model\'][\'num_classes\']},\n                normalize_targets=True,\n                post_prediction_callback=PPYoloEPostPredictionCallback(\n                    score_threshold=0.01,\n                    nms_top_k=1000,\n                    max_predictions=300,\n                    nms_threshold=0.7\n                )\n            )\n        ],\n        "metric_to_watch": "mAP@0.50:0.95",\n        "greater_metric_to_watch_is_better": True,\n        \n        # Checkpointing\n        "save_ckpt_epoch_list": {config[\'training\'][\'save_ckpt_epoch_list\']},\n        "resume": False,\n        \n        # Logging\n        "silent_mode": False,\n        "sg_logger": "base_sg_logger",\n        "sg_logger_params": {{\n            "tb_files_user_prompt": False,\n            "launch_tensorboard": False,\n            "tensorboard_port": None,\n            "save_checkpoints_remote": False,\n            "save_tensorboard_remote": False,\n            "save_logs_remote": False\n        }},\n        \n        # Other settings\n        "seed": 42,\n        "launch_tensorboard": False\n    }}\n    \n    # Add QAT callback if enabled\n    phase_callbacks = []\n    if {config[\'qat\'][\'enabled\']}:\n        logger.info("QAT (Quantization Aware Training) enabled")\n        logger.info(f"QAT will start at epoch {config[\'qat\'][\'start_epoch\']}")\n        \n        # Note: QAT implementation may need to be added separately\n        # This is a placeholder for QAT callback\n        # phase_callbacks.append(QATCallback(start_epoch=config[\'qat\'][\'start_epoch\']))\n    \n    # Train the model - pass training_params as dict\n    trainer.train(\n        model=model,\n        training_params=training_params,\n        train_loader=train_dataloader,\n        valid_loader=val_dataloader\n    )\n    \n    # Save final model\n    best_model_path = Path("{config[\'training\'][\'checkpoints_dir\']}") / "{config[\'training\'][\'experiment_name\']}" / "average_model.pth"\n    final_model_path = Path("../output") / "yolo_nas_s_trained.pth"\n    \n    if best_model_path.exists():\n        import shutil\n        shutil.copy2(best_model_path, final_model_path)\n        logger.info(f"Best model saved to: {{final_model_path}}")\n    else:\n        logger.warning("Best model not found, saving current model state")\n        torch.save(model.state_dict(), final_model_path)\n    \n    logger.info("Training completed!")\n    return str(final_model_path)\n\nif __name__ == "__main__":\n    trained_model_path = main()\n    print(f"TRAINED_MODEL_PATH={{trained_model_path}}")\n\'\'\'\n    \n    script_path = output_dir / "run_training.py"\n    with open(script_path, \'w\') as f:\n        f.write(training_script)\n    \n    logger.info(f"Training script created: {script_path}")\n    return script_path\n\ndef run_training(script_path: Path):\n    """Execute the training script with appropriate timeout"""\n    logger.info("Starting YOLO-NAS training...")\n    logger.info("This may take 48-72 hours depending on your GPU")\n    \n    import subprocess\n    \n    # Calculate timeout for 72 hours\n    timeout_seconds = 72 * 60 * 60\n    \n    try:\n        logger.info(f"Running training with timeout: {timeout_seconds/3600:.1f} hours")\n        \n        result = subprocess.run(\n            [sys.executable, str(script_path)],\n            capture_output=True,\n            text=True,\n            timeout=timeout_seconds,\n            cwd=script_path.parent\n        )\n        \n        if result.returncode == 0:\n            logger.info("Training completed successfully!")\n            \n            # Extract trained model path from output\n            for line in result.stdout.split(\'\\\\n\'):\n                if line.startswith(\'TRAINED_MODEL_PATH=\'):\n                    model_path = line.split(\'=\', 1)[1]\n                    logger.info(f"Trained model available at: {model_path}")\n                    return model_path\n            \n            return None\n        else:\n            logger.error(f"Training failed with return code: {result.returncode}")\n            logger.error(f"Error output: {result.stderr}")\n            return None\n            \n    except subprocess.TimeoutExpired:\n        logger.error(f"Training timed out after {timeout_seconds/3600:.1f} hours")\n        return None\n    except Exception as e:\n        logger.error(f"Training failed with exception: {e}")\n        return None\n\ndef main():\n    """Main training pipeline"""\n    logger.info("YOLO-NAS Training Pipeline for Wildfire Watch")\n    logger.info("=" * 60)\n    \n    try:\n        # Step 1: Check requirements\n        check_requirements()\n        \n        # Step 2: Setup YOLO-NAS\n        repo_dir = setup_yolo_nas()\n        \n        # Step 3: Prepare dataset config\n        config = prepare_dataset_config()\n        \n        # Step 4: Create training script\n        script_path = create_training_script(config)\n        \n        # Step 5: Run training\n        logger.info("About to start training. This will take a very long time!")\n        logger.info("Training will run for up to 72 hours.")\n        logger.info("Monitor progress in output/yolo_nas_training.log")\n        \n        trained_model_path = run_training(script_path)\n        \n        if trained_model_path:\n            logger.info(f"Training pipeline completed! Model: {trained_model_path}")\n            return trained_model_path\n        else:\n            logger.error("Training pipeline failed!")\n            return None\n            \n    except Exception as e:\n        logger.error(f"Training pipeline failed: {e}")\n        import traceback\n        traceback.print_exc()\n        return None\n\nif __name__ == "__main__":\n    trained_model = main()\n    if trained_model:\n        print(f"SUCCESS: Trained model at {trained_model}")\n    else:\n        print("FAILED: Training did not complete successfully")\n        sys.exit(1)'
+_______ QATConfigurationTests.test_qat_configuration_in_training_script ________
+tests/test_qat_functionality.py:85: in test_qat_configuration_in_training_script
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:293: in create_training_script
+    original_data_dir = "{config['dataset']['data_dir']}"
+E   KeyError: 'data_dir'
+____________ QATConfigurationTests.test_qat_start_epoch_validation _____________
+tests/test_qat_functionality.py:63: in test_qat_start_epoch_validation
+    self.assertGreater(trainer.config['training']['epochs'],
+E   AssertionError: 100 not greater than 100
+________________ QATCallbackTests.test_qat_callback_placeholder ________________
+tests/test_qat_functionality.py:115: in test_qat_callback_placeholder
+    script_path = create_training_script(config)
+converted_models/train_yolo_nas.py:293: in create_training_script
+    original_data_dir = "{config['dataset']['data_dir']}"
+E   KeyError: 'data_dir'
+________________ QATQuantizationTests.test_int8_export_with_qat ________________
+tests/test_qat_functionality.py:222: in test_int8_export_with_qat
+    with patch.object(converter, 'convert_to_tflite') as mock_convert:
+/usr/lib/python3.10/unittest/mock.py:1447: in __enter__
+    original, local = self.get_original()
+/usr/lib/python3.10/unittest/mock.py:1420: in get_original
+    raise AttributeError(
+E   AttributeError: <convert_model.EnhancedModelConverter object at 0x7fc81fbb19c0> does not have the attribute 'convert_to_tflite'
+----------------------------- Captured stderr call -----------------------------
+[2025-06-15 00:35:28] INFO - convert_model.py - Model sizes to convert: [(640, 640)]
+[2025-06-15 00:35:28] INFO - convert_model.py - Using calibration data directory: /tmp/tmpdemtpvoi
+[2025-06-15 00:35:28] INFO - convert_model.py - Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:257 Model sizes to convert: [(640, 640)]
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmpdemtpvoi
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+_________________ QATIntegrationTests.test_qat_export_pipeline _________________
+tests/test_qat_functionality.py:331: in test_qat_export_pipeline
+    output_dir=str(tmpdir / 'output'),
+E   TypeError: unsupported operand type(s) for /: 'str' and 'str'
+=============================== warnings summary ===============================
+tests/test_api_usage.py::SuperGradientsAPITests::test_dataloader_factory_api
+  /home/seth/.local/lib/python3.10/site-packages/super_gradients/common/environment/cfg_utils.py:6: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+    import pkg_resources
+
+tests/test_api_usage.py::SuperGradientsAPITests::test_dataloader_factory_api
+  /home/seth/.local/lib/python3.10/site-packages/pkg_resources/__init__.py:3146: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('google')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    declare_namespace(pkg)
+
+tests/test_api_usage.py::SuperGradientsAPITests::test_dataloader_factory_api
+  /home/seth/.local/lib/python3.10/site-packages/pkg_resources/__init__.py:3146: DeprecationWarning: Deprecated call to `pkg_resources.declare_namespace('sphinxcontrib')`.
+  Implementing implicit namespace packages (as specified in PEP 420) is preferred to `pkg_resources.declare_namespace`. See https://setuptools.pypa.io/en/latest/references/keywords.html#keyword-namespace-packages
+    declare_namespace(pkg)
+
+tests/test_api_usage.py::SuperGradientsAPITests::test_dataloader_factory_api
+  /usr/lib/python3/dist-packages/urllib3/util/ssl_.py:256: DeprecationWarning: ssl.PROTOCOL_TLS is deprecated
+    context = SSLContext(ssl_version or PROTOCOL_TLS)
+
+tests/test_api_usage.py::SuperGradientsAPITests::test_loss_function_api
+tests/test_api_usage.py::SuperGradientsAPITests::test_training_params_dict_structure
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_loss_function_configuration
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_trainer_train_uses_dict_not_training_params
+tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_validation_metrics_configuration
+  /home/seth/.local/lib/python3.10/site-packages/super_gradients/training/losses/ppyolo_loss.py:669: DeprecationWarning: A reg_max argument is not needed for PPYoloE loss anymore. It is deprecated since SG 3.6.0 and will be removed in the SG 3.8.0.You can safely omit this argument as it is not used anymore and we infer it automatically from model's outputs
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_api_usage.py::SuperGradientsAPITests::test_dataloader_factory_api
+FAILED tests/test_api_usage.py::SuperGradientsAPITests::test_metrics_api - At...
+FAILED tests/test_api_usage.py::SuperGradientsAPITests::test_model_get_api - ...
+FAILED tests/test_api_usage.py::SuperGradientsAPITests::test_training_params_dict_structure
+FAILED tests/test_api_usage.py::IntegrationTests::test_training_pipeline_integration
+FAILED tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_dataloader_api_parameters
+FAILED tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_model_creation_api
+FAILED tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_trainer_api_parameters
+FAILED tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_training_params_structure
+FAILED tests/test_yolo_nas_training.py::YoloNasTrainingAPITests::test_transform_usage
+FAILED tests/test_yolo_nas_training.py::TrainingPipelineIntegrationTests::test_training_pipeline_with_mocked_components
+FAILED tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_dataloader_correct_api_parameters
+FAILED tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_model_creation_with_correct_api
+FAILED tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_trainer_train_uses_dict_not_training_params
+FAILED tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_transform_usage_for_variable_size_images
+FAILED tests/test_yolo_nas_training_updated.py::YoloNasCorrectAPITests::test_validation_metrics_configuration
+FAILED tests/test_yolo_nas_training_updated.py::FrigateIntegrationTests::test_fire_class_detection
+FAILED tests/test_yolo_nas_training_updated.py::APIRegressionTests::test_no_training_params_object
+FAILED tests/test_qat_functionality.py::QATConfigurationTests::test_qat_configuration_in_training_script
+FAILED tests/test_qat_functionality.py::QATConfigurationTests::test_qat_start_epoch_validation
+FAILED tests/test_qat_functionality.py::QATCallbackTests::test_qat_callback_placeholder
+FAILED tests/test_qat_functionality.py::QATQuantizationTests::test_int8_export_with_qat
+FAILED tests/test_qat_functionality.py::QATIntegrationTests::test_qat_export_pipeline
+================== 23 failed, 32 passed, 9 warnings in 4.24s ===================

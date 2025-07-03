@@ -1,0 +1,35 @@
+Thank you for the excellent analysis! Let me provide additional context about the project and then search for the OpenCV RTSP timeout reliability information you requested.
+
+## Additional Project Context:
+
+The Wildfire Watch system is an automated fire detection and suppression platform designed for edge deployment. Here's the full context:
+
+**System Architecture:**
+- Multi-service Docker-based architecture communicating via MQTT
+- Camera Detector discovers IP cameras and configures them
+- Frigate NVR performs AI-based fire/smoke detection  
+- Fire Consensus validates detections from multiple cameras
+- GPIO Trigger controls water pump hardware
+- All services use TLS-encrypted MQTT for production
+
+**Key Requirements:**
+- Must run on resource-constrained edge devices (Raspberry Pi 5)
+- Handles network instability and camera IP changes gracefully
+- Prevents false positives through multi-camera consensus
+- Safety-critical system requiring robust error handling
+
+**Camera Detector Specific Context (from README):**
+- Uses Smart Discovery Mode to reduce resource usage (90%+ reduction after stabilization)
+- Tracks cameras by MAC address to handle DHCP IP changes
+- Supports ONVIF, mDNS, and RTSP port scanning discovery methods
+- Automatically generates and updates Frigate NVR configuration
+- Validates credentials and RTSP streams before configuration
+
+Now, let me search for the OpenCV RTSP timeout reliability information you requested:
+
+Please search for: "opencv python rtsp CAP_PROP_OPEN_TIMEOUT_MSEC reliability"
+
+I'm particularly interested in:
+1. Whether the OpenCV timeout properties work reliably across different backends
+2. Community-vetted patterns for handling hanging RTSP connections
+3. Best practices for robust RTSP stream validation in production environments

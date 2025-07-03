@@ -1,0 +1,40 @@
+# YOLO-NAS Wildfire Detection Model Configuration
+# Add this to your Frigate config.yml
+
+model:
+  path: /models/yolo_nas_s_wildfire.onnx
+  input_tensor: nchw
+  input_pixel_format: bgr
+  width: 640
+  height: 640
+
+detectors:
+  wildfire:
+    type: onnx
+    device: auto
+
+cameras:
+  default:
+    detect:
+      width: 640
+      height: 640
+    objects:
+      filters:
+        fire:
+          min_area: 1000
+          threshold: 0.7
+        smoke:
+          min_area: 1500
+          threshold: 0.6
+        person:
+          min_area: 2000
+          threshold: 0.5
+        vehicle:
+          min_area: 5000
+          threshold: 0.5
+
+# Classes detected by this model:
+# 0: fire
+# 1: smoke  
+# 2: person
+# 3: vehicle

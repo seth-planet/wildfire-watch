@@ -1,0 +1,47 @@
+#===============================================================================
+#  Wildfire Watch – Environment Variables
+#  Copy this to `.env` and customize as needed.
+#===============================================================================
+GEMINI_API_KEY=AIzaSyAHXGqZgvwTJ7mRZZ7SiOfcLdRlDoLLpBg
+
+
+# PLATFORM tells Docker which architecture to target:
+# - linux/amd64   → local dev on AMD/NVIDIA machine
+# - linux/arm64   → Raspberry Pi / Balena
+PLATFORM=linux/amd64
+
+# Your RTSP stream (0 for default webcam on local dev)
+RTSP_STREAM_URL=0
+
+# MQTT broker hostname
+MQTT_BROKER=mqtt_broker
+
+# Frigate detector selection: auto / hailo / gpu / cpu
+# 'auto' will pick Hailo if /dev/hailo0 exists, else GPU if available, else CPU.
+FRIGATE_DETECTOR=auto
+
+# Custom YOLO 11 model path inside container
+MODEL_PATH=/app/model/yolov11.hef
+
+# Fire consensus params
+CAMERA_WINDOW=10
+CAMERA_THRESHOLD=3
+
+# Safety limits (adjust MAX_ENGINE_RUNTIME for your tank!)
+MAX_ENGINE_RUNTIME=1800     # 30 minutes default - MUST be less than tank capacity/flow rate!
+
+# Optional safety sensors (leave blank if not installed)
+RESERVOIR_FLOAT_PIN=16      # GPIO pin for tank full sensor
+LINE_PRESSURE_PIN=20        # GPIO pin for line pressure switch
+
+# Telemetry publish interval (seconds)
+TELEMETRY_INTERVAL=60
+
+# Camera detection resolution (640x640 recommended, 320x320 for limited hardware)
+CAMERA_DETECT_WIDTH=640
+CAMERA_DETECT_HEIGHT=640
+
+# TLS/SSL Configuration
+MQTT_TLS=false
+MQTT_TLS_PORT=8883
+

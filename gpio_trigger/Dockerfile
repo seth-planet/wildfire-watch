@@ -21,6 +21,11 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /app
 
+# Copy utils module
+COPY utils /utils
+# Add root to Python path so utils can be imported
+ENV PYTHONPATH=/
+
 # Copy all requirements files
 COPY requirements*.txt ./
 
@@ -40,4 +45,4 @@ COPY trigger.py .
 ENTRYPOINT ["entrypoint.sh"]
 
 # Run the GPIO trigger loop
-CMD ["python", "trigger.py"]
+CMD ["python3.12", "trigger.py"]

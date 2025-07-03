@@ -1,0 +1,32 @@
+model:
+  path: /models/yolo8l_fire_640x640_hailo8.hef
+  input_tensor: nhwc
+  input_pixel_format: rgb
+  width: 640
+  height: 640
+  labelmap_path: /models/yolo8l_fire_640x640_labels.txt
+  model_type: yolov8
+detectors:
+  hailo_0:
+    type: hailo
+    device: hailo-8
+    num_threads: 2
+  coral_1:
+    type: edgetpu
+    device: pcie
+  tensorrt_2:
+    type: tensorrt
+    device: 0
+  cpu:
+    type: cpu
+    num_threads: 4
+objects:
+  track: []
+  filters: {}
+motion:
+  threshold: 20
+  contour_area: 100
+  delta_alpha: 0.2
+  frame_alpha: 0.2
+  frame_height: 180
+  mask: ''

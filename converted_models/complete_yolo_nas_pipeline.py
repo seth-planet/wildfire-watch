@@ -115,7 +115,7 @@ def run_training_phase() -> Optional[str]:
   pretrained_weights: null
 
 dataset:
-  data_dir: /home/seth/fiftyone/train_yolo
+  data_dir: /media/seth/SketchScratch/fiftyone/train_yolo
   train_split: train
   val_split: validation
   class_names: []  # Will be auto-detected

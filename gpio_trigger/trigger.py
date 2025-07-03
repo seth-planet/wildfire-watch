@@ -1307,9 +1307,27 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             
             if time_since_trigger >= self.cfg['FIRE_OFF_DELAY']:
                 logger.info(f"No fire trigger for {time_since_trigger:.1f}s, initiating shutdown")
-                # Cancel RPM reduction timer since we're shutting down due to fire off
-                self._cancel_timer('rpm_reduction')
-                self._shutdown_engine()
+                
+                # NEW LOGIC: Check if we need RPM reduction first
+                if self._state == PumpState.RUNNING and not self._has_timer('delayed_shutdown_after_rpm'):
+                    # Start RPM reduction sequence before shutdown
+                    logger.info("Starting RPM reduction before shutdown")
+                    self._cancel_timer('rpm_reduction')  # Cancel the scheduled one
+                    self._reduce_rpm()
+                    
+                    # Schedule actual shutdown after RPM reduction period
+                    self._schedule_timer(
+                        'delayed_shutdown_after_rpm', 
+                        self._shutdown_engine, 
+                        self.cfg['RPM_REDUCTION_LEAD']
+                    )
+                elif self._state == PumpState.REDUCING_RPM:
+                    # Already reducing RPM, shutdown will happen via timer
+                    logger.debug("RPM reduction in progress, shutdown scheduled")
+                else:
+                    # Direct shutdown for other states or if already scheduled
+                    if not self._has_timer('delayed_shutdown_after_rpm'):
+                        self._shutdown_engine()
             else:
                 # Re-schedule check
                 remaining = self.cfg['FIRE_OFF_DELAY'] - time_since_trigger
@@ -1328,12 +1346,20 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             
             self._shutting_down = True
             previous_state = self._state
+            
+            # Ensure RPM is reduced if coming directly from RUNNING state
+            if previous_state == PumpState.RUNNING:
+                logger.warning("Direct shutdown from RUNNING - applying brief RPM reduction")
+                self._set_pin('RPM_REDUCE', True)
+                time.sleep(2.0)  # Brief RPM reduction for emergency/direct shutdown cases
+            
             self._state = PumpState.STOPPING
             self._publish_event('shutdown_initiated', {'reason': previous_state.name})
             
             # Cancel max runtime timer if still active
             self._cancel_timer('max_runtime')
             self._cancel_timer('pressure_check')
+            self._cancel_timer('delayed_shutdown_after_rpm')  # Cancel if exists
             
             # Calculate total runtime
             if self._engine_start_time:

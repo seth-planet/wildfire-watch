@@ -14,6 +14,7 @@ import yaml
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import sys
+import pytest
 
 # Add converted_models to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
@@ -76,13 +77,13 @@ class FrigateConfigurationTests(unittest.TestCase):
         }
         
         # Set Fire class
-        model_config['labelmap'][26] = 'Fire'
+        model_config.labelmap[26] = 'Fire'
         
         # Verify configuration
-        self.assertEqual(model_config['input_tensor'], 'nhwc')
-        self.assertEqual(model_config['width'], 320)
-        self.assertEqual(model_config['height'], 320)
-        self.assertEqual(len(model_config['labelmap']), 32)
+        self.assertEqual(model_config.input_tensor, 'nhwc')
+        self.assertEqual(model_config.width, 320)
+        self.assertEqual(model_config.height, 320)
+        self.assertEqual(len(model_config.labelmap), 32)
     
     def test_frigate_detector_config(self):
         """Test Frigate detector configuration for our models"""
@@ -205,8 +206,8 @@ class FrigateConfigurationTests(unittest.TestCase):
         with open(yaml_path, 'r') as f:
             loaded_config = yaml.safe_load(f)
         
-        self.assertEqual(loaded_config['model']['width'], 320)
-        self.assertIn('Fire', loaded_config['objects']['track'])
+        self.assertEqual(loaded_config.model['width'], 320)
+        self.assertIn('Fire', loaded_config.objects['track'])
 
 
 class FrigateModelDeploymentTests(unittest.TestCase):
@@ -328,9 +329,9 @@ class FrigateFireDetectionTests(unittest.TestCase):
         }
         
         # Verify zones are configured
-        self.assertIn('high_risk_zone', zone_config['zones'])
+        self.assertIn('high_risk_zone', zone_config.zones)
         self.assertEqual(
-            zone_config['zones']['high_risk_zone']['filters']['Fire']['min_score'],
+            zone_config.zones['high_risk_zone']['filters']['Fire']['min_score'],
             0.5
         )
     
@@ -397,8 +398,8 @@ class FrigateFireDetectionTests(unittest.TestCase):
         }
         
         # Verify fire events have longer retention
-        fire_retention = record_config['record']['events']['retain']['objects']['Fire']
-        default_retention = record_config['record']['events']['retain']['default']
+        fire_retention = record_config.record['events']['retain']['objects']['Fire']
+        default_retention = record_config.record['events']['retain']['default']
         
         self.assertGreater(fire_retention, default_retention)
         self.assertEqual(fire_retention, 30)
@@ -433,12 +434,12 @@ class FrigatePerformanceTests(unittest.TestCase):
         }
         
         # Verify detection FPS is reasonable
-        self.assertLessEqual(camera_config['detect']['fps'], 10)
-        self.assertGreaterEqual(camera_config['detect']['fps'], 1)
+        self.assertLessEqual(camera_config.detect['fps'], 10)
+        self.assertGreaterEqual(camera_config.detect['fps'], 1)
         
         # Verify record FPS is higher
-        self.assertGreater(camera_config['record']['fps'], 
-                          camera_config['detect']['fps'])
+        self.assertGreater(camera_config.record['fps'], 
+                          camera_config.detect['fps'])
     
     def test_hardware_acceleration_config(self):
         """Test hardware acceleration configuration"""
@@ -467,12 +468,12 @@ class FrigatePerformanceTests(unittest.TestCase):
         # Verify each acceleration method
         for method, config in hwaccel_configs.items():
             with self.subTest(method=method):
-                self.assertIn('-hwaccel', config['hwaccel_args'])
+                self.assertIn('-hwaccel', config.hwaccel_args)
                 # For nvidia, check for 'cuda' instead of 'nvidia'
                 if method == 'nvidia':
-                    self.assertIn('cuda', config['hwaccel_args'])
+                    self.assertIn('cuda', config.hwaccel_args)
                 else:
-                    self.assertIn(method, config['hwaccel_args'])
+                    self.assertIn(method, config.hwaccel_args)
 
 
 class FrigateIntegrationValidationTests(unittest.TestCase):
@@ -491,10 +492,10 @@ class FrigateIntegrationValidationTests(unittest.TestCase):
         self.assertIn('cameras', config)
         
         # Validate Fire class is tracked
-        self.assertIn('Fire', config['objects']['track'])
+        self.assertIn('Fire', config.objects['track'])
         
         # Validate at least one camera configured
-        self.assertGreater(len(config['cameras']), 0)
+        self.assertGreater(len(config.cameras), 0)
     
     def _create_complete_frigate_config(self):
         """Create a complete Frigate configuration"""

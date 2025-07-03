@@ -1,0 +1,196 @@
+# Frigate configuration for Hailo-8L M.2 accelerator
+# This configuration is optimized for the Hailo-8L with batch processing
+
+mqtt:
+  enabled: true
+  host: mqtt_broker
+  port: 8883
+  topic_prefix: frigate
+  client_id: frigate_hailo
+  stats_interval: 60
+  tls_ca_certs: /mnt/data/certs/ca.crt
+  tls_client_cert: /mnt/data/certs/frigate.crt
+  tls_client_key: /mnt/data/certs/frigate.key
+  tls_insecure: false
+
+# Hailo detector configuration
+detectors:
+  hailo8l:
+    type: hailo8l
+    device: /dev/hailo0
+    model:
+      path: /models/wildfire/yolo8l_fire_640x640_hailo8l_qat.hef
+      input_tensor: nhwc
+      input_pixel_format: rgb
+      width: 640
+      height: 640
+
+# Model configuration for wildfire detection
+model:
+  width: 640
+  height: 640
+  labels:
+    - fire
+    - smoke
+    - person
+    - car
+    - wildlife
+
+# Object tracking configuration
+objects:
+  track:
+    - fire
+    - smoke
+    - person
+    - car
+    - wildlife
+  filters:
+    fire:
+      min_score: 0.65
+      threshold: 0.7
+      min_area: 100
+      max_area: 1000000
+    smoke:
+      min_score: 0.60
+      threshold: 0.65
+      min_area: 200
+      max_area: 1000000
+    person:
+      min_score: 0.5
+      threshold: 0.6
+    car:
+      min_score: 0.5
+      threshold: 0.6
+    wildlife:
+      min_score: 0.4
+      threshold: 0.5
+
+# Database for event storage
+database:
+  path: /media/frigate/frigate.db
+
+# Recording configuration - optimized for fire detection
+record:
+  enabled: true
+  retain:
+    days: 180
+    mode: active_objects
+  events:
+    pre_capture: 15  # Capture 15s before detection
+    post_capture: 30  # Capture 30s after detection
+    retain:
+      default: 30
+      mode: active_objects
+      objects:
+        fire: 365     # Keep fire events for 1 year
+        smoke: 365    # Keep smoke events for 1 year
+        person: 180   # Keep person events for 6 months
+        car: 60       # Keep car events for 2 months
+        wildlife: 120 # Keep wildlife events for 4 months
+
+# Snapshot configuration
+snapshots:
+  enabled: true
+  timestamp: true
+  bounding_box: true
+  crop: true
+  quality: 95  # High quality for fire detection
+  retain:
+    default: 7
+    objects:
+      fire: 365
+      smoke: 365
+      person: 30
+      car: 14
+      wildlife: 30
+
+# Hardware acceleration for video decoding
+ffmpeg:
+  hwaccel_args: 
+    - -hwaccel
+    - vaapi
+    - -hwaccel_device
+    - /dev/dri/renderD128
+    - -hwaccel_output_format
+    - vaapi
+  input_args:
+    - -avoid_negative_ts
+    - make_zero
+    - -fflags
+    - +genpts+discardcorrupt
+    - -rtsp_transport
+    - tcp
+    - -timeout
+    - "5000000"
+    - -use_wallclock_as_timestamps
+    - "1"
+  output_args:
+    detect:
+      - -f
+      - rawvideo
+      - -pix_fmt
+      - yuv420p
+    record:
+      - -f
+      - segment
+      - -segment_time
+      - "10"
+      - -segment_format
+      - mp4
+      - -reset_timestamps
+      - "1"
+      - -strftime
+      - "1"
+      - -c:v
+      - h264_vaapi
+      - -qp
+      - "23"
+      - -movflags
+      - +faststart
+
+# Performance tuning for Hailo
+detect:
+  enabled: true
+  max_disappeared: 25
+  fps: 10  # Hailo can handle 10 FPS easily
+  stationary:
+    interval: 50
+    threshold: 10
+
+# Motion detection to trigger AI
+motion:
+  threshold: 30
+  contour_area: 100
+  delta_alpha: 0.2
+  frame_alpha: 0.2
+  frame_height: 180
+  mask_rate: 5
+  improve_contrast: true
+
+# Birdseye view disabled for performance
+birdseye:
+  enabled: false
+
+# UI settings
+ui:
+  live_mode: mse
+  timezone: UTC
+  time_format: 24hour
+  date_style: short
+  time_style: medium
+  strftime_fmt: "%Y-%m-%d %H:%M"
+
+# Logging
+logger:
+  default: info
+  logs:
+    frigate.mqtt: info
+    frigate.detector.hailo8l: debug
+    frigate.record: info
+
+# Go2RTC for stream management
+go2rtc:
+  streams: {}  # Will be populated by camera_detector
+
+# Camera configuration (populated dynamically)
+cameras: {}

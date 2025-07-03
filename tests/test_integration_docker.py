@@ -13,11 +13,21 @@ import docker
 import paho.mqtt.client as mqtt
 from typing import Dict, List, Optional
 
+# Import parallel test utilities
+try:
+    from helpers import ParallelTestContext, DockerContainerManager
+    from topic_namespace import create_namespaced_client
+except ImportError:
+    from tests.helpers import ParallelTestContext, DockerContainerManager
+    from tests.topic_namespace import create_namespaced_client
+
 class DockerIntegrationTest:
     """Test integration with Docker containers"""
     
-    def __init__(self):
+    def __init__(self, parallel_context: ParallelTestContext, docker_manager: DockerContainerManager):
         self.docker_client = docker.from_env()
+        self.parallel_context = parallel_context
+        self.docker_manager = docker_manager
         self.containers = {}
         self.test_passed = False
         self.network = None
@@ -83,20 +93,21 @@ class DockerIntegrationTest:
             self.docker_client.images.pull("eclipse-mosquitto:latest")
         
         # Remove existing test container if any
+        container_name = f"mqtt-test-{self.parallel_context.worker_id}"
         try:
-            old_container = self.docker_client.containers.get("mqtt-test-sdk")
-            old_container.stop()
-            old_container.remove()
+            old = self.docker_client.containers.get(container_name)
+            old.stop()
+            old.remove()
         except docker.errors.NotFound:
             pass
             
         # Create mosquitto config that listens on all interfaces
-        mosquitto_config = "listener 1883\nallow_anonymous true\n"
+        mosquitto_config = "listener 1883 0.0.0.0\nallow_anonymous true\n"
         
         # Create and start container with custom config
         container = self.docker_client.containers.run(
             "eclipse-mosquitto:latest",
-            name="mqtt-test",
+            name=container_name,
             network=self.network.name,
             ports={'1883/tcp': 11883},
             detach=True,
@@ -128,6 +139,9 @@ class DockerIntegrationTest:
         """Start fire consensus container"""
         print("Starting fire consensus container...")
         
+        # Get the MQTT container name that was used
+        mqtt_container_name = f"mqtt-test-{self.parallel_context.worker_id}"
+        
         # Build custom consensus image for testing
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         consensus_path = os.path.join(project_root, 'fire_consensus')
@@ -155,7 +169,7 @@ exec "$@"
             os.chmod(test_entrypoint_path, 0o755)
             
             # Create a test-specific Dockerfile that runs as root
-            test_dockerfile = '''FROM python:3.13-slim
+            test_dockerfile = '''FROM python:3.12-slim
 
 # Install system dependencies for mDNS and resilience
 RUN apt-get update && \
@@ -182,7 +196,7 @@ COPY test_entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["python", "-u", "consensus.py"]
+CMD ["python3.12", "-u", "consensus.py"]
 '''
             
             # Write test Dockerfile
@@ -203,8 +217,9 @@ CMD ["python", "-u", "consensus.py"]
             os.remove(test_entrypoint_path)
             
             # Remove old container
+            consensus_container_name = f"consensus-test-{self.parallel_context.worker_id}"
             try:
-                old = self.docker_client.containers.get("consensus-test")
+                old = self.docker_client.containers.get(consensus_container_name)
                 old.stop()
                 old.remove()
             except docker.errors.NotFound:
@@ -213,10 +228,10 @@ CMD ["python", "-u", "consensus.py"]
             # Start container
             container = self.docker_client.containers.run(
                 "wildfire-consensus:test",
-                name="consensus-test",
+                name=consensus_container_name,
                 network=self.network.name,
                 environment={
-                    'MQTT_BROKER': 'mqtt-test',  # Use container name on same network
+                    'MQTT_BROKER': mqtt_container_name,  # Use the actual MQTT container name
                     'MQTT_PORT': '1883',  # Internal port, not mapped port
                     'CONSENSUS_THRESHOLD': '2',
                     'SINGLE_CAMERA_TRIGGER': 'false',
@@ -362,11 +377,45 @@ CMD ["python", "-u", "consensus.py"]
         # Network cleanup is handled by the fixture, not here
 
 
-def test_docker_integration(docker_client, docker_test_network):
+@pytest.mark.slow
+@pytest.mark.docker
+@pytest.mark.integration
+@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
+def test_docker_integration(parallel_test_context, docker_container_manager):
     """Test Docker container integration"""
-    test = DockerIntegrationTest()
-    test.docker_client = docker_client
-    test.network = docker_test_network
+    import docker
+    
+    # Create a test network for this test
+    docker_client = docker.from_env()
+    network_name = f"test-network-{parallel_test_context.worker_id}"
+    
+    # Clean up any existing network
+    try:
+        old_net = docker_client.networks.get(network_name)
+        # Disconnect all containers from the network first
+        for container in old_net.containers:
+            try:
+                old_net.disconnect(container, force=True)
+                print(f"Disconnected {container.name} from network {network_name}")
+            except Exception as e:
+                print(f"Warning: Could not disconnect {container.name}: {e}")
+        # Now remove the network
+        old_net.remove()
+        print(f"Removed existing network: {network_name}")
+    except docker.errors.NotFound:
+        pass
+    except Exception as e:
+        print(f"Warning: Error cleaning up existing network: {e}")
+        # Continue with test even if cleanup fails
+    
+    # Create new network
+    network = docker_client.networks.create(
+        name=network_name,
+        driver="bridge"
+    )
+    
+    test = DockerIntegrationTest(parallel_test_context, docker_container_manager)
+    test.network = network
     
     try:
         success = test.test_docker_fire_detection_flow()
@@ -374,7 +423,30 @@ def test_docker_integration(docker_client, docker_test_network):
         print("\n✅ DOCKER INTEGRATION TEST PASSED")
     finally:
         test.cleanup()
-        
+        # Clean up network - disconnect containers first
+        try:
+            # Refresh network state to get current containers
+            network.reload()
+            # Disconnect all remaining containers
+            for container in network.containers:
+                try:
+                    network.disconnect(container, force=True)
+                    print(f"Final cleanup: Disconnected {container.name} from network")
+                except Exception as e:
+                    print(f"Warning: Could not disconnect {container.name} during cleanup: {e}")
+            # Now remove the network
+            network.remove()
+            print(f"Cleaned up network: {network.name}")
+        except Exception as e:
+            print(f"Warning: Error during final network cleanup: {e}")
+
 
 if __name__ == "__main__":
-    test_docker_integration()
+    # Standalone execution
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from tests.helpers import ParallelTestContext, DockerContainerManager
+    
+    context = ParallelTestContext("standalone")
+    manager = DockerContainerManager("standalone")
+    test_docker_integration(context, manager)

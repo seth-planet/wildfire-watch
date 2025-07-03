@@ -1,0 +1,35 @@
+Edge TPU Compiler version 16.0.384591198
+Input: yolo8l_fire_640x640_full_integer_quant.tflite
+Output: yolo8l_fire_640x640_full_integer_quant_edgetpu.tflite
+
+Operator                       Count      Status
+
+RESHAPE                        3          Operation is otherwise supported, but not mapped due to some unspecified limitation
+RESHAPE                        2          More than one subgraph is not supported
+ADD                            18         Mapped to Edge TPU
+ADD                            2          More than one subgraph is not supported
+SUB                            2          More than one subgraph is not supported
+MUL                            59         Mapped to Edge TPU
+MUL                            40         More than one subgraph is not supported
+SOFTMAX                        1          More than one subgraph is not supported
+CONCATENATION                  2          Operation is otherwise supported, but not mapped due to some unspecified limitation
+CONCATENATION                  7          Mapped to Edge TPU
+CONCATENATION                  10         More than one subgraph is not supported
+SPLIT                          3          More than one subgraph is not supported
+SPLIT                          5          Mapped to Edge TPU
+LOGISTIC                       1          Operation is otherwise supported, but not mapped due to some unspecified limitation
+LOGISTIC                       59         Mapped to Edge TPU
+LOGISTIC                       38         More than one subgraph is not supported
+CONV_2D                        59         Mapped to Edge TPU
+CONV_2D                        45         More than one subgraph is not supported
+QUANTIZE                       1          Operation is otherwise supported, but not mapped due to some unspecified limitation
+QUANTIZE                       2          Mapped to Edge TPU
+RESIZE_NEAREST_NEIGHBOR        1          Mapped to Edge TPU
+RESIZE_NEAREST_NEIGHBOR        1          Operation is otherwise supported, but not mapped due to some unspecified limitation
+STRIDED_SLICE                  2          Operation is otherwise supported, but not mapped due to some unspecified limitation
+STRIDED_SLICE                  2          More than one subgraph is not supported
+TRANSPOSE                      3          Operation is otherwise supported, but not mapped due to some unspecified limitation
+TRANSPOSE                      1          More than one subgraph is not supported
+PAD                            2          More than one subgraph is not supported
+PAD                            5          Mapped to Edge TPU
+MAX_POOL_2D                    3          Mapped to Edge TPU

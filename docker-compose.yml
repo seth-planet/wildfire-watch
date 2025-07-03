@@ -10,7 +10,7 @@ x-common-variables: &common-variables
 
 # Common healthcheck for MQTT connectivity
 x-healthcheck-mqtt: &healthcheck-mqtt
-  test: ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${MQTT_BROKER:-mqtt_broker}', ${MQTT_PORT:-8883})); s.close()"]
+  test: ["CMD", "python3.12", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('${MQTT_BROKER:-mqtt_broker}', ${MQTT_PORT:-8883})); s.close()"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -100,7 +100,7 @@ services:
       - NET_ADMIN
       - NET_RAW
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; r=requests.get('http://localhost:8080/health', timeout=5); exit(0 if r.status_code==200 else 1)"]
+      test: ["CMD", "python3.12", "-c", "import requests; r=requests.get('http://localhost:8080/health', timeout=5); exit(0 if r.status_code==200 else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -293,7 +293,7 @@ services:
     environment:
       TARGET_FORMATS: ${MODEL_FORMATS:-tflite,hailo,onnx}
       TARGET_DEVICE: ${TARGET_DEVICE:-auto}
-    command: ["python", "convert_model.py", "/input/yolov8n.pt", "--output-dir", "/models"]
+    command: ["python3.12", "convert_model.py", "/input/yolov8n.pt", "--output-dir", "/models"]
 
 volumes:
   mqtt_data:

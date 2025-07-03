@@ -1,0 +1,133 @@
+{
+  "model_name": "yolov8n_demo",
+  "model_info": {
+    "name": "yolov8n_demo",
+    "type": "unknown",
+    "version": null,
+    "input_size": [
+      640,
+      640
+    ],
+    "classes": null,
+    "num_classes": 0,
+    "architecture": null,
+    "license": null,
+    "has_nms": false,
+    "output_format": "xyxy",
+    "qat_compatible": false
+  },
+  "sizes": {
+    "640x640": {
+      "outputs": {
+        "onnx": "demo_output/640x640/yolov8n_demo_640x640.onnx",
+        "tflite_cpu": "demo_output/640x640/yolov8n_demo_cpu.tflite",
+        "tflite_dynamic": "demo_output/640x640/yolov8n_demo_dynamic.tflite",
+        "frigate_config": "demo_output/640x640/yolov8n_demo_frigate_config.yml"
+      },
+      "errors": [],
+      "validation": {
+        "onnx": {
+          "passed": true,
+          "degradation": 0.0,
+          "metrics": {
+            "input_shape": [
+              1,
+              3,
+              640,
+              640
+            ],
+            "output_shapes": [
+              [
+                1,
+                84,
+                8400
+              ]
+            ],
+            "model_size_mb": 12.24015998840332
+          },
+          "threshold": 1.0
+        },
+        "tflite": {
+          "passed": true,
+          "degradation": 1.5,
+          "metrics": {
+            "input_dtype": "<class 'numpy.float32'>",
+            "output_dtype": "<class 'numpy.float32'>",
+            "model_size_mb": 3.2383651733398438,
+            "quantized": false
+          },
+          "threshold": 3.0
+        }
+      },
+      "benchmarks": {},
+      "models": {
+        "onnx": "demo_output/640x640/yolov8n_demo_640x640.onnx",
+        "tflite": {
+          "cpu": "demo_output/640x640/yolov8n_demo_cpu.tflite",
+          "dynamic": "demo_output/640x640/yolov8n_demo_dynamic.tflite"
+        }
+      }
+    },
+    "416x416": {
+      "outputs": {
+        "onnx": "demo_output/416x416/yolov8n_demo_416x416.onnx",
+        "tflite_cpu": "demo_output/416x416/yolov8n_demo_cpu.tflite",
+        "tflite_dynamic": "demo_output/416x416/yolov8n_demo_dynamic.tflite",
+        "frigate_config": "demo_output/416x416/yolov8n_demo_frigate_config.yml"
+      },
+      "errors": [],
+      "validation": {
+        "onnx": {
+          "passed": true,
+          "degradation": 0.0,
+          "metrics": {
+            "input_shape": [
+              1,
+              3,
+              416,
+              416
+            ],
+            "output_shapes": [
+              [
+                1,
+                84,
+                3549
+              ]
+            ],
+            "model_size_mb": 12.147683143615723
+          },
+          "threshold": 1.0
+        },
+        "tflite": {
+          "passed": true,
+          "degradation": 1.5,
+          "metrics": {
+            "input_dtype": "<class 'numpy.float32'>",
+            "output_dtype": "<class 'numpy.float32'>",
+            "model_size_mb": 3.1828460693359375,
+            "quantized": false
+          },
+          "threshold": 3.0
+        }
+      },
+      "benchmarks": {},
+      "models": {
+        "onnx": "demo_output/416x416/yolov8n_demo_416x416.onnx",
+        "tflite": {
+          "cpu": "demo_output/416x416/yolov8n_demo_cpu.tflite",
+          "dynamic": "demo_output/416x416/yolov8n_demo_dynamic.tflite"
+        }
+      }
+    }
+  },
+  "conversion_time_seconds": 71.44312119483948,
+  "baseline_metrics": {
+    "mAP50": 0.6250350006603094,
+    "mAP50_95": 0.49483089330481833,
+    "precision": 0.706075180309619,
+    "recall": 0.4877289792481308,
+    "f1_score": 0.538354318453188,
+    "inference_time_ms": 12.130904197692871,
+    "model_size_mb": 6.246372222900391
+  }
+}

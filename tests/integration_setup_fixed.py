@@ -323,7 +323,7 @@ exec python -u consensus.py
                 detach=True,
                 remove=False,  # Don't auto-remove
                 healthcheck={
-                    "test": ["CMD", "python", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('mqtt-broker-test', 1883)); s.close()"],
+                    "test": ["CMD", "python3.12", "-c", "import socket; s=socket.socket(); s.settimeout(5); s.connect(('mqtt-broker-test', 1883)); s.close()"],
                     "interval": 5000000000,  # 5s in nanoseconds
                     "timeout": 3000000000,   # 3s in nanoseconds
                     "retries": 5,

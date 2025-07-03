@@ -1,0 +1,323 @@
+============================= test session starts ==============================
+platform linux -- Python 3.8.10, pytest-8.3.5, pluggy-1.5.0 -- /usr/bin/python3.8
+cachedir: .pytest_cache
+rootdir: /home/seth/wildfire-watch
+plugins: timeout-2.4.0
+timeout: 1800.0s
+timeout method: signal
+timeout func_only: False
+collecting ... collected 15 items
+
+tests/test_model_converter.py::ValidationIntegrationTests::test_benchmark_integration FAILED [  6%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_failed_validation_reporting PASSED [ 13%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_format_specific_thresholds PASSED [ 20%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_multi_format_validation PASSED [ 26%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_qat_affects_thresholds PASSED [ 33%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_skipped_validation_handling PASSED [ 40%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_disabled_flag PASSED [ 46%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_error_handling FAILED [ 53%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary FAILED [ 60%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size FAILED [ 66%]
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically FAILED [ 73%]
+tests/test_model_converter.py::EndToEndValidationTests::test_cli_integration FAILED [ 80%]
+tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation FAILED [ 86%]
+tests/test_model_converter.py::ValidationReportingTests::test_multi_size_validation_reporting PASSED [ 93%]
+tests/test_model_converter.py::ValidationReportingTests::test_validation_summary_formatting PASSED [100%]
+
+=================================== FAILURES ===================================
+____________ ValidationIntegrationTests.test_benchmark_integration _____________
+
+self = <test_model_converter.ValidationIntegrationTests testMethod=test_benchmark_integration>
+
+    def test_benchmark_integration(self):
+        """Test benchmarking is integrated with validation"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            debug=True
+        )
+    
+        # Mock ONNX runtime for benchmarking
+>       with patch('onnxruntime.InferenceSession') as mock_session:
+
+tests/test_model_converter.py:263: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/usr/lib/python3.8/unittest/mock.py:1377: in __enter__
+    self.target = self.getter()
+/usr/lib/python3.8/unittest/mock.py:1552: in <lambda>
+    getter = lambda: _importer(target)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+target = 'onnxruntime'
+
+    def _importer(target):
+        components = target.split('.')
+        import_path = components.pop(0)
+>       thing = __import__(import_path)
+E       ModuleNotFoundError: No module named 'onnxruntime'
+
+/usr/lib/python3.8/unittest/mock.py:1224: ModuleNotFoundError
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmpzan6lk7b
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+__________ ValidationIntegrationTests.test_validation_error_handling ___________
+
+self = <test_model_converter.ValidationIntegrationTests testMethod=test_validation_error_handling>
+
+    def test_validation_error_handling(self):
+        """Test validation handles errors gracefully"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            debug=True
+        )
+    
+        # Test with non-existent file
+        result = converter._validate_single_model(
+            Path('original.pt'),
+            Path('nonexistent.onnx'),
+            'onnx'
+        )
+    
+>       self.assertFalse(result['passed'])
+E       AssertionError: True is not false
+
+tests/test_model_converter.py:250: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:257 Model sizes to convert: [(640, 640)]
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmpn1n12p8k
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+WARNING  convert_model:convert_model.py:3001 ONNX dependencies not available for validation: No module named 'onnx'
+_________ ValidationIntegrationTests.test_validation_output_in_summary _________
+
+self = <test_model_converter.ValidationIntegrationTests testMethod=test_validation_output_in_summary>
+
+    def test_validation_output_in_summary(self):
+        """Test validation results appear in conversion summary"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+    
+        # Mock successful conversion and validation
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            with patch.object(converter, '_validate_onnx_model') as mock_validate:
+                # Set up mocks
+                onnx_path = self.output_dir / '320x320' / 'dummy.onnx'
+                onnx_path.parent.mkdir(parents=True)
+                onnx_path.touch()
+                mock_onnx.return_value = onnx_path
+    
+                mock_validate.return_value = {
+                    'passed': True,
+                    'degradation': 0.8,
+                    'metrics': {'model_size_mb': 25.3}
+                }
+    
+                # Run conversion
+                results = converter.convert_all(formats=['onnx'])
+    
+                # Save summary
+                summary_path = converter.output_dir / 'conversion_summary.json'
+                with open(summary_path, 'w') as f:
+                    json.dump(results, f, indent=2, default=str)
+    
+                # Verify summary contains validation
+                with open(summary_path) as f:
+                    summary = json.load(f)
+    
+>               validation = summary['sizes']['320x320']['validation']
+E               KeyError: '320x320'
+
+tests/test_model_converter.py:321: KeyError
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:257 Model sizes to convert: [(320, 320)]
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmpbrebdjiq
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+ERROR    convert_model:convert_model.py:2232 Model file not found: dummy.pt
+_____________ ValidationIntegrationTests.test_validation_per_size ______________
+
+self = <test_model_converter.ValidationIntegrationTests testMethod=test_validation_per_size>
+
+    def test_validation_per_size(self):
+        """Test that each size is validated separately"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=[416, 320],  # Multiple sizes
+            debug=True
+        )
+    
+        # Mock conversions
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            with patch.object(converter, '_validate_converted_models') as mock_validate:
+                # Set up different results for each size
+                def create_onnx(size=None):
+                    size = size or converter.model_size
+                    size_str = f"{size[0]}x{size[1]}"
+                    path = converter.output_dir / size_str / f'dummy_{size_str}.onnx'
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+                    return path
+    
+                mock_onnx.side_effect = create_onnx
+    
+                # Different validation results per size
+                validation_results = [
+                    {
+                        'validation': {'onnx': {'passed': True, 'degradation': 1.0}},
+                        'benchmarks': {'onnx': {'fps': 40.0}}
+                    },
+                    {
+                        'validation': {'onnx': {'passed': True, 'degradation': 2.0}},
+                        'benchmarks': {'onnx': {'fps': 60.0}}
+                    }
+                ]
+                mock_validate.side_effect = validation_results
+    
+                # Run conversion
+                results = converter.convert_all(formats=['onnx'])
+    
+                # Verify validation was called for each size
+>               self.assertEqual(mock_validate.call_count, 2)
+E               AssertionError: 0 != 2
+
+tests/test_model_converter.py:154: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:257 Model sizes to convert: [(416, 416), (320, 320)]
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmpsw1xoyxd
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+ERROR    convert_model:convert_model.py:2232 Model file not found: dummy.pt
+________ ValidationIntegrationTests.test_validation_runs_automatically _________
+
+self = <test_model_converter.ValidationIntegrationTests testMethod=test_validation_runs_automatically>
+
+    def test_validation_runs_automatically(self):
+        """Test that validation runs automatically after conversion"""
+        converter = EnhancedModelConverter(
+            model_path='dummy.pt',
+            output_dir=str(self.output_dir),
+            calibration_data=str(self.calibration_dir),
+            model_size=320,
+            debug=True
+        )
+    
+        # Mock the conversion and validation methods
+        with patch.object(converter, 'convert_to_onnx_optimized') as mock_onnx:
+            with patch.object(converter, '_validate_converted_models') as mock_validate:
+                # Set up mocks
+                onnx_path = self.output_dir / '320x320' / 'dummy_320x320.onnx'
+                onnx_path.parent.mkdir(parents=True)
+                onnx_path.touch()
+                mock_onnx.return_value = onnx_path
+    
+                mock_validate.return_value = {
+                    'validation': {'onnx': {'passed': True, 'degradation': 0.5}},
+                    'benchmarks': {'onnx': {'fps': 50.0}}
+                }
+    
+                # Run conversion
+                results = converter.convert_all(formats=['onnx'], validate=True)
+    
+                # Verify validation was called
+>               mock_validate.assert_called_once_with(validate=True, benchmark=True)
+
+tests/test_model_converter.py:86: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='_validate_converted_models' id='140230144271504'>
+args = (), kwargs = {'benchmark': True, 'validate': True}
+msg = "Expected '_validate_converted_models' to be called once. Called 0 times."
+
+    def assert_called_once_with(self, /, *args, **kwargs):
+        """assert that the mock was called exactly once and that that call was
+        with the specified arguments."""
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to be called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected '_validate_converted_models' to be called once. Called 0 times.
+
+/usr/lib/python3.8/unittest/mock.py:924: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     convert_model:convert_model.py:257 Model sizes to convert: [(320, 320)]
+INFO     convert_model:convert_model.py:186 Using calibration data directory: /tmp/tmp3002514n
+INFO     convert_model:convert_model.py:199 Detected hardware: {'coral': {'usb': False, 'pcie': True}, 'hailo': {'hailo8': False, 'hailo8l': False}, 'nvidia': {'cuda': False, 'tensorrt': False}, 'intel': {'cpu': True, 'openvino': False}}
+ERROR    convert_model:convert_model.py:2232 Model file not found: dummy.pt
+_________________ EndToEndValidationTests.test_cli_integration _________________
+
+self = <test_model_converter.EndToEndValidationTests testMethod=test_cli_integration>
+
+        def test_cli_integration(self):
+            """Test CLI integration with validation"""
+            # Create test script that imports the converter
+            test_script = self.test_dir / 'test_cli.py'
+            test_script.write_text("""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    
+    from convert_model import main
+    
+    # Mock sys.argv
+    sys.argv = [
+        'convert_model.py',
+        'dummy.pt',
+        '--size', '320',
+        '--formats', 'onnx',
+        '--output-dir', 'test_output',
+        '--no-validate'  # Disable for speed
+    ]
+    
+    # Run
+    try:
+        main()
+    except SystemExit as e:
+        sys.exit(e.code)
+    """)
+    
+            # Run the script
+            result = subprocess.run(
+                [sys.executable, str(test_script)],
+                capture_output=True,
+                text=True,
+                cwd=str(self.test_dir)
+            )
+    
+            # Should handle missing model gracefully
+            self.assertNotEqual(result.returncode, 0)
+>           self.assertIn('Model not found', result.stderr)
+E           AssertionError: 'Model not found' not found in 'Traceback (most recent call last):\n  File "/tmp/tmpgjg90qob/test_cli.py", line 6, in <module>\n    from convert_model import main\nModuleNotFoundError: No module named \'convert_model\'\n'
+
+tests/test_model_converter.py:598: AssertionError
+______ EndToEndValidationTests.test_end_to_end_conversion_with_validation ______
+
+self = <test_model_converter.EndToEndValidationTests testMethod=test_end_to_end_conversion_with_validation>
+
+    def test_end_to_end_conversion_with_validation(self):
+        """Test complete conversion pipeline with validation"""
+        # Use a small test model or mock
+        model_path = self.test_dir / 'test_model.pt'
+    
+        # Create mock model file
+>       import torch
+E       ModuleNotFoundError: No module named 'torch'
+
+tests/test_model_converter.py:485: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_model_converter.py::ValidationIntegrationTests::test_benchmark_integration
+FAILED tests/test_model_converter.py::ValidationIntegrationTests::test_validation_error_handling
+FAILED tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary
+FAILED tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size
+FAILED tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically
+FAILED tests/test_model_converter.py::EndToEndValidationTests::test_cli_integration
+FAILED tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation
+========================= 7 failed, 8 passed in 0.86s ==========================

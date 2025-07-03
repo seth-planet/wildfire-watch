@@ -1,0 +1,27 @@
+{
+  "dataset": "wildfire_calibration",
+  "version": "1.0",
+  "num_images": 800,
+  "image_format": "mixed",
+  "description": "Calibration dataset for wildfire detection models",
+  "categories": [
+    "fire",
+    "smoke",
+    "background"
+  ],
+  "preprocessing": {
+    "normalization": {
+      "mean": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "std": [
+        255.0,
+        255.0,
+        255.0
+      ]
+    },
+    "resize": "original"
+  }
+}

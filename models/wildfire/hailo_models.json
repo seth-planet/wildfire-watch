@@ -1,0 +1,22 @@
+{
+  "models": {
+    "yolo8l_fire_hailo8": {
+      "path": "/models/wildfire/yolo8l_fire_640x640_hailo8_qat.hef",
+      "target": "hailo8",
+      "batch_size": 8,
+      "input_size": [640, 640],
+      "tops": 26,
+      "description": "YOLOv8L fire detection optimized for Hailo-8 (26 TOPS)"
+    },
+    "yolo8l_fire_hailo8l": {
+      "path": "/models/wildfire/yolo8l_fire_640x640_hailo8l_qat.hef",
+      "target": "hailo8l",
+      "batch_size": 8,
+      "input_size": [640, 640],
+      "tops": 13,
+      "description": "YOLOv8L fire detection optimized for Hailo-8L M.2 (13 TOPS)"
+    }
+  },
+  "default_model": "yolo8l_fire_hailo8l",
+  "created": "2025-06-28T05:12:17Z"
+}

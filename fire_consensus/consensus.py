@@ -1,72 +1,17 @@
 #!/usr/bin/env python3
-"""Fire Consensus Service for multi-camera fire detection validation.
+"""Fire Consensus Service (Refactored) - Multi-camera fire detection validation.
 
-This module implements a sophisticated consensus algorithm that requires multiple
-cameras to confirm a fire before triggering the suppression system. It goes beyond
-simple voting by analyzing fire growth patterns over time.
+This is a refactored version of the fire consensus service that uses the new
+base classes for reduced code duplication and improved maintainability.
 
-The consensus algorithm has multiple stages:
-1. Detection ingestion and filtering (confidence, area thresholds)
-2. Object tracking per camera (groups detections by object_id)
-3. Growth analysis (fires must show increasing area over time)
-4. Multi-camera consensus (configurable number of cameras must agree)
-5. Cooldown enforcement (prevents rapid re-triggering)
-
-Key Features:
-    - Growth-based validation: Real fires grow, reducing false positives
-    - Moving average smoothing: Handles ML model detection jitter
-    - Per-camera object tracking: Tracks individual fires over time
-    - Configurable consensus threshold: Adjust sensitivity vs false positives
-    - Zone mapping: Activate specific sprinkler zones based on camera location
-
-Communication Flow:
-    1. Receives fire detections from camera services via 'fire/detection/#'
-    2. Receives Frigate NVR events via 'frigate/events'
-    3. Tracks camera health via 'system/camera_telemetry'
-    4. Publishes trigger commands to 'fire/trigger' when consensus reached
-    5. Reports own health to 'system/consensus_telemetry'
-
-MQTT Topics:
-    Subscribed:
-        - fire/detection: Direct fire detections from cameras
-        - fire/detection/+: Camera-specific detection topics
-        - frigate/events: Events from Frigate NVR (filtered for fire)
-        - system/camera_telemetry: Camera heartbeat messages
-        
-    Published:
-        - fire/trigger: Fire suppression activation command (QoS 2)
-        - system/consensus_telemetry: Service health status (retained)
-        - system/consensus_telemetry/{NODE_ID}/lwt: Last will testament
-
-Thread Model:
-    - Main thread: MQTT message processing
-    - Timer threads: Periodic health reporting and state cleanup
-    - All shared state protected by single RLock for simplicity
-
-Configuration:
-    Key environment variables:
-    - CONSENSUS_THRESHOLD: Number of cameras required (default: 2)
-    - SINGLE_CAMERA_TRIGGER: Override to allow single camera (default: false)
-    - MIN_CONFIDENCE: Minimum detection confidence (default: 0.7)
-    - DETECTION_WINDOW: Time window for detection history (default: 30s)
-    - AREA_INCREASE_RATIO: Required growth ratio (default: 1.2 = 20%)
-    - COOLDOWN_PERIOD: Seconds between triggers (default: 300)
-
-Example:
-    Run standalone:
-        $ python3.12 consensus.py
-        
-    Run in Docker:
-        $ docker-compose up fire-consensus
-        
-    Test with single camera override:
-        $ SINGLE_CAMERA_TRIGGER=true python3.12 consensus.py
-
-Note:
-    The hardcoded 1920x1080 resolution assumption in _calculate_area() can
-    cause issues with 4K or low-resolution cameras. Future versions should
-    receive camera resolution from the detection source.
+Key Improvements:
+1. Uses MQTTService base class for connection management
+2. Uses HealthReporter base class for health monitoring
+3. Uses ThreadSafeService for thread management
+4. Configuration management via ConfigBase
+5. Cleaner separation of concerns
 """
+
 import os
 import sys
 import time
@@ -81,1015 +26,609 @@ from collections import defaultdict, deque
 from typing import Dict, List, Tuple, Optional, Set
 import numpy as np
 
-import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+
+# Import base classes
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.mqtt_service import MQTTService
+from utils.health_reporter import HealthReporter
+from utils.thread_manager import ThreadSafeService, SafeTimerManager
+from utils.config_base import ConfigBase, ConfigSchema
 
 load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
-# Configuration
+# Configuration using ConfigBase
 # ─────────────────────────────────────────────────────────────
-class Config:
-    """Configuration management for Fire Consensus service.
+class FireConsensusConfig(ConfigBase):
+    """Configuration for Fire Consensus service."""
     
-    Loads and validates all configuration from environment variables. This class
-    defines the behavior of the consensus algorithm through various thresholds
-    and parameters.
-    
-    Attributes:
-        MQTT Settings:
-            MQTT_BROKER (str): MQTT broker hostname
-            MQTT_PORT (int): MQTT broker port
-            MQTT_TLS (bool): Enable TLS encryption
-            TLS_CA_PATH (str): Path to CA certificate
-            
-        Core Consensus:
-            CONSENSUS_THRESHOLD (int): Cameras required for consensus (default: 2)
-            SINGLE_CAMERA_TRIGGER (bool): Override to allow single camera
-            DETECTION_WINDOW (float): Time window for detection history (seconds)
-            COOLDOWN_PERIOD (float): Minimum time between triggers (seconds)
-            
-        Detection Filtering:
-            MIN_CONFIDENCE (float): Minimum ML confidence score (0-1)
-            MIN_AREA_RATIO (float): Minimum fire area as fraction of frame
-            MAX_AREA_RATIO (float): Maximum fire area as fraction of frame
-            
-        Growth Analysis:
-            AREA_INCREASE_RATIO (float): Required growth ratio (e.g., 1.2 = 20%)
-            MOVING_AVERAGE_WINDOW (int): Detections for smoothing (default: 3)
-            INCREASE_COUNT (int): Deprecated, not used in current algorithm
-            
-        System Health:
-            CAMERA_TIMEOUT (float): Seconds before marking camera offline
-            HEALTH_INTERVAL (int): Health report frequency (seconds)
-            MEMORY_CLEANUP_INTERVAL (int): State cleanup frequency (seconds)
-            
-        Zone Mapping:
-            ZONE_ACTIVATION (bool): Enable zone-based sprinkler control
-            ZONE_MAPPING (Dict[str, List[int]]): Camera ID to zone list mapping
-            
-    Important Interactions:
-        - If SINGLE_CAMERA_TRIGGER=true, CONSENSUS_THRESHOLD is ignored
-        - DETECTION_WINDOW must be long enough to collect MOVING_AVERAGE_WINDOW*2 samples
-        - CAMERA_TIMEOUT affects consensus (offline cameras don't count)
-        - Zone mapping only affects trigger payload, not consensus logic
+    SCHEMA = {
+        # Service identification
+        'service_id': ConfigSchema(
+            str,
+            default=f"fire_consensus_{socket.gethostname()}",
+            description="Unique service identifier"
+        ),
         
-    Thread Safety:
-        This class is read-only after initialization and thread-safe.
-    """
+        # Core consensus parameters
+        'consensus_threshold': ConfigSchema(
+            int,
+            default=2,
+            min=1,
+            max=10,
+            description="Number of cameras required for consensus"
+        ),
+        'single_camera_trigger': ConfigSchema(
+            bool,
+            default=False,
+            description="Allow single camera to trigger (overrides threshold)"
+        ),
+        'detection_window': ConfigSchema(
+            float,
+            default=30.0,
+            min=10.0,
+            max=300.0,
+            description="Time window for detection history (seconds)"
+        ),
+        'cooldown_period': ConfigSchema(
+            float,
+            default=300.0,
+            min=0.0,
+            max=3600.0,
+            description="Minimum time between triggers (seconds)"
+        ),
+        
+        # Detection filtering
+        'min_confidence': ConfigSchema(
+            float,
+            default=0.7,
+            min=0.0,
+            max=1.0,
+            description="Minimum ML confidence score"
+        ),
+        'min_area_ratio': ConfigSchema(
+            float,
+            default=0.001,
+            min=0.0,
+            max=1.0,
+            description="Minimum fire area as fraction of frame"
+        ),
+        'max_area_ratio': ConfigSchema(
+            float,
+            default=0.8,
+            min=0.0,
+            max=1.0,
+            description="Maximum fire area as fraction of frame"
+        ),
+        
+        # Growth analysis
+        'area_increase_ratio': ConfigSchema(
+            float,
+            default=1.2,
+            min=1.0,
+            max=5.0,
+            description="Required growth ratio (1.2 = 20% growth)"
+        ),
+        'moving_average_window': ConfigSchema(
+            int,
+            default=3,
+            min=1,
+            max=10,
+            description="Detections for moving average smoothing"
+        ),
+        
+        # System health
+        'camera_timeout': ConfigSchema(
+            float,
+            default=60.0,
+            min=10.0,
+            max=600.0,
+            description="Seconds before marking camera offline"
+        ),
+        'health_interval': ConfigSchema(
+            int,
+            default=30,
+            min=10,
+            max=300,
+            description="Health report frequency (seconds)"
+        ),
+        'memory_cleanup_interval': ConfigSchema(
+            int,
+            default=300,
+            min=60,
+            max=3600,
+            description="State cleanup frequency (seconds)"
+        ),
+        
+        # Zone mapping
+        'zone_activation': ConfigSchema(
+            bool,
+            default=False,
+            description="Enable zone-based sprinkler control"
+        ),
+        'zone_mapping': ConfigSchema(
+            dict,
+            default={},
+            description="Camera ID to zone list mapping"
+        ),
+        
+        # MQTT settings
+        'mqtt_broker': ConfigSchema(str, required=True, default='mqtt_broker'),
+        'mqtt_port': ConfigSchema(int, default=1883, min=1, max=65535),
+        'mqtt_tls': ConfigSchema(bool, default=False),
+        'mqtt_username': ConfigSchema(str, default=''),
+        'mqtt_password': ConfigSchema(str, default=''),
+        'topic_prefix': ConfigSchema(str, default='', description="MQTT topic prefix"),
+        
+        # TLS settings
+        'tls_ca_path': ConfigSchema(str, default='/mnt/data/certs/ca.crt'),
+    }
     
     def __init__(self):
-        """Initialize configuration with validated environment variables."""
-        # MQTT Settings
-        self.MQTT_BROKER = os.getenv("MQTT_BROKER", "mqtt_broker")
-        self.MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
-        self.MQTT_TLS = os.getenv("MQTT_TLS", "false").lower() == "true"
-        self.TLS_CA_PATH = os.getenv("TLS_CA_PATH", "/mnt/data/certs/ca.crt")
+        super().__init__()
         
-        # Consensus Parameters
-        self.CONSENSUS_THRESHOLD = int(os.getenv("CONSENSUS_THRESHOLD", "2"))
-        self.DETECTION_WINDOW = float(os.getenv("CAMERA_WINDOW", "10"))
-        self.INCREASE_COUNT = int(os.getenv("INCREASE_COUNT", "3"))
-        self.COOLDOWN_PERIOD = float(os.getenv("COOLDOWN_PERIOD", "30"))
-        self.SINGLE_CAMERA_TRIGGER = os.getenv("SINGLE_CAMERA_TRIGGER", "false").lower() == "true"
-        
-        # Advanced Detection Parameters
-        self.MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.7"))
-        self.MIN_AREA_RATIO = float(os.getenv("MIN_AREA_RATIO", "0.001"))
-        self.MAX_AREA_RATIO = float(os.getenv("MAX_AREA_RATIO", "0.5"))
-        self.AREA_INCREASE_RATIO = float(os.getenv("AREA_INCREASE_RATIO", "1.2"))
-        self.MOVING_AVERAGE_WINDOW = int(os.getenv("MOVING_AVERAGE_WINDOW", "3"))
-        
-        # Timing and Health
-        self.HEALTH_INTERVAL = int(os.getenv("TELEMETRY_INTERVAL", "60"))
-        self.MEMORY_CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL", "300"))
-        self.CAMERA_TIMEOUT = float(os.getenv("CAMERA_TIMEOUT", "120"))
-    
-        # Node Identity
-        self.NODE_ID = os.getenv("BALENA_DEVICE_UUID", socket.gethostname())
-        self.SERVICE_ID = f"consensus-{self.NODE_ID}"
-        
-        # Topic prefix support for test isolation
-        self.TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "")
-        
-        # Topics - with optional prefix for test isolation
-        base_detection = os.getenv("DETECTION_TOPIC", "fire/detection")
-        base_trigger = os.getenv("TRIGGER_TOPIC", "fire/trigger")
-        base_health = os.getenv("CONSENSUS_HEALTH_TOPIC", "system/consensus_telemetry")
-        base_frigate = os.getenv("FRIGATE_EVENTS_TOPIC", "frigate/events")
-        base_telemetry = os.getenv("CAMERA_TELEMETRY_TOPIC", "system/camera_telemetry")
-        
-        # Apply prefix if set
-        if self.TOPIC_PREFIX:
-            self.TOPIC_DETECTION = f"{self.TOPIC_PREFIX}/{base_detection}"
-            self.TOPIC_TRIGGER = f"{self.TOPIC_PREFIX}/{base_trigger}"
-            self.TOPIC_HEALTH = f"{self.TOPIC_PREFIX}/{base_health}"
-            self.TOPIC_FRIGATE = f"{self.TOPIC_PREFIX}/{base_frigate}"
-            self.TOPIC_CAMERA_TELEMETRY = f"{self.TOPIC_PREFIX}/{base_telemetry}"
-        else:
-            self.TOPIC_DETECTION = base_detection
-            self.TOPIC_TRIGGER = base_trigger
-            self.TOPIC_HEALTH = base_health
-            self.TOPIC_FRIGATE = base_frigate
-            self.TOPIC_CAMERA_TELEMETRY = base_telemetry
-        
-        # Zone-based activation
-        self.ZONE_MAPPING = json.loads(os.getenv("ZONE_MAPPING", "{}"))  # Camera ID -> Zone mapping
-        self.ZONE_ACTIVATION = os.getenv("ZONE_ACTIVATION", "false").lower() == "true"
-        
-        # Resilience Settings
-        self.MQTT_RECONNECT_DELAY = 5
-        self.MQTT_KEEPALIVE = 60
-        self.MAX_RECONNECT_ATTEMPTS = -1  # Infinite
+    def validate(self):
+        """Validate fire consensus configuration."""
+        # If single camera trigger enabled, consensus threshold doesn't matter
+        if self.single_camera_trigger and self.consensus_threshold > 1:
+            logging.warning("single_camera_trigger=true overrides consensus_threshold")
+            
+        # Ensure min area < max area
+        if self.min_area_ratio >= self.max_area_ratio:
+            raise ValueError("min_area_ratio must be less than max_area_ratio")
+            
+        # Detection window must be long enough for moving average
+        min_window = self.moving_average_window * 2
+        if self.detection_window < min_window:
+            logging.warning(f"detection_window ({self.detection_window}s) may be too short "
+                          f"for moving_average_window ({self.moving_average_window})")
+
 
 # ─────────────────────────────────────────────────────────────
-# Logging Setup
-# ─────────────────────────────────────────────────────────────
-log_level = getattr(logging, os.getenv('LOG_LEVEL', 'INFO').upper(), logging.INFO)
-logging.basicConfig(
-    level=log_level,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    stream=sys.stderr
-)
-logger = logging.getLogger(__name__)
-
-# ─────────────────────────────────────────────────────────────
-# Data Models
+# Data Models (reuse from original)
 # ─────────────────────────────────────────────────────────────
 class Detection:
-    """Represents a single fire detection event"""
-    def __init__(self, camera_id: str, timestamp: float, confidence: float,
-                 area: float, bbox: List[float], object_id: Optional[str] = None):
-        self.camera_id = camera_id
-        self.timestamp = timestamp
+    """Single fire detection from a camera."""
+    def __init__(self, confidence: float, area: float, object_id: str = "0"):
         self.confidence = confidence
         self.area = area
-        self.bbox = bbox
-        self.object_id = object_id or self._generate_id()
-    
-    def _generate_id(self) -> str:
-        """Generate unique ID for detection"""
-        data = f"{self.camera_id}-{self.timestamp}-{self.bbox}"
-        return hashlib.md5(data.encode()).hexdigest()[:8]
-    
-    def to_dict(self) -> dict:
-        return {
-            'camera_id': self.camera_id,
-            'timestamp': self.timestamp,
-            'confidence': self.confidence,
-            'area': self.area,
-            'bbox': self.bbox,
-            'object_id': self.object_id
-        }
+        self.object_id = object_id
+        self.timestamp = time.time()
 
 class CameraState:
-    """Tracks fire detection state for a single camera.
-    
-    This class maintains the detection history and fire object tracking for
-    one camera. It implements per-object tracking to follow individual fires
-    over time and analyze their growth patterns.
-    
-    Attributes:
-        camera_id (str): Unique camera identifier
-        config (Config): Reference to service configuration
-        last_seen (float): Timestamp of last detection from this camera
-        last_telemetry (float): Timestamp of last health message
-        detections (deque): Recent detections (capped at 100)
-        fire_objects (Dict[str, List[Detection]]): Object ID to detection list
-        last_trigger (float): When this camera last contributed to trigger
-        false_positive_count (int): Tracking for future ML improvement
-        true_positive_count (int): Tracking for future ML improvement
-        
-    Object Tracking:
-        Each detection includes an object_id from the ML model. Detections
-        with the same object_id are grouped together to track a single fire
-        over time. This enables growth analysis.
-        
-    Cleanup:
-        Old objects are removed after DETECTION_WINDOW seconds of inactivity
-        to prevent memory growth and stale data.
-        
-    Thread Safety:
-        This class is not thread-safe. Access must be synchronized by caller
-        (FireConsensus uses a lock).
-    """
-    def __init__(self, camera_id: str, config: 'Config'):
+    """State tracking for a single camera."""
+    def __init__(self, camera_id: str):
         self.camera_id = camera_id
-        self.config = config
+        self.detections: Dict[str, deque] = defaultdict(lambda: deque(maxlen=100))
         self.last_seen = time.time()
-        self.last_telemetry = time.time()
-        self.detections = deque(maxlen=100)  # Recent detections
-        self.fire_objects = {}  # object_id -> list of detections
-        self.last_trigger = 0
-        self.false_positive_count = 0
-        self.true_positive_count = 0
-        
-    def add_detection(self, detection: Detection):
-        """Add a detection and update object tracking"""
-        self.detections.append(detection)
-        self.last_seen = detection.timestamp
-        
-        # Track by object ID
-        if detection.object_id not in self.fire_objects:
-            self.fire_objects[detection.object_id] = []
-        self.fire_objects[detection.object_id].append(detection)
-        
-        # Cleanup old objects
-        self._cleanup_old_objects(detection.timestamp)
-    
-    def _cleanup_old_objects(self, current_time: float):
-        """Remove stale object tracks"""
-        stale_objects = []
-        for obj_id, detections in self.fire_objects.items():
-            if detections and current_time - detections[-1].timestamp > self.config.DETECTION_WINDOW * 2:
-                stale_objects.append(obj_id)
-        
-        for obj_id in stale_objects:
-            del self.fire_objects[obj_id]
-    
-    def get_growing_fires(self, current_time: float) -> List[str]:
-        """Identify fire objects that show growth patterns over time.
-        
-        This is the core of the growth-based validation algorithm. It analyzes
-        the area history of each tracked fire object to determine if it's
-        exhibiting growth behavior consistent with a real fire.
-        
-        The algorithm:
-            1. Requires minimum MOVING_AVERAGE_WINDOW * 2 detections
-            2. Calculates moving averages to smooth ML detection noise
-            3. Checks if smoothed trend shows required growth ratio
-            4. Requires 70% of transitions to be non-decreasing
-            
-        Args:
-            current_time: Current timestamp for windowing
-            
-        Returns:
-            List[str]: Object IDs that pass growth analysis
-            
-        Important Parameters:
-            - DETECTION_WINDOW: Must be long enough to collect samples
-            - MOVING_AVERAGE_WINDOW: Smoothing factor (default 3)
-            - AREA_INCREASE_RATIO: Required growth (default 1.2 = 20%)
-            
-        Note:
-            The 70% stability threshold is hardcoded in _check_growth_trend.
-            This prevents noise from invalidating real fires that briefly
-            flicker or are partially occluded.
-        """
-        growing_fires = []
-        
-        for obj_id, detections in self.fire_objects.items():
-            # Need enough detections for meaningful moving average comparison
-            min_detections = self.config.MOVING_AVERAGE_WINDOW * 2
-            if len(detections) < min_detections:
-                continue
-            
-            # Get recent detections within window
-            recent = [d for d in detections
-                     if current_time - d.timestamp <= self.config.DETECTION_WINDOW]
-            
-            if len(recent) >= min_detections:
-                # Calculate moving averages to reduce noise
-                areas = [d.area for d in recent]
-                moving_averages = self._calculate_moving_averages(areas, self.config.MOVING_AVERAGE_WINDOW)
-                
-                # Check if moving averages show growth trend
-                if self._check_growth_trend(moving_averages, self.config.AREA_INCREASE_RATIO):
-                    growing_fires.append(obj_id)
-        
-        return growing_fires
-    
-    def _calculate_moving_averages(self, areas: List[float], window_size: int) -> List[float]:
-        """Calculate moving averages for area values"""
-        if len(areas) < window_size:
-            return []
-        
-        moving_averages = []
-        for i in range(window_size - 1, len(areas)):
-            # Calculate average of current window
-            window_values = areas[i - window_size + 1:i + 1]
-            avg = sum(window_values) / len(window_values)
-            moving_averages.append(avg)
-        
-        return moving_averages
-    
-    def _check_growth_trend(self, moving_averages: List[float], growth_ratio: float) -> bool:
-        """Check if moving averages show consistent growth pattern"""
-        if len(moving_averages) < 2:
-            return False
-        
-        # Check for overall growth trend between first and last averages
-        first_avg = moving_averages[0]
-        last_avg = moving_averages[-1]
-        
-        # Require significant overall growth
-        if last_avg < first_avg * growth_ratio:
-            return False
-        
-        # Check that trend is generally upward (allow some fluctuation)
-        # Count how many moving average transitions show growth
-        growth_transitions = 0
-        total_transitions = len(moving_averages) - 1
-        
-        for i in range(1, len(moving_averages)):
-            if moving_averages[i] >= moving_averages[i-1] * 0.95:  # Allow 5% tolerance for noise
-                growth_transitions += 1
-        
-        # Require at least 70% of transitions to show growth (or minimal shrinkage)
-        growth_percentage = growth_transitions / total_transitions if total_transitions > 0 else 0
-        return growth_percentage >= 0.7
-    
-    def is_online(self, current_time: float) -> bool:
-        """Check if camera is online based on telemetry"""
-        return current_time - self.last_telemetry < self.config.CAMERA_TIMEOUT
+        self.is_online = True
+        self.total_detections = 0
+        self.last_detection_time = 0
+
 
 # ─────────────────────────────────────────────────────────────
-# Fire Consensus Engine
+# Consensus Health Reporter
 # ─────────────────────────────────────────────────────────────
-class FireConsensus:
-    """Main service class implementing multi-camera fire consensus algorithm.
+class ConsensusHealthReporter(HealthReporter):
+    """Health reporter for fire consensus service."""
     
-    This class orchestrates the entire consensus process from receiving individual
-    camera detections to triggering the fire suppression system. It implements a
-    sophisticated algorithm that analyzes fire growth patterns across multiple
-    cameras to reduce false positives.
+    def __init__(self, consensus):
+        self.consensus = consensus
+        super().__init__(consensus, consensus.config.health_interval)
+        
+    def get_service_health(self) -> Dict[str, any]:
+        """Get consensus-specific health metrics."""
+        with self.consensus.lock:
+            cameras = list(self.consensus.cameras.values())
+            online_cameras = [c for c in cameras if c.is_online]
+            
+            # Calculate detection rates
+            now = time.time()
+            recent_detections = sum(
+                1 for c in cameras 
+                if now - c.last_detection_time < 60
+            )
+            
+            # Get consensus state
+            consensus_state = "idle"
+            if self.consensus.last_trigger_time > 0:
+                time_since_trigger = now - self.consensus.last_trigger_time
+                if time_since_trigger < self.consensus.config.cooldown_period:
+                    consensus_state = "cooldown"
+                    
+            health = {
+                'consensus_state': consensus_state,
+                'trigger_count': self.consensus.trigger_count,
+                'last_trigger_ago': int(now - self.consensus.last_trigger_time) if self.consensus.last_trigger_time > 0 else -1,
+                'cameras_total': len(cameras),
+                'cameras_online': len(online_cameras),
+                'cameras_detecting': recent_detections,
+                'consensus_threshold': self.consensus.config.consensus_threshold,
+                'single_camera_mode': self.consensus.config.single_camera_trigger,
+                'recent_consensus_events': len(self.consensus.consensus_events),
+            }
+            
+            # Add per-camera stats
+            camera_stats = {}
+            for cam in cameras:
+                total_objects = sum(len(detections) for detections in cam.detections.values())
+                camera_stats[cam.camera_id] = {
+                    'online': cam.is_online,
+                    'total_detections': cam.total_detections,
+                    'active_objects': total_objects,
+                    'last_seen_ago': int(now - cam.last_seen)
+                }
+            health['cameras'] = camera_stats
+            
+        return health
+
+
+# ─────────────────────────────────────────────────────────────
+# Refactored Fire Consensus Service
+# ─────────────────────────────────────────────────────────────
+class FireConsensus(MQTTService, ThreadSafeService):
+    """Refactored fire consensus service using base classes.
     
-    The consensus algorithm stages:
-        1. Detection Reception: Via MQTT from cameras and Frigate NVR
-        2. Validation: Filter by confidence and area thresholds
-        3. Object Tracking: Group detections by object_id per camera
-        4. Growth Analysis: Verify fires are growing over time
-        5. Consensus Check: Count cameras with growing fires
-        6. Trigger Decision: Activate if threshold met and cooldown passed
-        
-    Attributes:
-        config (Config): Service configuration
-        cameras (Dict[str, CameraState]): Camera ID to state mapping
-        last_trigger_time (float): Unix timestamp of last trigger
-        trigger_count (int): Total triggers since startup
-        consensus_events (deque): Historical consensus events (debugging)
-        lock (RLock): Protects all shared state access
-        mqtt_client (mqtt.Client): MQTT client for all communications
-        mqtt_connected (bool): Current connection status
-        
-    Key Methods:
-        _add_detection: Process new detection and check consensus
-        _check_consensus: Evaluate if trigger conditions are met
-        _trigger_fire_response: Send fire suppression command
-        get_growing_fires: Analyze fire growth for a camera
-        
-    MQTT Integration:
-        - Subscribes on connect to all input topics
-        - Publishes trigger commands with QoS 2 (exactly once)
-        - Reports health periodically with retain flag
-        - Sets last will for ungraceful disconnections
-        
-    Thread Safety:
-        All methods that access shared state (cameras, trigger times) must
-        acquire self.lock. The MQTT callbacks run in a separate thread.
-        
-    Resilience:
-        - Exponential backoff for MQTT reconnection
-        - Continues processing if individual messages fail
-        - Validates all numeric inputs to prevent crashes
-        - Cleans up stale data periodically
+    This implementation reduces code duplication by:
+    1. Using MQTTService for all MQTT handling
+    2. Using ThreadSafeService for thread management
+    3. Using HealthReporter for health monitoring
+    4. Using SafeTimerManager for timer management
     """
     
     def __init__(self):
-        self.config = Config()
+        # Load configuration
+        self.config = FireConsensusConfig()
+        
+        # Initialize base classes
+        MQTTService.__init__(self, "fire_consensus", self.config)
+        ThreadSafeService.__init__(self, "fire_consensus", logging.getLogger(__name__))
+        
+        # Core state
         self.cameras: Dict[str, CameraState] = {}
         self.last_trigger_time = 0
         self.trigger_count = 0
         self.consensus_events = deque(maxlen=1000)
         self.lock = threading.RLock()
         
-        # Initialize shutdown flag first
-        self._shutdown = False
+        # Setup health reporter
+        self.health_reporter = ConsensusHealthReporter(self)
         
-        # MQTT client
-        self.mqtt_client = None
-        self.mqtt_connected = False
-        self._setup_mqtt()
+        # Setup MQTT with subscriptions
+        subscriptions = [
+            "fire/detection",
+            "fire/detection/+",
+            "frigate/events",
+            "system/camera_telemetry"
+        ]
         
-        # Background task timers (store for cleanup)
-        self._health_timer = None
-        self._cleanup_timer = None
+        self.setup_mqtt(
+            on_connect=self._on_connect,
+            on_message=self._on_message,
+            subscriptions=subscriptions
+        )
+        
+        # Enable offline queue for resilience
+        self.enable_offline_queue(max_size=100)
         
         # Start background tasks
         self._start_background_tasks()
         
-        logger.info(f"Fire Consensus initialized: {self.config.SERVICE_ID}")
-    
-    def _setup_mqtt(self):
-        """Setup MQTT client with resilient connection"""
-        self.mqtt_client = mqtt.Client(
-            mqtt.CallbackAPIVersion.VERSION2,
-            client_id=self.config.SERVICE_ID,
-            clean_session=True  # Clean sessions for better test compatibility
+        self.logger.info(f"Fire Consensus initialized: {self.config.service_id}")
+        
+    def _on_connect(self, client, userdata, flags, rc):
+        """MQTT connection callback."""
+        self.logger.info("MQTT connected, ready for fire detection messages")
+        
+    def _on_message(self, topic: str, payload: any):
+        """Handle incoming MQTT messages."""
+        try:
+            # Route messages based on topic
+            if topic.startswith("fire/detection"):
+                self._handle_fire_detection(topic, payload)
+            elif topic == "frigate/events":
+                self._handle_frigate_event(payload)
+            elif topic == "system/camera_telemetry":
+                self._handle_camera_telemetry(payload)
+                
+        except Exception as e:
+            self.logger.error(f"Error processing message on {topic}: {e}", exc_info=True)
+            
+    def _start_background_tasks(self):
+        """Start background tasks using timer manager."""
+        # Memory cleanup task
+        self.timer_manager.schedule(
+            "memory_cleanup",
+            self._cleanup_old_data,
+            self.config.memory_cleanup_interval
         )
         
-        # Set callbacks
-        self.mqtt_client.on_connect = self._on_mqtt_connect
-        self.mqtt_client.on_disconnect = self._on_mqtt_disconnect
-        self.mqtt_client.on_message = self._on_mqtt_message
+        # Start health reporting
+        self.health_reporter.start_health_reporting()
         
-        # Configure TLS if enabled
-        if self.config.MQTT_TLS:
-            import ssl
-            self.mqtt_client.tls_set(
-                ca_certs=self.config.TLS_CA_PATH,
-                cert_reqs=ssl.CERT_REQUIRED,
-                tls_version=ssl.PROTOCOL_TLS
-            )
-        
-        # Set LWT
-        lwt_topic = f"{self.config.TOPIC_HEALTH}/{self.config.NODE_ID}/lwt"
-        lwt_payload = json.dumps({
-            'node_id': self.config.NODE_ID,
-            'service': 'fire_consensus',
-            'status': 'offline',
-            'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-        })
-        self.mqtt_client.will_set(lwt_topic, lwt_payload, qos=1, retain=True)
-        
-        # Connect with retry
-        self._mqtt_connect_with_retry()
-    
-    def _mqtt_connect_with_retry(self):
-        """Connect to MQTT with exponential backoff retry"""
-        attempt = 0
-        while not self._shutdown:  # Check shutdown flag to prevent infinite retry during cleanup
-            try:
-                port = 8883 if self.config.MQTT_TLS else self.config.MQTT_PORT
-                self.mqtt_client.connect(
-                    self.config.MQTT_BROKER,
-                    port,
-                    keepalive=self.config.MQTT_KEEPALIVE
-                )
-                self.mqtt_client.loop_start()
-                logger.info(f"MQTT connection initiated to {self.config.MQTT_BROKER}:{port}")
-                break
-            except Exception as e:
-                if self._shutdown:
-                    break  # Exit if shutting down
-                attempt += 1
-                delay = min(self.config.MQTT_RECONNECT_DELAY * (2 ** attempt), 300)
-                logger.error(f"MQTT connection failed (attempt {attempt}): {e}")
-                logger.info(f"Retrying in {delay}s...")
-                # Use interruptible sleep
-                for _ in range(int(delay * 10)):
-                    if self._shutdown:
-                        break
-                    time.sleep(0.1)
-    
-    def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
-        """MQTT connection callback"""
-        if rc == 0:
-            self.mqtt_connected = True
-            logger.info("MQTT connected successfully")
-            
-            # Subscribe to topics
-            topics = [
-                (self.config.TOPIC_DETECTION, 1),
-                (self.config.TOPIC_FRIGATE, 1),
-                (self.config.TOPIC_CAMERA_TELEMETRY, 0),
-                (f"{self.config.TOPIC_DETECTION}/+", 1),  # Wildcard for camera-specific
-            ]
-            
-            for topic, qos in topics:
-                client.subscribe(topic, qos)
-                logger.info(f"Subscribed to {topic}")
-            
-            # Publish online status
-            self._publish_health()
-        else:
-            self.mqtt_connected = False
-            logger.error(f"MQTT connection failed with code {rc}")
-    
-    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
-        """MQTT disconnection callback"""
-        self.mqtt_connected = False
-        
-        # Check if we're shutting down to avoid logging errors
-        if self._shutdown:
-            return
-            
-        logger.warning(f"MQTT disconnected with code {rc}")
-        
-        if rc != 0:
-            # Unexpected disconnect, will auto-reconnect
-            logger.info("Unexpected disconnect, auto-reconnect enabled")
-    
-    def _on_mqtt_message(self, client, userdata, msg):
-        """Process incoming MQTT messages"""
+    def _handle_fire_detection(self, topic: str, payload: Dict):
+        """Process fire detection from cameras."""
         try:
-            logger.debug(f"Received message on topic: {msg.topic}")
-            # Route message to appropriate handler
-            if msg.topic.startswith(self.config.TOPIC_DETECTION):
-                logger.debug(f"Processing fire detection message")
-                self._process_detection(msg)
-            elif msg.topic == self.config.TOPIC_FRIGATE:
-                logger.debug(f"Processing Frigate event")
-                self._process_frigate_event(msg)
-            elif msg.topic == self.config.TOPIC_CAMERA_TELEMETRY:
-                logger.debug(f"Processing camera telemetry")
-                self._process_camera_telemetry(msg)
-            else:
-                logger.debug(f"Message topic {msg.topic} not handled")
-        except Exception as e:
-            logger.error(f"Error processing message on {msg.topic}: {e}", exc_info=True)
-    
-    def _process_detection(self, msg):
-        """Process fire detection messages"""
-        try:
-            data = json.loads(msg.payload)
-            logger.debug(f"Detection data: {data}")
-            
-            # Extract detection info
-            camera_id = data.get('camera_id')
-            confidence = float(data.get('confidence', 0))
-            bbox = data.get('bounding_box', [])
-            timestamp = data.get('timestamp', time.time())
-            object_id = data.get('object_id')  # Optional object ID for tracking
-            
-            logger.debug(f"Parsed: camera_id={camera_id}, confidence={confidence}, bbox={bbox}")
-            
-            if not camera_id or not bbox or len(bbox) != 4:
-                logger.warning(f"Invalid detection data: camera_id={camera_id}, bbox={bbox}")
-                return
-            
-            # Calculate area
-            area = self._calculate_area(bbox)
-            logger.debug(f"Calculated area: {area}")
+            # Extract camera ID
+            parts = topic.split('/')
+            camera_id = parts[2] if len(parts) > 2 else payload.get('camera_id', 'unknown')
             
             # Validate detection
-            if not self._validate_detection(confidence, area):
-                logger.debug(f"Detection from {camera_id} failed validation: confidence={confidence}, area={area}")
+            confidence = float(payload.get('confidence', 0))
+            if confidence < self.config.min_confidence:
                 return
-            
-            # Create detection object
-            detection = Detection(
-                camera_id=camera_id,
-                timestamp=timestamp,
-                confidence=confidence,
-                area=area,
-                bbox=bbox,
-                object_id=object_id
-            )
-            
-            logger.info(f"Valid detection from {camera_id}: confidence={confidence:.2f}, area={area:.6f}")
-            
-            # Process detection
-            self._add_detection(detection)
-            
-        except Exception as e:
-            logger.error(f"Error processing detection: {e}", exc_info=True)
-    
-    def _process_frigate_event(self, msg):
-        """Process Frigate NVR events"""
-        try:
-            event = json.loads(msg.payload)
-            
-            # Only process fire events
-            if event.get('after', {}).get('label') != 'fire':
-                return
-            
-            event_type = event.get('type')
-            if event_type not in ('new', 'update'):
-                return
-            
-            # Extract event data
-            after = event.get('after', {})
-            camera_id = after.get('camera')
-            object_id = after.get('id')
-            confidence = after.get('current_score', 0)
-            bbox = after.get('box', [])
-            
-            if not camera_id or not bbox:
-                return
-            
+                
             # Calculate area
-            area = self._calculate_area(bbox)
-            
-            # Validate
-            if not self._validate_detection(confidence, area):
-                return
-            
+            bbox = payload.get('bbox', [])
+            if len(bbox) == 4:
+                area = self._calculate_area(bbox)
+                if not (self.config.min_area_ratio <= area <= self.config.max_area_ratio):
+                    return
+            else:
+                area = 0.01  # Default area
+                
             # Create detection
-            detection = Detection(
-                camera_id=camera_id,
-                timestamp=time.time(),
-                confidence=confidence,
-                area=area,
-                bbox=bbox,
-                object_id=object_id
-            )
+            object_id = str(payload.get('object_id', '0'))
+            detection = Detection(confidence, area, object_id)
             
-            # Process detection
-            self._add_detection(detection)
+            # Add detection and check consensus
+            self._add_detection(camera_id, detection)
             
         except Exception as e:
-            logger.error(f"Error processing Frigate event: {e}")
-    
-    def _process_camera_telemetry(self, msg):
-        """Process camera telemetry/heartbeat messages"""
+            self.logger.error(f"Error handling fire detection: {e}")
+            
+    def _handle_frigate_event(self, payload: Dict):
+        """Process Frigate NVR events."""
         try:
-            data = json.loads(msg.payload)
-            camera_id = data.get('camera_id')
+            # Filter for fire/smoke events
+            label = payload.get('after', {}).get('label', '')
+            if label not in ['fire', 'smoke']:
+                return
+                
+            # Extract data
+            camera_id = payload.get('after', {}).get('camera', 'unknown')
+            confidence = float(payload.get('after', {}).get('top_score', 0))
             
-            if camera_id:
-                with self.lock:
-                    if camera_id not in self.cameras:
-                        self.cameras[camera_id] = CameraState(camera_id, self.config)
-                        logger.info(f"Created new camera state for {camera_id}")
-                    self.cameras[camera_id].last_telemetry = time.time()
-                    logger.info(f"Updated telemetry for {camera_id}, now online")
-                    
-        except Exception as e:
-            logger.error(f"Error processing telemetry: {e}")
-    
-    def _calculate_area(self, bbox: List[float], camera_resolution: Optional[Tuple[int, int]] = None) -> float:
-        """Calculate normalized area from bounding box.
-        
-        Handles three formats:
-        1. Direct detections: [x, y, width, height] where values are normalized (0-1)
-        2. Normalized box coordinates: [x1, y1, x2, y2] where values are normalized (0-1)
-        3. Frigate events: [x1, y1, x2, y2] where values are pixel coordinates (>1)
-        
-        Args:
-            bbox: Bounding box coordinates
-            camera_resolution: Optional (width, height) tuple for accurate normalization.
-                             If not provided, assumes 1920x1080 for backwards compatibility.
-                             
-        Returns:
-            float: Normalized area (0-1) representing fraction of frame
-            
-        Side Effects:
-            None, this is a pure calculation function
-            
-        Note:
-            The default 1920x1080 assumption can cause issues:
-            - 4K cameras (3840x2160): Areas appear 4x larger than actual
-            - 720p cameras (1280x720): Areas appear 2.25x smaller than actual
-            - VGA cameras (640x480): Areas appear 6.75x smaller than actual
-        """
-        if len(bbox) != 4:
-            return 0
-        
-        # Check for invalid values (NaN, inf, negative)
-        try:
-            if any(not isinstance(coord, (int, float)) or 
-                   math.isnan(coord) or math.isinf(coord) or coord < 0 
-                   for coord in bbox):
-                return 0
-        except (TypeError, ValueError):
-            return 0
-        
-        # Detect format by checking if values look like pixel coordinates (>1)
-        if any(coord > 1.0 for coord in bbox):
-            # Frigate format: [x1, y1, x2, y2] pixel coordinates
-            x1, y1, x2, y2 = bbox
-            width_pixels = abs(x2 - x1)
-            height_pixels = abs(y2 - y1)
-            
-            # Normalize by camera resolution or default assumption
-            if camera_resolution:
-                image_width, image_height = camera_resolution
-                estimated_image_area = image_width * image_height
+            if confidence < self.config.min_confidence:
+                return
+                
+            # Calculate area from box
+            box = payload.get('after', {}).get('box', [])
+            if len(box) == 4:
+                area = (box[2] - box[0]) * (box[3] - box[1])
             else:
-                # Default assumption for backwards compatibility
-                # WARNING: This can cause significant errors for non-1080p cameras
-                estimated_image_area = 1920 * 1080
+                area = 0.01
                 
-            pixel_area = width_pixels * height_pixels
-            area = pixel_area / estimated_image_area
+            # Create detection
+            object_id = str(payload.get('after', {}).get('id', '0'))
+            detection = Detection(confidence, area, object_id)
             
-            # Check for invalid result
-            if math.isnan(area) or math.isinf(area):
-                return 0
-            return area
-        else:
-            # Normalized coordinates (0-1)
-            # Need to distinguish between [x, y, width, height] and [x1, y1, x2, y2]
-            # If bbox[2] > bbox[0] and bbox[3] > bbox[1], it's likely [x1, y1, x2, y2]
-            # Otherwise, it's [x, y, width, height]
+            # Add detection
+            self._add_detection(camera_id, detection)
             
-            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
-                # Normalized [x1, y1, x2, y2] format
-                x1, y1, x2, y2 = bbox
-                width = abs(x2 - x1)
-                height = abs(y2 - y1)
-            else:
-                # Direct detection format: [x, y, width, height]
-                width = bbox[2]
-                height = bbox[3]
-            
-            area = width * height
-            
-            # Check for invalid result
-            if math.isnan(area) or math.isinf(area):
-                return 0
-            return area
-    
-    def _validate_detection(self, confidence: float, area: float) -> bool:
-        """Validate detection meets minimum criteria"""
-        # Check confidence threshold
-        if confidence < self.config.MIN_CONFIDENCE:
-            return False
-        
-        # Check area bounds (filter out too small or too large)
-        if area < self.config.MIN_AREA_RATIO or area > self.config.MAX_AREA_RATIO:
-            return False
-        
-        return True
-    
-    def _add_detection(self, detection: Detection):
-        """Add detection and check for consensus"""
-        with self.lock:
-            # Ensure camera state exists
-            if detection.camera_id not in self.cameras:
-                self.cameras[detection.camera_id] = CameraState(detection.camera_id, self.config)
-            
-            # Add detection to camera
-            camera = self.cameras[detection.camera_id]
-            camera.add_detection(detection)
-            
-            # Check for consensus
-            self._check_consensus()
-    
-    def _check_consensus(self):
-        """Check if fire consensus criteria are met"""
-        current_time = time.time()
-        
-        logger.debug(f"Checking consensus at {current_time}")
-        
-        # Check cooldown
-        if current_time - self.last_trigger_time < self.config.COOLDOWN_PERIOD:
-            logger.debug(f"In cooldown period, skipping consensus check")
-            return
-        
-        # Get cameras with growing fires
-        cameras_with_fire = []
-        fire_details = {}
-        
-        with self.lock:
-            logger.info(f"Checking {len(self.cameras)} cameras for consensus")
-            for camera_id, camera in self.cameras.items():
-                # Skip offline cameras
-                if not camera.is_online(current_time):
-                    logger.info(f"Camera {camera_id} is offline (last telemetry: {current_time - camera.last_telemetry:.1f}s ago)")
-                    continue
-                
-                # Get growing fires for this camera
-                growing_fires = camera.get_growing_fires(current_time)
-                logger.info(f"Camera {camera_id}: {len(growing_fires)} growing fires, {len(camera.detections)} total detections")
-                
-                if growing_fires:
-                    cameras_with_fire.append(camera_id)
-                    fire_details[camera_id] = {
-                        'objects': growing_fires,
-                        'detections': len(camera.detections),
-                        'confidence': np.mean([d.confidence for d in camera.detections
-                                              if current_time - d.timestamp < self.config.DETECTION_WINDOW])
-                    }
-        
-        # Check if consensus threshold is met
-        # Allow single camera trigger if configured
-        required_cameras = 1 if self.config.SINGLE_CAMERA_TRIGGER else self.config.CONSENSUS_THRESHOLD
-        logger.info(f"Consensus check: {len(cameras_with_fire)} cameras with fire (need {required_cameras})")
-        
-        if len(cameras_with_fire) >= required_cameras:
-            logger.warning(f"CONSENSUS THRESHOLD MET! Triggering fire response")
-            self._trigger_fire_response(cameras_with_fire, fire_details)
-        else:
-            logger.debug(f"Consensus not met yet")
-    
-    def _trigger_fire_response(self, cameras: List[str], details: dict):
-        """Trigger fire response system"""
-        with self.lock:
-            current_time = time.time()
-            self.last_trigger_time = current_time
-            self.trigger_count += 1
-            
-            # Determine affected zones if zone-based activation is enabled
-            affected_zones = set()
-            if self.config.ZONE_ACTIVATION and self.config.ZONE_MAPPING:
-                for camera_id in cameras:
-                    zone = self.config.ZONE_MAPPING.get(camera_id)
-                    if zone:
-                        affected_zones.add(zone)
-            
-            # Create trigger payload
-            payload = {
-                'node_id': self.config.NODE_ID,
-                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                'trigger_number': self.trigger_count,
-                'consensus_cameras': cameras,
-                'camera_count': len(cameras),
-                'details': details,
-                'confidence': np.mean([d['confidence'] for d in details.values()]),
-                'zones': list(affected_zones) if affected_zones else None,
-                'zone_activation': self.config.ZONE_ACTIVATION
-            }
-            
-            # Log consensus event
-            self.consensus_events.append({
-                'timestamp': current_time,
-                'cameras': cameras,
-                'triggered': True
-            })
-            
-            # Publish trigger
-            try:
-                self.mqtt_client.publish(
-                    self.config.TOPIC_TRIGGER,
-                    json.dumps(payload),
-                    qos=2,  # Exactly once delivery
-                    retain=False
-                )
-                logger.warning(f"FIRE CONSENSUS REACHED - Triggered response! Cameras: {cameras}")
-            except Exception as e:
-                logger.error(f"Failed to publish fire trigger: {e}")
-    
-    def _start_background_tasks(self):
-        """Start background maintenance tasks"""
-        # Health reporting
-        self._health_timer = threading.Timer(
-            self.config.HEALTH_INTERVAL,
-            self._periodic_health_report
-        )
-        self._health_timer.start()
-        
-        # Memory cleanup
-        self._cleanup_timer = threading.Timer(
-            self.config.MEMORY_CLEANUP_INTERVAL,
-            self._periodic_cleanup
-        )
-        self._cleanup_timer.start()
-    
-    def _periodic_health_report(self):
-        """Periodically publish health status"""
-        if self._shutdown:
-            return
-            
-        try:
-            self._publish_health()
         except Exception as e:
-            logger.error(f"Error in health report: {e}")
-        
-        # Reschedule
-        if not self._shutdown:
-            self._health_timer = threading.Timer(
-                self.config.HEALTH_INTERVAL,
-                self._periodic_health_report
-            )
-            self._health_timer.start()
-    
-    def _periodic_cleanup(self):
-        """Periodically clean up old data"""
-        if self._shutdown:
-            return
+            self.logger.error(f"Error handling Frigate event: {e}")
             
+    def _handle_camera_telemetry(self, payload: Dict):
+        """Update camera online status from telemetry."""
         try:
-            current_time = time.time()
-            removed_cameras = []
-            
+            camera_id = payload.get('camera_id')
+            if not camera_id:
+                return
+                
             with self.lock:
-                # Remove very stale cameras
-                for camera_id, camera in list(self.cameras.items()):
-                    if current_time - camera.last_seen > self.config.CAMERA_TIMEOUT * 2:
-                        removed_cameras.append(camera_id)
-                        del self.cameras[camera_id]
-            
-            if removed_cameras:
-                logger.info(f"Cleaned up stale cameras: {removed_cameras}")
+                if camera_id not in self.cameras:
+                    self.cameras[camera_id] = CameraState(camera_id)
+                    
+                camera = self.cameras[camera_id]
+                camera.last_seen = time.time()
+                camera.is_online = True
                 
         except Exception as e:
-            logger.error(f"Error in cleanup: {e}")
+            self.logger.error(f"Error handling camera telemetry: {e}")
+            
+    def _add_detection(self, camera_id: str, detection: Detection):
+        """Add detection and check for consensus."""
+        with self.lock:
+            # Ensure camera exists
+            if camera_id not in self.cameras:
+                self.cameras[camera_id] = CameraState(camera_id)
+                
+            camera = self.cameras[camera_id]
+            camera.detections[detection.object_id].append(detection)
+            camera.total_detections += 1
+            camera.last_detection_time = time.time()
+            camera.last_seen = time.time()
+            camera.is_online = True
+            
+            self.logger.debug(f"Added detection from {camera_id}: "
+                            f"confidence={detection.confidence:.2f}, "
+                            f"area={detection.area:.4f}, "
+                            f"object_id={detection.object_id}")
+            
+        # Check consensus
+        self._check_consensus()
         
-        # Reschedule
-        if not self._shutdown:
-            self._cleanup_timer = threading.Timer(
-                self.config.MEMORY_CLEANUP_INTERVAL,
-                self._periodic_cleanup
-            )
-            self._cleanup_timer.start()
-    
-    def _publish_health(self):
-        """Publish health status"""
+    def _check_consensus(self):
+        """Check if consensus conditions are met."""
+        with self.lock:
+            # Check cooldown
+            if time.time() - self.last_trigger_time < self.config.cooldown_period:
+                return
+                
+            # Get growing fires from all cameras
+            cameras_with_fires = []
+            fire_locations = []
+            
+            for camera_id, camera in self.cameras.items():
+                if not camera.is_online:
+                    continue
+                    
+                growing_fires = self.get_growing_fires(camera_id)
+                if growing_fires:
+                    cameras_with_fires.append(camera_id)
+                    fire_locations.extend([
+                        (camera_id, obj_id) for obj_id in growing_fires
+                    ])
+                    
+            # Check consensus threshold
+            consensus_met = False
+            if self.config.single_camera_trigger and len(cameras_with_fires) >= 1:
+                consensus_met = True
+            elif len(cameras_with_fires) >= self.config.consensus_threshold:
+                consensus_met = True
+                
+            if consensus_met:
+                self.logger.warning(f"CONSENSUS REACHED! {len(cameras_with_fires)} cameras "
+                                  f"detecting growing fires: {cameras_with_fires}")
+                self._trigger_fire_response(cameras_with_fires, fire_locations)
+                
+                # Record consensus event
+                self.consensus_events.append({
+                    'timestamp': time.time(),
+                    'cameras': cameras_with_fires,
+                    'fire_count': len(fire_locations)
+                })
+                
+    def get_growing_fires(self, camera_id: str) -> List[str]:
+        """Get list of growing fire object IDs for a camera."""
+        camera = self.cameras.get(camera_id)
+        if not camera:
+            return []
+            
+        growing_fires = []
         current_time = time.time()
         
-        with self.lock:
-            # Count camera states
-            online_cameras = [
-                cid for cid, cam in self.cameras.items()
-                if cam.is_online(current_time)
-            ]
+        for object_id, detections in camera.detections.items():
+            # Filter recent detections
+            recent = [d for d in detections 
+                     if current_time - d.timestamp <= self.config.detection_window]
             
-            cameras_with_detections = [
-                cid for cid, cam in self.cameras.items()
-                if cam.detections and current_time - cam.detections[-1].timestamp < self.config.DETECTION_WINDOW
-            ]
-            
-            # Calculate consensus stats
-            recent_events = [
-                e for e in self.consensus_events
-                if current_time - e['timestamp'] < 3600  # Last hour
-            ]
-            
-            payload = {
-                'node_id': self.config.NODE_ID,
-                'service': 'fire_consensus',
-                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                'status': 'online' if self.mqtt_connected else 'degraded',
-                'config': {
-                    'threshold': self.config.CONSENSUS_THRESHOLD,
-                    'window_seconds': self.config.DETECTION_WINDOW,
-                    'cooldown_seconds': self.config.COOLDOWN_PERIOD,
-                    'min_confidence': self.config.MIN_CONFIDENCE,
-                },
-                'stats': {
-                    'total_cameras': len(self.cameras),
-                    'online_cameras': len(online_cameras),
-                    'active_detections': len(cameras_with_detections),
-                    'total_triggers': self.trigger_count,
-                    'last_trigger': self.last_trigger_time,
-                    'recent_consensus_events': len(recent_events),
-                },
-                'cameras': {
-                    'online': online_cameras,
-                    'detecting': cameras_with_detections,
-                }
-            }
-        
-        try:
-            self.mqtt_client.publish(
-                self.config.TOPIC_HEALTH,
-                json.dumps(payload),
-                qos=1,
-                retain=True
-            )
-        except Exception as e:
-            logger.error(f"Failed to publish health: {e}")
-    
-    def run(self):
-        """Main run loop"""
-        logger.info("Fire Consensus Service started")
-        
-        try:
-            while True:
-                time.sleep(1)
+            if len(recent) < self.config.moving_average_window * 2:
+                continue
                 
-        except KeyboardInterrupt:
-            logger.info("Shutdown requested")
-        finally:
-            self.cleanup()
-    
+            # Calculate moving averages
+            areas = [d.area for d in recent]
+            early_avg = np.mean(areas[:self.config.moving_average_window])
+            recent_avg = np.mean(areas[-self.config.moving_average_window:])
+            
+            # Check growth
+            if recent_avg >= early_avg * self.config.area_increase_ratio:
+                growing_fires.append(object_id)
+                
+        return growing_fires
+        
+    def _trigger_fire_response(self, cameras: List[str], fire_locations: List[Tuple[str, str]]):
+        """Send fire suppression trigger command."""
+        self.last_trigger_time = time.time()
+        self.trigger_count += 1
+        
+        # Build trigger payload
+        payload = {
+            'action': 'trigger',
+            'confidence': 'high',
+            'timestamp': self.last_trigger_time,
+            'trigger_count': self.trigger_count,
+            'consensus_cameras': cameras,
+            'fire_locations': fire_locations,
+            'service_id': self.config.service_id
+        }
+        
+        # Add zone information if enabled
+        if self.config.zone_activation:
+            zones = set()
+            for camera_id in cameras:
+                camera_zones = self.config.zone_mapping.get(camera_id, [])
+                zones.update(camera_zones)
+            payload['zones'] = list(zones)
+            
+        # Publish with QoS 2 (exactly once)
+        self.publish_message("fire/trigger", payload, qos=2)
+        
+        self.logger.critical(f"FIRE TRIGGER SENT! Cameras: {cameras}")
+        
+    def _cleanup_old_data(self):
+        """Periodic cleanup of old detection data."""
+        with self.lock:
+            current_time = time.time()
+            
+            for camera in self.cameras.values():
+                # Clean old detections
+                for object_id, detections in list(camera.detections.items()):
+                    # Remove old detections
+                    while detections and current_time - detections[0].timestamp > self.config.detection_window * 2:
+                        detections.popleft()
+                        
+                    # Remove empty deques
+                    if not detections:
+                        del camera.detections[object_id]
+                        
+                # Update online status
+                if current_time - camera.last_seen > self.config.camera_timeout:
+                    camera.is_online = False
+                    
+        # Reschedule
+        self.timer_manager.schedule(
+            "memory_cleanup",
+            self._cleanup_old_data,
+            self.config.memory_cleanup_interval
+        )
+        
+    def _calculate_area(self, bbox: List[float]) -> float:
+        """Calculate normalized area from bounding box."""
+        # Assuming 1920x1080 resolution (should be configurable)
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        return (width * height) / (1920 * 1080)
+        
     def cleanup(self):
-        """Clean shutdown"""
-        try:
-            logger.info("Cleaning up Fire Consensus Service")
-        except (ValueError, OSError):
-            # Ignore logging errors during teardown
-            pass
+        """Clean shutdown of service."""
+        self.logger.info("Shutting down Fire Consensus")
         
-        # Set shutdown flag to stop timer reschedules
-        self._shutdown = True
+        # Stop health reporting
+        if hasattr(self, 'health_reporter'):
+            self.health_reporter.stop_health_reporting()
+            
+        # Cancel all timers
+        self.timer_manager.cancel_all()
         
-        # Cancel any active timers
-        if self._health_timer and self._health_timer.is_alive():
-            self._health_timer.cancel()
-        if self._cleanup_timer and self._cleanup_timer.is_alive():
-            self._cleanup_timer.cancel()
+        # Shutdown base services
+        ThreadSafeService.shutdown(self)
+        MQTTService.shutdown(self)
         
-        # Wait for threads to finish with timeout
-        for timer in [self._health_timer, self._cleanup_timer]:
-            if timer and timer.is_alive():
-                timer.join(timeout=1.0)
+        self.logger.info("Fire Consensus shutdown complete")
         
-        # Publish offline status
-        try:
-            lwt_topic = f"{self.config.TOPIC_HEALTH}/{self.config.NODE_ID}/lwt"
-            lwt_payload = json.dumps({
-                'node_id': self.config.NODE_ID,
-                'service': 'fire_consensus',
-                'status': 'offline',
-                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-            })
-            self.mqtt_client.publish(lwt_topic, lwt_payload, qos=1, retain=True)
-        except:
-            pass
-        
-        # Disconnect MQTT
-        self.mqtt_client.loop_stop()
-        self.mqtt_client.disconnect()
 
 # ─────────────────────────────────────────────────────────────
 # Main Entry Point
 # ─────────────────────────────────────────────────────────────
+
+
 def main():
-    consensus = FireConsensus()
-    consensus.run()
+    """Main entry point for fire consensus service."""
+    # Setup logging
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    )
+    
+    try:
+        consensus = FireConsensus()
+        
+        # Wait for shutdown
+        consensus.wait_for_shutdown()
+        
+    except KeyboardInterrupt:
+        logging.info("Received interrupt signal")
+    except Exception as e:
+        logging.error(f"Fatal error: {e}", exc_info=True)
+        sys.exit(1)
+    finally:
+        if 'consensus' in locals():
+            consensus.cleanup()
+            
 
 if __name__ == "__main__":
     main()

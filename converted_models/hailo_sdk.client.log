@@ -1,0 +1,226 @@
+2025-06-27 17:40:37,333 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:40:37,948 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.62)
+2025-06-27 17:40:40,028 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.69)
+2025-06-27 17:40:40,279 - WARNING - parser.py:318 - ONNX shape inference failed: list index out of range
+2025-06-27 17:40:44,718 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:40:45,325 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.61)
+2025-06-27 17:40:47,382 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.66)
+2025-06-27 17:40:47,629 - WARNING - parser.py:318 - ONNX shape inference failed: list index out of range
+2025-06-27 17:41:36,980 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:41:37,601 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.62)
+2025-06-27 17:41:39,665 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.69)
+2025-06-27 17:41:42,136 - INFO - parser.py:278 - Simplified ONNX model for a parsing retry attempt (completion time: 00:00:05.16)
+2025-06-27 17:41:43,078 - INFO - parser_cli.py:245 - According to recommendations, retrying parsing with end node names: ['/model.22/Concat_3'].
+2025-06-27 17:41:43,079 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:41:43,347 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.27)
+2025-06-27 17:41:44,921 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:01.84)
+2025-06-27 17:41:46,026 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 17:41:46,026 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv3.0/cv3.0.2/Conv /model.22/cv2.0/cv2.0.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.2/cv2.2.2/Conv /model.22/cv3.2/cv3.2.2/Conv.
+2025-06-27 17:41:46,119 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 17:41:46,119 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/Concat_3'.
+2025-06-27 17:41:46,211 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:03.13)
+2025-06-27 17:41:47,573 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:41:47,842 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.27)
+2025-06-27 17:41:49,513 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:01.94)
+2025-06-27 17:41:50,693 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 17:41:50,693 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv2.0/cv2.0.2/Conv /model.22/cv3.0/cv3.0.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.2/cv3.2.2/Conv /model.22/cv2.2/cv2.2.2/Conv.
+2025-06-27 17:41:50,782 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 17:41:50,782 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/cv3.0/cv3.0.2/Conv', '/model.22/cv2.0/cv2.0.2/Conv', '/model.22/cv2.1/cv2.1.2/Conv', '/model.22/cv3.1/cv3.1.2/Conv', '/model.22/cv2.2/cv2.2.2/Conv', '/model.22/cv3.2/cv3.2.2/Conv'.
+2025-06-27 17:41:50,871 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:03.30)
+2025-06-27 17:41:52,024 - INFO - client_runner.py:499 - Appending model script commands to yolo8l_fire_640x640 from string
+2025-06-27 17:41:52,052 - INFO - parser_cli.py:324 - Added nms postprocess command to model script.
+2025-06-27 17:41:52,534 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_yolo8l_fire_640x640_savfjzim/yolo8l_fire_640x640.har
+2025-06-27 17:41:59,060 - INFO - nms_postprocess_command.py:385 - For NMS architecture yolov8 the default engine is cpu. For other engine please use the 'engine' flag in the nms_postprocess model script command. If the NMS has been added during parsing, please parse the model again without confirming the addition of the NMS, and add the command manually with the desired engine.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv74 was detected as cls_layer.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv73 was detected as reg_layer.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv88 was detected as reg_layer.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv89 was detected as cls_layer.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv100 was detected as reg_layer.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv103 was detected as cls_layer.
+2025-06-27 17:41:59,061 - INFO - nms_postprocess_command.py:514 - Using the default score threshold of 0.001 (range is [0-1], where 1 performs maximum suppression) and IoU threshold of 0.7 (range is [0-1], where 0 performs maximum suppression).
+Changing the values is possible using the nms_postprocess model script command.
+2025-06-27 17:41:59,064 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv74 was replaced by a Sigmoid
+2025-06-27 17:41:59,064 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv89 was replaced by a Sigmoid
+2025-06-27 17:41:59,064 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv103 was replaced by a Sigmoid
+2025-06-27 17:41:59,550 - IMPORTANT - sdk_backend.py:1191 - Starting Model Optimization
+2025-06-27 17:42:00,254 - WARNING - mo_config.py:168 - Reducing optimization level to 0 (the accuracy won't be optimized and compression won't be used) because there's less data than the recommended amount (1024), and there's no available GPU
+2025-06-27 17:42:00,254 - WARNING - mo_config.py:233 - Running model optimization with zero level of optimization is not recommended for production use and might lead to suboptimal accuracy results
+2025-06-27 17:42:00,255 - INFO - mo_script_parser.py:91 - Model received quantization params from the hn
+2025-06-27 17:42:04,783 - INFO - algorithm_base.py:149 - MatmulDecompose skipped
+2025-06-27 17:42:04,979 - INFO - algorithm_base.py:152 - Starting Mixed Precision
+2025-06-27 17:42:05,586 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Mixed Precision is done (completion time is 00:00:00.60)
+2025-06-27 17:42:05,870 - INFO - algorithm_base.py:149 - LayerNorm Decomposition skipped
+2025-06-27 17:42:06,566 - INFO - algorithm_base.py:152 - Starting Statistics Collector
+2025-06-27 17:42:06,568 - INFO - stats_collection.py:77 - Using dataset with 64 entries for calibration
+2025-06-27 17:42:59,753 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Statistics Collector is done (completion time is 00:00:53.18)
+2025-06-27 17:43:01,345 - INFO - algorithm_base.py:152 - Starting Fix zp_comp Encoding
+2025-06-27 17:43:01,345 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Fix zp_comp Encoding is done (completion time is 00:00:00.00)
+2025-06-27 17:43:01,346 - INFO - algorithm_base.py:149 - Matmul Equalization skipped
+2025-06-27 17:43:01,346 - INFO - algorithm_base.py:152 - Starting MatmulDecomposeFix
+2025-06-27 17:43:01,346 - INFO - algorithm_base.py:168 - Model Optimization Algorithm MatmulDecomposeFix is done (completion time is 00:00:00.00)
+2025-06-27 17:43:14,958 - INFO - algorithm_base.py:149 - Finetune encoding skipped
+2025-06-27 17:43:14,960 - INFO - algorithm_base.py:149 - Bias Correction skipped
+2025-06-27 17:43:14,971 - INFO - algorithm_base.py:149 - Adaround skipped
+2025-06-27 17:43:14,975 - INFO - algorithm_base.py:149 - Quantization-Aware Fine-Tuning skipped
+2025-06-27 17:43:24,839 - INFO - algorithm_base.py:149 - Layer Noise Analysis skipped
+2025-06-27 17:43:25,227 - INFO - quant_checker.py:171 - The calibration set seems to not be normalized, because the values range is [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)].
+Since the neural core works in 8-bit (between 0 to 255), a quantization will occur on the CPU of the runtime platform.
+Add a normalization layer to the model to offload the normalization to the neural core.
+Refer to the user guide Hailo Dataflow Compiler user guide / Model Optimization / Optimization Related Model Script Commands / model_modification_commands / normalization for details.
+2025-06-27 17:43:34,335 - IMPORTANT - sdk_backend.py:1203 - Model Optimization is done
+2025-06-27 17:43:36,469 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_yolo8l_fire_640x640_savfjzim/yolo8l_fire_640x640_optimized.har
+2025-06-27 17:43:48,049 - INFO - compiler_cli.py:81 - Compiling network
+2025-06-27 17:43:48,087 - INFO - hailo_tools_runner.py:510 - To achieve optimal performance, set the compiler_optimization_level to "max" by adding performance_param(compiler_optimization_level=max) to the model script. Note that this may increase compilation time.
+2025-06-27 17:54:25,367 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:54:26,019 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.65)
+2025-06-27 17:54:28,187 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.82)
+2025-06-27 17:54:28,676 - WARNING - parser.py:318 - ONNX shape inference failed: [ONNXRuntimeError] : 1 : FAIL : Node (/model.22/Concat_5) Op (Concat) [ShapeInferenceError] Can't merge shape info. Both inferred and declared dimension have values but they differ. Inferred=67200 Declared=8400 Dimension=2
+2025-06-27 17:54:30,433 - INFO - parser.py:278 - Simplified ONNX model for a parsing retry attempt (completion time: 00:00:05.07)
+2025-06-27 17:54:30,902 - WARNING - parser.py:318 - ONNX shape inference failed: [ONNXRuntimeError] : 1 : FAIL : Node (/model.22/Concat_5) Op (Concat) [ShapeInferenceError] Can't merge shape info. Both inferred and declared dimension have values but they differ. Inferred=67200 Declared=8400 Dimension=2
+2025-06-27 17:54:31,191 - INFO - parser_cli.py:245 - According to recommendations, retrying parsing with end node names: ['/model.22/Concat_1', '/model.22/Concat_2', '/model.22/Concat'].
+2025-06-27 17:54:31,192 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:54:31,613 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.42)
+2025-06-27 17:54:33,651 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.46)
+2025-06-27 17:54:37,302 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 17:54:37,302 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv2.0/cv2.0.2/Conv /model.22/cv3.0/cv3.0.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.2/cv2.2.2/Conv /model.22/cv3.2/cv3.2.2/Conv.
+2025-06-27 17:54:37,393 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 17:54:37,393 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/Concat_1', '/model.22/Concat_2', '/model.22/Concat'.
+2025-06-27 17:54:37,484 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:06.29)
+2025-06-27 17:56:51,619 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:56:52,276 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.66)
+2025-06-27 17:56:54,454 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.84)
+2025-06-27 17:56:57,011 - INFO - parser.py:278 - Simplified ONNX model for a parsing retry attempt (completion time: 00:00:05.39)
+2025-06-27 17:56:57,935 - INFO - parser_cli.py:245 - According to recommendations, retrying parsing with end node names: ['/model.22/Concat_3'].
+2025-06-27 17:56:57,935 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:56:58,216 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.28)
+2025-06-27 17:56:59,946 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.01)
+2025-06-27 17:57:01,040 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 17:57:01,040 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv3.0/cv3.0.2/Conv /model.22/cv2.0/cv2.0.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.2/cv2.2.2/Conv /model.22/cv3.2/cv3.2.2/Conv.
+2025-06-27 17:57:01,134 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 17:57:01,134 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/Concat_3'.
+2025-06-27 17:57:01,226 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:03.29)
+2025-06-27 17:57:02,610 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 17:57:03,014 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.40)
+2025-06-27 17:57:04,872 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.26)
+2025-06-27 17:57:06,126 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 17:57:06,126 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv2.0/cv2.0.2/Conv /model.22/cv3.0/cv3.0.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.2/cv3.2.2/Conv /model.22/cv2.2/cv2.2.2/Conv.
+2025-06-27 17:57:06,219 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 17:57:06,219 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/cv3.0/cv3.0.2/Conv', '/model.22/cv2.0/cv2.0.2/Conv', '/model.22/cv2.1/cv2.1.2/Conv', '/model.22/cv3.1/cv3.1.2/Conv', '/model.22/cv2.2/cv2.2.2/Conv', '/model.22/cv3.2/cv3.2.2/Conv'.
+2025-06-27 17:57:06,310 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:03.70)
+2025-06-27 17:57:07,473 - INFO - client_runner.py:499 - Appending model script commands to yolo8l_fire_640x640 from string
+2025-06-27 17:57:07,500 - INFO - parser_cli.py:324 - Added nms postprocess command to model script.
+2025-06-27 17:57:07,998 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_qat_yolo8l_fire_640x640_e1sfw_dq/yolo8l_fire_640x640.har
+2025-06-27 17:57:13,516 - INFO - client_runner.py:496 - Loading model script commands to yolo8l_fire_640x640 from /tmp/hailo_qat_yolo8l_fire_640x640_e1sfw_dq/yolo8l_fire_640x640_hailo_script.py
+2025-06-27 17:57:19,062 - INFO - nms_postprocess_command.py:385 - For NMS architecture yolov8 the default engine is cpu. For other engine please use the 'engine' flag in the nms_postprocess model script command. If the NMS has been added during parsing, please parse the model again without confirming the addition of the NMS, and add the command manually with the desired engine.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv74 was detected as cls_layer.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv73 was detected as reg_layer.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv88 was detected as reg_layer.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv89 was detected as cls_layer.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv100 was detected as reg_layer.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv103 was detected as cls_layer.
+2025-06-27 17:57:19,063 - INFO - nms_postprocess_command.py:514 - Using the default score threshold of 0.001 (range is [0-1], where 1 performs maximum suppression) and IoU threshold of 0.7 (range is [0-1], where 0 performs maximum suppression).
+Changing the values is possible using the nms_postprocess model script command.
+2025-06-27 17:57:19,066 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv74 was replaced by a Sigmoid
+2025-06-27 17:57:19,066 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv89 was replaced by a Sigmoid
+2025-06-27 17:57:19,066 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv103 was replaced by a Sigmoid
+2025-06-27 17:57:19,549 - IMPORTANT - sdk_backend.py:1191 - Starting Model Optimization
+2025-06-27 17:57:20,118 - WARNING - mo_config.py:168 - Reducing optimization level to 0 (the accuracy won't be optimized and compression won't be used) because there's no available GPU
+2025-06-27 17:57:20,118 - WARNING - mo_config.py:233 - Running model optimization with zero level of optimization is not recommended for production use and might lead to suboptimal accuracy results
+2025-06-27 17:57:20,119 - INFO - mo_script_parser.py:91 - Model received quantization params from the hn
+2025-06-27 17:57:24,644 - INFO - algorithm_base.py:149 - MatmulDecompose skipped
+2025-06-27 17:57:24,842 - INFO - algorithm_base.py:152 - Starting Mixed Precision
+2025-06-27 17:57:25,445 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Mixed Precision is done (completion time is 00:00:00.60)
+2025-06-27 17:57:25,728 - INFO - algorithm_base.py:149 - LayerNorm Decomposition skipped
+2025-06-27 17:57:26,420 - INFO - algorithm_base.py:152 - Starting Statistics Collector
+2025-06-27 17:57:26,422 - INFO - stats_collection.py:77 - Using dataset with 64 entries for calibration
+2025-06-27 17:58:20,100 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Statistics Collector is done (completion time is 00:00:53.68)
+2025-06-27 17:58:21,699 - INFO - algorithm_base.py:152 - Starting Fix zp_comp Encoding
+2025-06-27 17:58:21,700 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Fix zp_comp Encoding is done (completion time is 00:00:00.00)
+2025-06-27 17:58:21,700 - INFO - algorithm_base.py:149 - Matmul Equalization skipped
+2025-06-27 17:58:21,700 - INFO - algorithm_base.py:152 - Starting MatmulDecomposeFix
+2025-06-27 17:58:21,700 - INFO - algorithm_base.py:168 - Model Optimization Algorithm MatmulDecomposeFix is done (completion time is 00:00:00.00)
+2025-06-27 17:58:35,232 - INFO - algorithm_base.py:149 - Finetune encoding skipped
+2025-06-27 17:58:35,234 - INFO - algorithm_base.py:149 - Bias Correction skipped
+2025-06-27 17:58:35,245 - INFO - algorithm_base.py:149 - Adaround skipped
+2025-06-27 17:58:35,249 - INFO - algorithm_base.py:149 - Quantization-Aware Fine-Tuning skipped
+2025-06-27 17:58:45,227 - INFO - algorithm_base.py:149 - Layer Noise Analysis skipped
+2025-06-27 17:58:45,626 - INFO - quant_checker.py:171 - The calibration set seems to not be normalized, because the values range is [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)].
+Since the neural core works in 8-bit (between 0 to 255), a quantization will occur on the CPU of the runtime platform.
+Add a normalization layer to the model to offload the normalization to the neural core.
+Refer to the user guide Hailo Dataflow Compiler user guide / Model Optimization / Optimization Related Model Script Commands / model_modification_commands / normalization for details.
+2025-06-27 17:58:54,713 - IMPORTANT - sdk_backend.py:1203 - Model Optimization is done
+2025-06-27 17:58:56,840 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_qat_yolo8l_fire_640x640_e1sfw_dq/yolo8l_fire_640x640_optimized.har
+2025-06-27 17:59:08,324 - INFO - compiler_cli.py:81 - Compiling network
+2025-06-27 17:59:08,363 - INFO - hailo_tools_runner.py:510 - To achieve optimal performance, set the compiler_optimization_level to "max" by adding performance_param(compiler_optimization_level=max) to the model script. Note that this may increase compilation time.
+2025-06-27 18:29:38,239 - INFO - compiler_cli.py:86 - Compilation complete
+2025-06-27 18:29:38,292 - INFO - compiler_cli.py:91 - Saved HEF to: /tmp/hailo_qat_yolo8l_fire_640x640_e1sfw_dq/yolo8l_fire_640x640.hef
+2025-06-27 18:29:40,526 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_qat_yolo8l_fire_640x640_e1sfw_dq/yolo8l_fire_640x640_compiled.har
+2025-06-27 18:30:30,785 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 18:30:31,442 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.66)
+2025-06-27 18:30:33,605 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.82)
+2025-06-27 18:30:36,275 - INFO - parser.py:278 - Simplified ONNX model for a parsing retry attempt (completion time: 00:00:05.49)
+2025-06-27 18:30:37,266 - INFO - parser_cli.py:245 - According to recommendations, retrying parsing with end node names: ['/model.22/Concat_3'].
+2025-06-27 18:30:37,266 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 18:30:37,611 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.34)
+2025-06-27 18:30:39,402 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.14)
+2025-06-27 18:30:40,542 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 18:30:40,542 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv3.0/cv3.0.2/Conv /model.22/cv2.0/cv2.0.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.2/cv2.2.2/Conv /model.22/cv3.2/cv3.2.2/Conv.
+2025-06-27 18:30:40,633 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 18:30:40,633 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/Concat_3'.
+2025-06-27 18:30:40,726 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:03.46)
+2025-06-27 18:30:42,108 - INFO - parser.py:162 - Translation started on ONNX model yolo8l_fire_640x640
+2025-06-27 18:30:42,391 - INFO - parser.py:197 - Restored ONNX model yolo8l_fire_640x640 (completion time: 00:00:00.28)
+2025-06-27 18:30:44,108 - INFO - parser.py:220 - Extracted ONNXRuntime meta-data for Hailo model (completion time: 00:00:02.00)
+2025-06-27 18:30:45,321 - INFO - onnx_translator.py:2640 - NMS structure of yolov8 (or equivalent architecture) was detected.
+2025-06-27 18:30:45,321 - INFO - onnx_translator.py:2642 - In order to use HailoRT post-processing capabilities, these end node names should be used: /model.22/cv2.0/cv2.0.2/Conv /model.22/cv3.0/cv3.0.2/Conv /model.22/cv3.1/cv3.1.2/Conv /model.22/cv2.1/cv2.1.2/Conv /model.22/cv3.2/cv3.2.2/Conv /model.22/cv2.2/cv2.2.2/Conv.
+2025-06-27 18:30:45,412 - INFO - parser.py:378 - Start nodes mapped from original model: 'images': 'yolo8l_fire_640x640/input_layer1'.
+2025-06-27 18:30:45,412 - INFO - parser.py:379 - End nodes mapped from original model: '/model.22/cv3.0/cv3.0.2/Conv', '/model.22/cv2.0/cv2.0.2/Conv', '/model.22/cv2.1/cv2.1.2/Conv', '/model.22/cv3.1/cv3.1.2/Conv', '/model.22/cv2.2/cv2.2.2/Conv', '/model.22/cv3.2/cv3.2.2/Conv'.
+2025-06-27 18:30:45,503 - INFO - parser.py:292 - Translation completed on ONNX model yolo8l_fire_640x640 (completion time: 00:00:03.39)
+2025-06-27 18:30:46,662 - INFO - client_runner.py:499 - Appending model script commands to yolo8l_fire_640x640 from string
+2025-06-27 18:30:46,689 - INFO - parser_cli.py:324 - Added nms postprocess command to model script.
+2025-06-27 18:30:47,199 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_qat_yolo8l_fire_640x640_pebgaknk/yolo8l_fire_640x640.har
+2025-06-27 18:30:52,722 - INFO - client_runner.py:496 - Loading model script commands to yolo8l_fire_640x640 from /tmp/hailo_qat_yolo8l_fire_640x640_pebgaknk/yolo8l_fire_640x640_hailo_script.py
+2025-06-27 18:30:58,243 - INFO - nms_postprocess_command.py:385 - For NMS architecture yolov8 the default engine is cpu. For other engine please use the 'engine' flag in the nms_postprocess model script command. If the NMS has been added during parsing, please parse the model again without confirming the addition of the NMS, and add the command manually with the desired engine.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv74 was detected as cls_layer.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv73 was detected as reg_layer.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv88 was detected as reg_layer.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv89 was detected as cls_layer.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv100 was detected as reg_layer.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:720 - The layer yolo8l_fire_640x640/conv103 was detected as cls_layer.
+2025-06-27 18:30:58,244 - INFO - nms_postprocess_command.py:514 - Using the default score threshold of 0.001 (range is [0-1], where 1 performs maximum suppression) and IoU threshold of 0.7 (range is [0-1], where 0 performs maximum suppression).
+Changing the values is possible using the nms_postprocess model script command.
+2025-06-27 18:30:58,246 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv74 was replaced by a Sigmoid
+2025-06-27 18:30:58,247 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv89 was replaced by a Sigmoid
+2025-06-27 18:30:58,247 - INFO - nms_postprocess.py:1108 - The activation function of layer yolo8l_fire_640x640/conv103 was replaced by a Sigmoid
+2025-06-27 18:30:58,726 - IMPORTANT - sdk_backend.py:1191 - Starting Model Optimization
+2025-06-27 18:30:59,293 - WARNING - mo_config.py:168 - Reducing optimization level to 0 (the accuracy won't be optimized and compression won't be used) because there's no available GPU
+2025-06-27 18:30:59,293 - WARNING - mo_config.py:233 - Running model optimization with zero level of optimization is not recommended for production use and might lead to suboptimal accuracy results
+2025-06-27 18:30:59,294 - INFO - mo_script_parser.py:91 - Model received quantization params from the hn
+2025-06-27 18:31:03,826 - INFO - algorithm_base.py:149 - MatmulDecompose skipped
+2025-06-27 18:31:04,026 - INFO - algorithm_base.py:152 - Starting Mixed Precision
+2025-06-27 18:31:04,616 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Mixed Precision is done (completion time is 00:00:00.59)
+2025-06-27 18:31:04,901 - INFO - algorithm_base.py:149 - LayerNorm Decomposition skipped
+2025-06-27 18:31:05,597 - INFO - algorithm_base.py:152 - Starting Statistics Collector
+2025-06-27 18:31:05,599 - INFO - stats_collection.py:77 - Using dataset with 64 entries for calibration
+2025-06-27 18:31:59,277 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Statistics Collector is done (completion time is 00:00:53.68)
+2025-06-27 18:32:00,854 - INFO - algorithm_base.py:152 - Starting Fix zp_comp Encoding
+2025-06-27 18:32:00,855 - INFO - algorithm_base.py:168 - Model Optimization Algorithm Fix zp_comp Encoding is done (completion time is 00:00:00.00)
+2025-06-27 18:32:00,855 - INFO - algorithm_base.py:149 - Matmul Equalization skipped
+2025-06-27 18:32:00,855 - INFO - algorithm_base.py:152 - Starting MatmulDecomposeFix
+2025-06-27 18:32:00,855 - INFO - algorithm_base.py:168 - Model Optimization Algorithm MatmulDecomposeFix is done (completion time is 00:00:00.00)
+2025-06-27 18:32:14,380 - INFO - algorithm_base.py:149 - Finetune encoding skipped
+2025-06-27 18:32:14,381 - INFO - algorithm_base.py:149 - Bias Correction skipped
+2025-06-27 18:32:14,391 - INFO - algorithm_base.py:149 - Adaround skipped
+2025-06-27 18:32:14,396 - INFO - algorithm_base.py:149 - Quantization-Aware Fine-Tuning skipped
+2025-06-27 18:32:24,182 - INFO - algorithm_base.py:149 - Layer Noise Analysis skipped
+2025-06-27 18:32:24,600 - INFO - quant_checker.py:171 - The calibration set seems to not be normalized, because the values range is [(0.0, 1.0), (0.0, 1.0), (0.0, 1.0)].
+Since the neural core works in 8-bit (between 0 to 255), a quantization will occur on the CPU of the runtime platform.
+Add a normalization layer to the model to offload the normalization to the neural core.
+Refer to the user guide Hailo Dataflow Compiler user guide / Model Optimization / Optimization Related Model Script Commands / model_modification_commands / normalization for details.
+2025-06-27 18:32:33,643 - IMPORTANT - sdk_backend.py:1203 - Model Optimization is done
+2025-06-27 18:32:35,778 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_qat_yolo8l_fire_640x640_pebgaknk/yolo8l_fire_640x640_optimized.har
+2025-06-27 18:32:47,149 - INFO - compiler_cli.py:81 - Compiling network
+2025-06-27 18:32:47,187 - INFO - hailo_tools_runner.py:510 - To achieve optimal performance, set the compiler_optimization_level to "max" by adding performance_param(compiler_optimization_level=max) to the model script. Note that this may increase compilation time.
+2025-06-27 19:21:10,207 - INFO - compiler_cli.py:86 - Compilation complete
+2025-06-27 19:21:10,243 - INFO - compiler_cli.py:91 - Saved HEF to: /tmp/hailo_qat_yolo8l_fire_640x640_pebgaknk/yolo8l_fire_640x640.hef
+2025-06-27 19:21:12,443 - INFO - client_runner.py:1876 - Saved HAR to: /tmp/hailo_qat_yolo8l_fire_640x640_pebgaknk/yolo8l_fire_640x640_compiled.har

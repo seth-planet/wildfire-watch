@@ -1,0 +1,16 @@
+[2025-06-28 08:56:03.535] [default] [info] Ran from command: "/home/seth/.local/bin/hailo compiler /tmp/yolo8l_fire_nms_optimized.har --hw-arch hailo8l"
+[2025-06-28 08:56:03.537] [default] [info] Loading network parameters
+[2025-06-28 08:56:03.999] [default] [info] Starting Hailo allocation and compilation flow
+[2025-06-28 08:56:04.001] [default] [info] Adding an output layer after conv73
+[2025-06-28 08:56:04.001] [default] [info] Adding an output layer after conv74
+[2025-06-28 08:56:04.001] [default] [info] Adding an output layer after conv88
+[2025-06-28 08:56:04.001] [default] [info] Adding an output layer after conv89
+[2025-06-28 08:56:04.001] [default] [info] Adding an output layer after conv100
+[2025-06-28 08:56:04.001] [default] [info] Adding an output layer after conv103
+[2025-06-28 08:56:04.017] [default] [info] Model name: yolo8l_fire_nms
+[2025-06-28 08:56:04.049] [default] [info] Building optimization options for network layers...
+[2025-06-28 08:57:24.825] [default] [info] Successfully built optimization options - 1m 20s 776ms
+[2025-06-28 08:57:24.827] [default] [info] Trying to compile the network in a single context
+[2025-06-28 08:57:24.827] [default] [info] Trying to solve in single context
+[2025-06-28 08:57:24.845] [default] [info] Single context flow failed: Recoverable single context error
+[2025-06-28 08:57:24.855] [default] [info] Building optimization options for network layers...

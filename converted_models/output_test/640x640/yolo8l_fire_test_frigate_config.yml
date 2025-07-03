@@ -1,0 +1,120 @@
+model:
+  path: /models/yolo8l_fire_test_edgetpu.tflite
+  input_tensor: nhwc
+  input_pixel_format: rgb
+  width: 640
+  height: 640
+  labelmap_path: /models/yolo8l_fire_test_labels.txt
+  model_type: yolov8
+detectors:
+  coral_0:
+    type: edgetpu
+    device: pcie
+  tensorrt_1:
+    type: tensorrt
+    device: 0
+  cpu:
+    type: cpu
+    num_threads: 4
+objects:
+  track:
+  - Fire
+  - Person
+  - Car
+  - Vehicle registration plate
+  - Bicycle
+  - Motorcycle
+  - Bus
+  - Truck
+  - Bird
+  filters:
+    Fire:
+      min_area: 100
+      max_area: 1000000
+      min_score: 0.45
+      threshold: 0.55
+      min_frames:
+        default: 2
+        tracked: 1
+    Person:
+      min_area: 500
+      max_area: 100000
+      min_score: 0.5
+      threshold: 0.6
+      min_frames:
+        default: 3
+        tracked: 2
+    Car:
+      min_area: 500
+      max_area: 100000
+      min_score: 0.5
+      threshold: 0.6
+      min_frames:
+        default: 3
+        tracked: 2
+    Vehicle registration plate:
+      min_area: 500
+      max_area: 100000
+      min_score: 0.5
+      threshold: 0.6
+      min_frames:
+        default: 3
+        tracked: 2
+    Bicycle:
+      min_area: 1000
+      max_area: 50000
+      min_score: 0.6
+      threshold: 0.7
+      min_frames:
+        default: 5
+        tracked: 3
+    Motorcycle:
+      min_area: 1000
+      max_area: 50000
+      min_score: 0.6
+      threshold: 0.7
+      min_frames:
+        default: 5
+        tracked: 3
+    Bus:
+      min_area: 1000
+      max_area: 50000
+      min_score: 0.6
+      threshold: 0.7
+      min_frames:
+        default: 5
+        tracked: 3
+    Truck:
+      min_area: 1000
+      max_area: 50000
+      min_score: 0.6
+      threshold: 0.7
+      min_frames:
+        default: 5
+        tracked: 3
+    Bird:
+      min_area: 1000
+      max_area: 50000
+      min_score: 0.6
+      threshold: 0.7
+      min_frames:
+        default: 5
+        tracked: 3
+motion:
+  threshold: 20
+  contour_area: 100
+  delta_alpha: 0.2
+  frame_alpha: 0.2
+  frame_height: 180
+  mask: ''
+mqtt:
+  enabled: true
+  host: mqtt_broker
+  topic_prefix: frigate
+  client_id: frigate
+  stats_interval: 30
+  alerts:
+    fire_detection:
+      enabled: true
+      topic: frigate/alerts/fire
+      retain: true

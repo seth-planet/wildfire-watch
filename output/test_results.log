@@ -1,0 +1,26 @@
+[0;34mWildfire Watch Test Runner with Python Version Selection[0m
+[0;34m=======================================================[0m
+[0;34mValidating Python environment...[0m
+[0;32m✅ python3.12 available: Python 3.12.11[0m
+[0;32m✅ python3.10 available: Python 3.10.18[0m
+[0;32m✅ python3.8 available: Python 3.8.10[0m
+[0;32mEnvironment validation complete (3/3 versions available)[0m
+[0;34mRunning all tests with appropriate Python versions...[0m
+[0;34mRunning Python 3.12 tests...[0m
+[0;32m✅ python3.12 available: Python 3.12.11[0m
+Starting pytest session with Python 3.12
+Test collection will be restricted to Python 3.12 compatible tests
+============================= test session starts ==============================
+platform linux -- Python 3.12.11, pytest-8.4.0, pluggy-1.6.0
+rootdir: /home/seth/wildfire-watch
+configfile: pytest-python312.ini
+plugins: cov-6.1.1, timeout-2.4.0, xdist-3.7.0, mock-3.14.1, asyncio-1.0.0, anyio-4.4.0
+timeout: 1800.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 12/12 workers
+12 workers [527 items]
+
+..................................................................s..... [ 13%]
+s...s............s..........

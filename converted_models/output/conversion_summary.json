@@ -1,0 +1,76 @@
+{
+  "model_name": "yolo8l_fire",
+  "model_info": {
+    "name": "yolo8l_fire",
+    "type": "unknown",
+    "version": null,
+    "input_size": [
+      640,
+      640
+    ],
+    "classes": null,
+    "num_classes": 0,
+    "architecture": null,
+    "license": null,
+    "has_nms": false,
+    "output_format": "xyxy",
+    "qat_compatible": false
+  },
+  "sizes": {
+    "640x640": {
+      "outputs": {
+        "onnx": "output/640x640/yolo8l_fire_640x640.onnx",
+        "tensorrt": "output/640x640/yolo8l_fire_tensorrt.engine",
+        "frigate_config": "output/640x640/yolo8l_fire_frigate_config.yml"
+      },
+      "errors": [],
+      "validation": {
+        "onnx": {
+          "passed": true,
+          "degradation": 0.0,
+          "metrics": {
+            "input_shape": [
+              1,
+              3,
+              640,
+              640
+            ],
+            "output_shapes": [
+              [
+                1,
+                36,
+                8400
+              ]
+            ],
+            "model_size_mb": 166.67076206207275
+          },
+          "threshold": 1.0
+        },
+        "tensorrt": {
+          "passed": true,
+          "degradation": 4.0,
+          "metrics": {
+            "model_size_mb": 87.82625198364258
+          },
+          "skipped": true,
+          "error": "TensorRT validation requires target device",
+          "threshold": 5.0
+        }
+      },
+      "benchmarks": {},
+      "models": {
+        "tensorrt": "output/640x640/yolo8l_fire_tensorrt.engine"
+      }
+    }
+  },
+  "conversion_time_seconds": 253.95491743087769,
+  "baseline_metrics": {
+    "mAP50": 0.85,
+    "mAP50_95": 0.65,
+    "precision": 0.9,
+    "recall": 0.85,
+    "f1_score": 0.87,
+    "inference_time_ms": 50.0,
+    "model_size_mb": 83.63426494598389
+  }
+}

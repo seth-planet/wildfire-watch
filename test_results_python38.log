@@ -1,0 +1,181 @@
+[0;34mWildfire Watch Test Runner with Python Version Selection[0m
+[0;34m=======================================================[0m
+[0;34mValidating Python environment...[0m
+[0;32m✅ python3.12 available: Python 3.12.11[0m
+[0;32m✅ python3.10 available: Python 3.10.18[0m
+[0;32m✅ python3.8 available: Python 3.8.10[0m
+[0;32mEnvironment validation complete (3/3 versions available)[0m
+[0;34mRunning Python 3.8 tests...[0m
+[0;32m✅ python3.8 available: Python 3.8.10[0m
+Starting pytest session with Python 3.8
+Test collection will be restricted to Python 3.8 compatible tests
+[1m============================= test session starts ==============================[0m
+platform linux -- Python 3.8.10, pytest-8.3.5, pluggy-1.5.0 -- /usr/bin/python3.8
+cachedir: .pytest_cache
+rootdir: /home/seth/wildfire-watch
+configfile: pytest-python38.ini
+testpaths: tests
+plugins: xdist-3.6.1, timeout-2.4.0, typeguard-2.13.3
+timeout: 1800.0s
+timeout method: thread
+timeout func_only: True
+created: 12/12 workers
+12 workers [37 items]
+
+scheduling tests via LoadScheduling
+
+tests/test_deployment.py::TestDeploymentProfiles::test_profile_configurations_exist 
+tests/test_coral_fire_video_e2e.py::TestCoralFireVideoE2E::test_coral_fire_detection_on_videos 
+tests/test_deployment.py::TestStorageConfiguration::test_volume_persistence 
+tests/test_deployment.py::TestDockerComposeDeployment::test_health_checks 
+tests/test_deployment.py::TestMultiNodeConfiguration::test_node_identity_configuration 
+tests/test_deployment.py::TestDockerComposeDeployment::test_docker_compose_valid_yaml 
+tests/test_model_converter.py::ValidationIntegrationTests::test_benchmark_integration 
+tests/test_deployment.py::TestDiagnosticTools::test_diagnostic_scripts_referenced 
+tests/test_deployment.py::TestEmergencyFeatures::test_emergency_bypass_configuration 
+tests/test_deployment.py::TestHardwareCompatibility::test_accelerator_configurations 
+tests/test_deployment.py::TestSecurityDeployment::test_acl_configuration 
+tests/test_deployment.py::TestDockerComposeDeployment::test_network_configuration 
+[gw9][36m [  2%] [0m[32mPASSED[0m tests/test_deployment.py::TestHardwareCompatibility::test_accelerator_configurations 
+[gw5][36m [  5%] [0m[32mPASSED[0m tests/test_deployment.py::TestDeploymentProfiles::test_profile_configurations_exist 
+[gw6][36m [  8%] [0m[32mPASSED[0m tests/test_deployment.py::TestEmergencyFeatures::test_emergency_bypass_configuration 
+[gw10][36m [ 10%] [0m[32mPASSED[0m tests/test_deployment.py::TestSecurityDeployment::test_acl_configuration 
+[gw8][36m [ 13%] [0m[32mPASSED[0m tests/test_deployment.py::TestDiagnosticTools::test_diagnostic_scripts_referenced 
+tests/test_deployment.py::TestEmergencyFeatures::test_manual_override_gpio 
+tests/test_deployment.py::TestHardwareCompatibility::test_usb_gpio_adapter_support 
+tests/test_deployment.py::TestDeploymentProfiles::test_hardware_auto_detection 
+tests/test_deployment.py::TestSecurityDeployment::test_tls_deployment_configuration 
+[gw5][36m [ 16%] [0m[32mPASSED[0m tests/test_deployment.py::TestDeploymentProfiles::test_hardware_auto_detection 
+[gw6][36m [ 18%] [0m[33mSKIPPED[0m tests/test_deployment.py::TestEmergencyFeatures::test_manual_override_gpio 
+[gw10][36m [ 21%] [0m[32mPASSED[0m tests/test_deployment.py::TestHardwareCompatibility::test_usb_gpio_adapter_support 
+tests/test_e2e_coral_frigate.py::TestE2ECoralFrigate::test_coral_frigate_fire_detection_e2e 
+[gw9][36m [ 24%] [0m[33mSKIPPED[0m tests/test_e2e_coral_frigate.py::TestE2ECoralFrigate::test_coral_frigate_fire_detection_e2e 
+tests/test_model_converter.py::ValidationIntegrationTests::test_format_specific_thresholds 
+tests/test_model_converter.py::ValidationIntegrationTests::test_qat_affects_thresholds 
+tests/test_model_converter.py::ValidationIntegrationTests::test_multi_format_validation 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_disabled_flag 
+[gw4][36m [ 27%] [0m[32mPASSED[0m tests/test_deployment.py::TestMultiNodeConfiguration::test_node_identity_configuration 
+tests/test_deployment.py::TestMultiNodeConfiguration::test_zone_configuration 
+[gw4][36m [ 29%] [0m[33mSKIPPED[0m tests/test_deployment.py::TestMultiNodeConfiguration::test_zone_configuration 
+[gw2][36m [ 32%] [0m[32mPASSED[0m tests/test_deployment.py::TestDockerComposeDeployment::test_health_checks 
+tests/test_model_converter.py::EndToEndValidationTests::test_cli_integration 
+tests/test_deployment.py::TestDockerComposeDeployment::test_resource_limits 
+[gw1][36m [ 35%] [0m[32mPASSED[0m tests/test_deployment.py::TestDockerComposeDeployment::test_docker_compose_valid_yaml 
+[gw3][36m [ 37%] [0m[32mPASSED[0m tests/test_deployment.py::TestDockerComposeDeployment::test_network_configuration 
+[gw7][36m [ 40%] [0m[32mPASSED[0m tests/test_deployment.py::TestStorageConfiguration::test_volume_persistence 
+tests/test_deployment.py::TestMultiNodeConfiguration::test_mqtt_bridging_config 
+tests/test_deployment.py::TestDockerComposeDeployment::test_service_dependencies 
+tests/test_deployment.py::TestStorageConfiguration::test_backup_restore_scripts 
+[gw3][36m [ 43%] [0m[32mPASSED[0m tests/test_deployment.py::TestMultiNodeConfiguration::test_mqtt_bridging_config 
+[gw7][36m [ 45%] [0m[33mSKIPPED[0m tests/test_deployment.py::TestStorageConfiguration::test_backup_restore_scripts 
+tests/test_model_converter.py::ValidationReportingTests::test_validation_summary_formatting 
+[gw8][36m [ 48%] [0m[32mPASSED[0m tests/test_deployment.py::TestSecurityDeployment::test_tls_deployment_configuration 
+tests/test_model_converter.py::ValidationIntegrationTests::test_skipped_validation_handling 
+[gw2][36m [ 51%] [0m[32mPASSED[0m tests/test_deployment.py::TestDockerComposeDeployment::test_resource_limits 
+tests/test_model_converter.py::ValidationReportingTests::test_multi_size_validation_reporting 
+[gw2][36m [ 54%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationReportingTests::test_multi_size_validation_reporting 
+[gw1][36m [ 56%] [0m[32mPASSED[0m tests/test_deployment.py::TestDockerComposeDeployment::test_service_dependencies 
+[gw4][36m [ 59%] [0m[32mPASSED[0m tests/test_model_converter.py::EndToEndValidationTests::test_cli_integration 
+tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation 
+[gw9][36m [ 62%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_disabled_flag 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically 
+[gw11][36m [ 64%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_benchmark_integration 
+tests/test_model_converter.py::ValidationIntegrationTests::test_failed_validation_reporting 
+[gw6][36m [ 67%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_multi_format_validation 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size 
+[gw8][36m [ 70%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_skipped_validation_handling 
+[gw3][36m [ 72%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationReportingTests::test_validation_summary_formatting 
+[gw10][36m [ 75%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_qat_affects_thresholds 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary 
+[gw5][36m [ 78%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_format_specific_thresholds 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_error_handling 
+[gw11][36m [ 81%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_failed_validation_reporting 
+[gw5][36m [ 83%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_error_handling 
+[gw4][36m [ 86%] [0m[32mPASSED[0m tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation 
+[gw9][36m [ 89%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically 
+[gw6][36m [ 91%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size 
+[gw10][36m [ 94%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary 
+[gw0][36m [ 97%] [0m[32mPASSED[0m tests/test_coral_fire_video_e2e.py::TestCoralFireVideoE2E::test_coral_fire_detection_on_videos 
+tests/test_coral_fire_video_e2e.py::TestCoralFireVideoE2E::test_coral_frigate_integration_with_video 
+[gw0][36m [100%] [0m[33mSKIPPED[0m tests/test_coral_fire_video_e2e.py::TestCoralFireVideoE2E::test_coral_frigate_integration_with_video 
+Worker master completed test session cleanup
+
+
+==================================== ERRORS ====================================
+[31m[1m________________ ERROR collecting tests/test_camera_detector.py ________________[0m
+ImportError while importing test module '/home/seth/wildfire-watch/tests/test_camera_detector.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.8/importlib/__init__.py:127: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+tests/test_camera_detector.py:24: in <module>
+    from detect import CameraDetector, Camera, CameraProfile, MACTracker, Config
+camera_detector/detect.py:85: in <module>
+    from wsdiscovery.discovery import ThreadedWSDiscovery as WSDiscovery
+E   ModuleNotFoundError: No module named 'wsdiscovery'
+[31m[1m______________ ERROR collecting tests/test_e2e_hardware_docker.py ______________[0m
+../.local/lib/python3.8/site-packages/_pytest/python.py:493: in importtestmodule
+    mod = import_path(
+../.local/lib/python3.8/site-packages/_pytest/pathlib.py:587: in import_path
+    importlib.import_module(module_name)
+/usr/lib/python3.8/importlib/__init__.py:127: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+<frozen importlib._bootstrap>:1014: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:991: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:975: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:671: in _load_unlocked
+    ???
+../.local/lib/python3.8/site-packages/_pytest/assertion/rewrite.py:176: in exec_module
+    source_stat, co = _rewrite_test(fn, self.config)
+../.local/lib/python3.8/site-packages/_pytest/assertion/rewrite.py:356: in _rewrite_test
+    tree = ast.parse(source, filename=strfn)
+/usr/lib/python3.8/ast.py:47: in parse
+    return compile(source, filename, mode, flags,
+E     File "/home/seth/wildfire-watch/tests/test_e2e_hardware_docker.py", line 387
+E       def on_camera_discovery(msg):
+E       ^
+E   SyntaxError: invalid syntax
+[33m=============================== warnings summary ===============================[0m
+tests/conftest.py:56: 13 warnings
+  /home/seth/wildfire-watch/tests/conftest.py:56: PytestRemovedIn9Warning: The (path: py.path.local) argument is deprecated, please use (collection_path: pathlib.Path)
+  see https://docs.pytest.org/en/latest/deprecations.html#py-path-local-arguments-for-hooks-replaced-with-pathlib-path
+    def pytest_ignore_collect(path, config):
+
+tests/mqtt_test_broker.py:16: 12 warnings
+  /home/seth/wildfire-watch/tests/mqtt_test_broker.py:16: PytestCollectionWarning: cannot collect test class 'MQTTTestBroker' because it has a __init__ constructor (from: tests/test_coral_fire_video_e2e.py)
+    class MQTTTestBroker:
+
+tests/mqtt_test_broker.py:16: 12 warnings
+  /home/seth/wildfire-watch/tests/mqtt_test_broker.py:16: PytestCollectionWarning: cannot collect test class 'MQTTTestBroker' because it has a __init__ constructor (from: tests/test_e2e_coral_frigate.py)
+    class MQTTTestBroker:
+
+tests/mqtt_test_broker.py:16: 12 warnings
+  /home/seth/wildfire-watch/tests/mqtt_test_broker.py:16: PytestCollectionWarning: cannot collect test class 'MQTTTestBroker' because it has a __init__ constructor (from: tests/test_tensorrt_gpu_integration.py)
+    class MQTTTestBroker:
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+============================= slowest 10 durations =============================
+133.70s call     tests/test_coral_fire_video_e2e.py::TestCoralFireVideoE2E::test_coral_fire_detection_on_videos
+6.46s call     tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically
+6.24s call     tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation
+5.93s call     tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size
+4.50s call     tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary
+4.36s call     tests/test_model_converter.py::ValidationIntegrationTests::test_format_specific_thresholds
+4.35s call     tests/test_model_converter.py::ValidationIntegrationTests::test_qat_affects_thresholds
+3.78s call     tests/test_model_converter.py::ValidationReportingTests::test_validation_summary_formatting
+3.08s call     tests/test_model_converter.py::ValidationIntegrationTests::test_failed_validation_reporting
+2.98s call     tests/test_model_converter.py::ValidationIntegrationTests::test_skipped_validation_handling
+[36m[1m=========================== short test summary info ============================[0m
+[31mERROR[0m tests/test_camera_detector.py
+[31mERROR[0m tests/test_e2e_hardware_docker.py
+[31m======= [32m32 passed[0m, [33m5 skipped[0m, [33m49 warnings[0m, [31m[1m2 errors[0m[31m in 150.20s (0:02:30)[0m[31m =======[0m
+[0;31m❌ Python 3.8 tests failed[0m
+[0;34m=======================================================[0m
+[0;34mTEST EXECUTION SUMMARY[0m
+[0;34m=======================================================[0m
+[0;31mPython 3.8: ❌ FAILED[0m
+[0;34mOverall: 0/1 test suites passed[0m
+[0;31mSome test suites failed - check output above[0m

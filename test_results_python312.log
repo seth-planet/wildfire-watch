@@ -1,0 +1,792 @@
+[0;34mWildfire Watch Test Runner with Python Version Selection[0m
+[0;34m=======================================================[0m
+[0;34mValidating Python environment...[0m
+[0;32m✅ python3.12 available: Python 3.12.11[0m
+[0;32m✅ python3.10 available: Python 3.10.18[0m
+[0;32m✅ python3.8 available: Python 3.8.10[0m
+[0;32mEnvironment validation complete (3/3 versions available)[0m
+[0;34mRunning Python 3.12 tests...[0m
+[0;32m✅ python3.12 available: Python 3.12.11[0m
+Starting pytest session with Python 3.12
+Test collection will be restricted to Python 3.12 compatible tests
+[1m============================= test session starts ==============================[0m
+platform linux -- Python 3.12.11, pytest-8.4.0, pluggy-1.6.0 -- /usr/bin/python3.12
+cachedir: .pytest_cache
+rootdir: /home/seth/wildfire-watch
+configfile: pytest-python312.ini
+testpaths: tests
+plugins: cov-6.1.1, timeout-2.4.0, xdist-3.7.0, mock-3.14.1, asyncio-1.0.0, anyio-4.4.0
+timeout: 1800.0s
+timeout method: thread
+timeout func_only: True
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+created: 12/12 workers
+12 workers [385 items]
+
+scheduling tests via LoadScheduling
+
+tests/test_container_smoke.py::TestServiceEnvironment::test_storage_manager_exists 
+tests/test_consensus.py::TestErrorHandling::test_extreme_area_values 
+tests/test_configuration_system.py::TestConfigBase::test_config_schema_validation 
+tests/test_configuration_system.py::TestConfigurationCLI::test_cli_compatibility_check 
+tests/test_consensus_integration.py::TestConsensusTrigger::test_multi_camera_consensus_trigger 
+tests/test_consensus.py::TestConfiguration::test_area_calculation 
+tests/test_core_logic.py::TestCoreLogic::test_detection_object_cleanup 
+tests/test_consensus.py::TestAdditionalFeatures::test_mqtt_reconnection_behavior 
+tests/test_consensus_integration.py::TestSingleCameraMode::test_single_camera_mode_disabled 
+tests/test_consensus.py::TestDetectionProcessing::test_process_frigate_event 
+tests/test_configuration_system.py::TestServiceConfigs::test_gpio_trigger_config_safety 
+tests/test_consensus.py::TestConsensusAlgorithm::test_non_growing_fire_ignored 
+[gw10][36m [  0%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestServiceEnvironment::test_storage_manager_exists 
+[gw11][36m [  0%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_detection_object_cleanup 
+[gw0][36m [  0%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigBase::test_config_schema_validation 
+[gw2][36m [  1%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_gpio_trigger_config_safety 
+tests/test_core_logic.py::TestCoreLogic::test_config_environment_variables 
+tests/test_configuration_system.py::TestConfigBase::test_shared_mqtt_config 
+tests/test_configuration_system.py::TestServiceConfigs::test_gpio_trigger_config_safe 
+tests/test_core_logic.py::TestCoreLogic::test_detection_area_calculation 
+[gw1][36m [  1%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigurationCLI::test_cli_compatibility_check 
+tests/test_consensus.py::TestBasicOperation::test_fire_consensus_initialization 
+[gw0][36m [  1%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigBase::test_shared_mqtt_config 
+[gw2][36m [  1%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_gpio_trigger_config_safe 
+tests/test_configuration_system.py::TestConfigBase::test_mqtt_config_validation 
+tests/test_configuration_system.py::TestServiceConfigs::test_gpio_pin_conflicts 
+[gw11][36m [  2%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_config_environment_variables 
+[gw2][36m [  2%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_gpio_pin_conflicts 
+tests/test_e2e_fire_detection_full.py::TestE2EFireDetection::test_complete_fire_detection_pipeline 
+[gw0][36m [  2%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigBase::test_mqtt_config_validation 
+tests/test_configuration_system.py::TestConfigBase::test_config_export_json 
+tests/test_configuration_system.py::TestCrossServiceValidation::test_load_all_configs 
+[gw0][36m [  2%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigBase::test_config_export_json 
+[gw2][36m [  3%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestCrossServiceValidation::test_load_all_configs 
+tests/test_configuration_system.py::TestServiceConfigs::test_camera_detector_config 
+tests/test_configuration_system.py::TestCrossServiceValidation::test_cross_service_warnings 
+[gw0][36m [  3%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_camera_detector_config 
+tests/test_configuration_system.py::TestServiceConfigs::test_camera_detector_validation_error 
+[gw2][36m [  3%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestCrossServiceValidation::test_cross_service_warnings 
+tests/test_configuration_system.py::TestCrossServiceValidation::test_config_diff 
+[gw0][36m [  3%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_camera_detector_validation_error 
+tests/test_configuration_system.py::TestServiceConfigs::test_fire_consensus_config 
+[gw2][36m [  4%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestCrossServiceValidation::test_config_diff 
+tests/test_configuration_system.py::TestConfigurationCLI::test_cli_validate_success 
+[gw0][36m [  4%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_fire_consensus_config 
+tests/test_configuration_system.py::TestServiceConfigs::test_fire_consensus_validation 
+[gw2][36m [  4%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigurationCLI::test_cli_validate_success 
+tests/test_configuration_system.py::TestConfigurationCLI::test_cli_export 
+[gw0][36m [  4%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestServiceConfigs::test_fire_consensus_validation 
+tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_detector_config 
+[gw2][36m [  5%] [0m[32mPASSED[0m tests/test_configuration_system.py::TestConfigurationCLI::test_cli_export 
+tests/test_e2e_hardware_integration.py::TestHardwareCompatibility::test_python_version_requirements 
+[gw0][36m [  5%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_detector_config 
+tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_model_config_generation 
+[gw0][36m [  5%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_model_config_generation 
+[gw2][36m [  5%] [0m[33mSKIPPED[0m tests/test_e2e_hardware_integration.py::TestHardwareCompatibility::test_python_version_requirements 
+tests/test_e2e_hardware_integration.py::TestHardwareCompatibility::test_model_format_availability 
+tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_object_tracking_config 
+[gw0][36m [  6%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_object_tracking_config 
+tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_yaml_generation 
+[gw2][36m [  6%] [0m[31mFAILED[0m tests/test_e2e_hardware_integration.py::TestHardwareCompatibility::test_model_format_availability 
+tests/test_fixes_validation.py::test_concurrent_futures_fix 
+[gw2][36m [  6%] [0m[32mPASSED[0m tests/test_fixes_validation.py::test_concurrent_futures_fix 
+tests/test_fixes_validation.py::test_camera_state_creation 
+[gw2][36m [  7%] [0m[32mPASSED[0m tests/test_fixes_validation.py::test_camera_state_creation 
+tests/test_fixes_validation.py::test_mqtt_broker_attributes 
+[gw2][36m [  7%] [0m[32mPASSED[0m tests/test_fixes_validation.py::test_mqtt_broker_attributes 
+tests/test_fixes_validation.py::test_calculate_area_signature 
+[gw2][36m [  7%] [0m[32mPASSED[0m tests/test_fixes_validation.py::test_calculate_area_signature 
+tests/test_frigate_integration.py::FrigateConfigurationTests::test_all_32_classes_in_labelmap 
+[gw0][36m [  7%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateConfigurationTests::test_frigate_yaml_generation 
+tests/test_frigate_integration.py::FrigateModelDeploymentTests::test_labelmap_file_generation 
+[gw2][36m [  8%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateConfigurationTests::test_all_32_classes_in_labelmap 
+tests/test_frigate_integration.py::FrigateIntegrationValidationTests::test_mqtt_topic_validation 
+[gw2][36m [  8%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateIntegrationValidationTests::test_mqtt_topic_validation 
+tests/test_hardware_integration.py::TestHardwareDetection::test_hardware_availability 
+[gw2][36m [  8%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestHardwareDetection::test_hardware_availability 
+tests/test_hardware_integration.py::TestCoralIntegration::test_coral_docker_access 
+[gw0][36m [  8%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateModelDeploymentTests::test_labelmap_file_generation 
+tests/test_frigate_integration.py::FrigateModelDeploymentTests::test_model_deployment_script 
+[gw0][36m [  9%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateModelDeploymentTests::test_model_deployment_script 
+tests/test_frigate_integration.py::FrigateModelDeploymentTests::test_tflite_model_format 
+[gw0][36m [  9%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateModelDeploymentTests::test_tflite_model_format 
+tests/test_frigate_integration.py::FrigateFireDetectionTests::test_fire_alert_automation 
+[gw0][36m [  9%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateFireDetectionTests::test_fire_alert_automation 
+tests/test_frigate_integration.py::FrigateFireDetectionTests::test_fire_detection_zones 
+[gw0][36m [  9%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateFireDetectionTests::test_fire_detection_zones 
+tests/test_frigate_integration.py::FrigateFireDetectionTests::test_fire_recording_retention 
+[gw0][36m [ 10%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateFireDetectionTests::test_fire_recording_retention 
+tests/test_frigate_integration.py::FrigatePerformanceTests::test_detection_fps_settings 
+[gw0][36m [ 10%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigatePerformanceTests::test_detection_fps_settings 
+tests/test_frigate_integration.py::FrigatePerformanceTests::test_hardware_acceleration_config 
+[gw0][36m [ 10%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigatePerformanceTests::test_hardware_acceleration_config 
+tests/test_frigate_integration.py::FrigateIntegrationValidationTests::test_deployment_checklist 
+[gw0][36m [ 10%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateIntegrationValidationTests::test_deployment_checklist 
+tests/test_frigate_integration.py::FrigateIntegrationValidationTests::test_end_to_end_configuration 
+[gw0][36m [ 11%] [0m[32mPASSED[0m tests/test_frigate_integration.py::FrigateIntegrationValidationTests::test_end_to_end_configuration 
+tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_cuda_availability 
+[gw0][36m [ 11%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_cuda_availability 
+tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_docker_gpu_access 
+[gw2][36m [ 11%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestCoralIntegration::test_coral_docker_access 
+tests/test_hardware_integration.py::TestCoralIntegration::test_coral_inference 
+[gw2][36m [ 11%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestCoralIntegration::test_coral_inference 
+tests/test_hardware_integration.py::TestHailoIntegration::test_hailo_benchmark 
+[gw4][36m [ 12%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_non_growing_fire_ignored 
+[gw6][36m [ 12%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_area_calculation 
+[gw10][36m [ 12%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_detection_area_calculation 
+tests/test_core_logic.py::TestCoreLogic::test_detection_validation 
+[gw2][36m [ 12%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestHailoIntegration::test_hailo_benchmark 
+tests/test_hardware_integration.py::TestHailoIntegration::test_hailo_detection 
+[gw2][36m [ 13%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestHailoIntegration::test_hailo_detection 
+tests/test_hardware_integration.py::TestHailoIntegration::test_hailo_docker_access 
+[gw10][36m [ 13%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_detection_validation 
+tests/test_core_logic.py::TestCoreLogic::test_camera_state_detection_tracking 
+[gw10][36m [ 13%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_camera_state_detection_tracking 
+tests/test_core_logic.py::TestCoreLogic::test_growing_fire_detection_algorithm 
+[gw10][36m [ 14%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_growing_fire_detection_algorithm 
+tests/test_core_logic.py::TestCoreLogic::test_shrinking_fire_not_detected 
+[gw10][36m [ 14%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_shrinking_fire_not_detected 
+tests/test_core_logic.py::TestCoreLogic::test_moving_average_calculation 
+[gw10][36m [ 14%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_moving_average_calculation 
+tests/test_core_logic.py::TestCoreLogic::test_growth_trend_detection 
+[gw10][36m [ 14%] [0m[32mPASSED[0m tests/test_core_logic.py::TestCoreLogic::test_growth_trend_detection 
+tests/test_int8_quantization.py::TestINT8Quantization::test_edge_tpu_compilation_command 
+[gw10][36m [ 15%] [0m[32mPASSED[0m tests/test_int8_quantization.py::TestINT8Quantization::test_edge_tpu_compilation_command 
+tests/test_int8_quantization.py::test_readme_int8_documentation 
+[gw10][36m [ 15%] [0m[32mPASSED[0m tests/test_int8_quantization.py::test_readme_int8_documentation 
+tests/test_integration_docker.py::test_docker_integration 
+[gw10][36m [ 15%] [0m[31mERROR[0m tests/test_integration_docker.py::test_docker_integration 
+tests/test_integration_docker_sdk.py::test_docker_sdk_integration 
+[gw7][36m [ 15%] [0m[32mPASSED[0m tests/test_consensus.py::TestAdditionalFeatures::test_mqtt_reconnection_behavior 
+[gw1][36m [ 16%] [0m[32mPASSED[0m tests/test_consensus.py::TestBasicOperation::test_fire_consensus_initialization 
+tests/test_consensus.py::TestConsensusAlgorithm::test_moving_average_with_noise 
+tests/test_consensus.py::TestConfiguration::test_frigate_pixel_coordinate_conversion 
+tests/test_consensus.py::TestBasicOperation::test_detection_class_creation 
+[gw1][36m [ 16%] [0m[32mPASSED[0m tests/test_consensus.py::TestBasicOperation::test_detection_class_creation 
+tests/test_consensus.py::TestBasicOperation::test_camera_state_tracking 
+[gw1][36m [ 16%] [0m[32mPASSED[0m tests/test_consensus.py::TestBasicOperation::test_camera_state_tracking 
+[gw5][36m [ 16%] [0m[32mPASSED[0m tests/test_consensus.py::TestErrorHandling::test_extreme_area_values 
+[gw0][36m [ 17%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_docker_gpu_access 
+tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_gpu_detection 
+[gw0][36m [ 17%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_gpu_detection 
+tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_tensorrt_availability 
+[gw4][36m [ 17%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_moving_average_with_noise 
+[gw6][36m [ 17%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_frigate_pixel_coordinate_conversion 
+[gw2][36m [ 18%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestHailoIntegration::test_hailo_docker_access 
+tests/test_hardware_integration.py::TestFrigateIntegration::test_frigate_hardware_detection 
+[gw2][36m [ 18%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestFrigateIntegration::test_frigate_hardware_detection 
+tests/test_hardware_integration.py::TestModelInference::test_coral_inference_speed 
+[gw0][36m [ 18%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestNVIDIAGPUIntegration::test_tensorrt_availability 
+tests/test_hardware_integration.py::TestIntelGPUIntegration::test_docker_vaapi_access 
+[gw0][36m [ 18%] [0m[33mSKIPPED[0m tests/test_hardware_integration.py::TestIntelGPUIntegration::test_docker_vaapi_access 
+tests/test_hardware_integration.py::TestIntelGPUIntegration::test_vaapi_support 
+[gw0][36m [ 19%] [0m[33mSKIPPED[0m tests/test_hardware_integration.py::TestIntelGPUIntegration::test_vaapi_support 
+tests/test_model_converter.py::ValidationIntegrationTests::test_benchmark_integration 
+[gw2][36m [ 19%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestModelInference::test_coral_inference_speed 
+tests/test_hardware_integration.py::TestModelInference::test_gpu_inference_speed 
+tests/test_consensus.py::TestConsensusAlgorithm::test_insufficient_detections_for_moving_average 
+tests/test_consensus.py::TestConfiguration::test_detection_validation 
+tests/test_consensus.py::TestErrorHandling::test_nan_inf_negative_validation 
+[gw8][36m [ 19%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestConsensusTrigger::test_multi_camera_consensus_trigger 
+[gw3][36m [ 20%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_process_frigate_event 
+[gw4][36m [ 20%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_insufficient_detections_for_moving_average 
+[gw6][36m [ 20%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_detection_validation 
+[gw0][36m [ 20%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_benchmark_integration 
+tests/test_model_converter.py::ValidationIntegrationTests::test_failed_validation_reporting 
+[gw5][36m [ 21%] [0m[32mPASSED[0m tests/test_consensus.py::TestErrorHandling::test_nan_inf_negative_validation 
+tests/test_consensus.py::TestDetectionProcessing::test_process_valid_detection 
+tests/test_consensus.py::TestConsensusAlgorithm::test_cooldown_period_enforcement 
+tests/test_consensus.py::TestConfiguration::test_moving_average_calculation 
+tests/test_consensus.py::TestErrorHandling::test_concurrent_detection_processing 
+[gw0][36m [ 21%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_failed_validation_reporting 
+tests/test_model_converter.py::ValidationIntegrationTests::test_format_specific_thresholds 
+[gw6][36m [ 21%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_moving_average_calculation 
+tests/test_consensus_integration.py::TestOnlineOfflineCameras::test_offline_cameras_excluded_from_consensus 
+[gw2][36m [ 21%] [0m[33mSKIPPED[0m tests/test_hardware_integration.py::TestModelInference::test_gpu_inference_speed 
+tests/test_hardware_integration.py::TestSystemIntegration::test_docker_compose_validation 
+[gw2][36m [ 22%] [0m[33mSKIPPED[0m tests/test_hardware_integration.py::TestSystemIntegration::test_docker_compose_validation 
+tests/test_hardware_integration.py::TestSystemIntegration::test_mqtt_connectivity 
+tests/test_consensus.py::TestIntegration::test_end_to_end_fire_detection_flow 
+tests/test_consensus.py::TestDetectionProcessing::test_process_frigate_non_fire_event 
+tests/test_consensus.py::TestConfiguration::test_growth_trend_checking 
+[gw1][36m [ 22%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_process_valid_detection 
+[gw6][36m [ 22%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_growth_trend_checking 
+[gw3][36m [ 22%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_process_frigate_non_fire_event 
+[gw4][36m [ 23%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_cooldown_period_enforcement 
+tests/test_consensus.py::TestConfiguration::test_object_tracking_cleanup 
+tests/test_consensus.py::TestDetectionProcessing::test_process_invalid_detection_low_confidence 
+[gw9][36m [ 23%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestSingleCameraMode::test_single_camera_mode_disabled 
+tests/test_container_smoke.py::TestContainerSmoke::test_mqtt_broker_startup 
+[gw5][36m [ 23%] [0m[32mPASSED[0m tests/test_consensus.py::TestErrorHandling::test_concurrent_detection_processing 
+[gw2][36m [ 23%] [0m[32mPASSED[0m tests/test_hardware_integration.py::TestSystemIntegration::test_mqtt_connectivity 
+tests/test_int8_quantization.py::TestINT8Quantization::test_train_with_int8_preparation 
+[gw6][36m [ 24%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_object_tracking_cleanup 
+[gw8][36m [ 24%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestOnlineOfflineCameras::test_offline_cameras_excluded_from_consensus 
+tests/test_consensus.py::TestDetectionProcessing::test_camera_telemetry_processing 
+tests/test_consensus.py::TestConfiguration::test_mqtt_last_will_testament 
+[gw1][36m [ 24%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_process_invalid_detection_low_confidence 
+[gw2][36m [ 24%] [0m[32mPASSED[0m tests/test_int8_quantization.py::TestINT8Quantization::test_train_with_int8_preparation 
+tests/test_int8_quantization.py::TestINT8Quantization::test_quantization_config_generation 
+[gw2][36m [ 25%] [0m[32mPASSED[0m tests/test_int8_quantization.py::TestINT8Quantization::test_quantization_config_generation 
+tests/test_int8_quantization.py::TestINT8Quantization::test_int8_conversion_command 
+[gw2][36m [ 25%] [0m[32mPASSED[0m tests/test_int8_quantization.py::TestINT8Quantization::test_int8_conversion_command 
+tests/test_int8_quantization.py::TestINT8Quantization::test_yolo_nas_architecture_quantization_friendly 
+[gw2][36m [ 25%] [0m[32mPASSED[0m tests/test_int8_quantization.py::TestINT8Quantization::test_yolo_nas_architecture_quantization_friendly 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_disabled_flag 
+[gw6][36m [ 25%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_mqtt_last_will_testament 
+tests/test_consensus.py::TestConsensusAlgorithm::test_offline_cameras_ignored 
+[gw0][36m [ 26%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_format_specific_thresholds 
+tests/test_model_converter.py::ValidationIntegrationTests::test_multi_format_validation 
+[gw3][36m [ 26%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_camera_telemetry_processing 
+tests/test_consensus_integration.py::TestCooldownPeriod::test_cooldown_prevents_rapid_triggers 
+tests/test_consensus.py::TestDetectionProcessing::test_process_invalid_detection_bad_area 
+[gw2][36m [ 26%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_disabled_flag 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_error_handling 
+tests/test_consensus.py::TestHealthMonitoring::test_health_report_generation 
+[gw0][36m [ 27%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_multi_format_validation 
+tests/test_model_converter.py::ValidationIntegrationTests::test_qat_affects_thresholds 
+[gw7][36m [ 27%] [0m[32mPASSED[0m tests/test_consensus.py::TestIntegration::test_end_to_end_fire_detection_flow 
+[gw2][36m [ 27%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_error_handling 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary 
+[gw4][36m [ 27%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_offline_cameras_ignored 
+[gw1][36m [ 28%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_process_invalid_detection_bad_area 
+[gw9][36m [ 28%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestContainerSmoke::test_mqtt_broker_startup 
+tests/test_container_smoke.py::TestContainerSmoke::test_gpio_trigger_help 
+[gw5][36m [ 28%] [0m[32mPASSED[0m tests/test_consensus.py::TestHealthMonitoring::test_health_report_generation 
+tests/test_consensus.py::TestConsensusAlgorithm::test_single_camera_no_consensus 
+tests/test_consensus.py::TestDetectionProcessing::test_process_malformed_detection 
+tests/test_consensus.py::TestAdditionalFeatures::test_mqtt_tls_configuration 
+[gw6][36m [ 28%] [0m[32mPASSED[0m tests/test_consensus.py::TestAdditionalFeatures::test_mqtt_tls_configuration 
+tests/test_model_converter_real.py::TestRealModelConversions::test_conversion_with_validation 
+tests/test_consensus.py::TestIntegration::test_mixed_detection_sources 
+[gw0][36m [ 29%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_qat_affects_thresholds 
+tests/test_model_converter.py::ValidationIntegrationTests::test_skipped_validation_handling 
+[gw9][36m [ 29%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestContainerSmoke::test_gpio_trigger_help 
+tests/test_container_smoke.py::TestContainerSmoke::test_fire_consensus_import 
+[gw0][36m [ 29%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_skipped_validation_handling 
+tests/test_mqtt_broker.py::TestConfigurationFiles::test_entrypoint_script 
+[gw0][36m [ 29%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationFiles::test_entrypoint_script 
+tests/test_mqtt_broker.py::TestConfigurationConsistency::test_port_consistency 
+[gw0][36m [ 30%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationConsistency::test_port_consistency 
+tests/test_mqtt_broker.py::TestConfigurationConsistency::test_certificate_paths_consistency 
+[gw0][36m [ 30%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationConsistency::test_certificate_paths_consistency 
+tests/test_mqtt_broker.py::TestConfigurationConsistency::test_persistence_settings 
+[gw0][36m [ 30%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationConsistency::test_persistence_settings 
+tests/test_mqtt_broker.py::TestMultiNodeSupport::test_bridge_configuration_template 
+[gw0][36m [ 30%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestMultiNodeSupport::test_bridge_configuration_template 
+tests/test_mqtt_broker.py::TestMultiNodeSupport::test_edge_to_central_bridging 
+[gw0][36m [ 31%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestMultiNodeSupport::test_edge_to_central_bridging 
+tests/test_mqtt_broker.py::TestMultiNodeSupport::test_high_availability_settings 
+[gw0][36m [ 31%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestMultiNodeSupport::test_high_availability_settings 
+tests/test_mqtt_broker.py::TestSecurityConfiguration::test_tls_security_settings 
+[gw0][36m [ 31%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestSecurityConfiguration::test_tls_security_settings 
+tests/test_mqtt_broker.py::TestSecurityConfiguration::test_default_security_warning 
+[gw0][36m [ 31%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestSecurityConfiguration::test_default_security_warning 
+tests/test_mqtt_broker.py::TestSecurityConfiguration::test_anonymous_access_configuration 
+[gw0][36m [ 32%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestSecurityConfiguration::test_anonymous_access_configuration 
+tests/test_mqtt_broker.py::TestPerformanceConfiguration::test_message_limits 
+[gw0][36m [ 32%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestPerformanceConfiguration::test_message_limits 
+tests/test_mqtt_broker.py::TestPerformanceConfiguration::test_network_resilience_settings 
+[gw0][36m [ 32%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestPerformanceConfiguration::test_network_resilience_settings 
+tests/test_mqtt_broker.py::TestPerformanceConfiguration::test_scaling_configurations_in_readme 
+[gw0][36m [ 32%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestPerformanceConfiguration::test_scaling_configurations_in_readme 
+tests/test_mqtt_broker.py::TestServiceDiscovery::test_mdns_configuration 
+[gw0][36m [ 33%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestServiceDiscovery::test_mdns_configuration 
+tests/test_mqtt_broker.py::TestServiceDiscovery::test_dbus_requirement 
+[gw0][36m [ 33%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestServiceDiscovery::test_dbus_requirement 
+tests/test_mqtt_broker.py::TestTopicStructure::test_documented_topics 
+[gw0][36m [ 33%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestTopicStructure::test_documented_topics 
+tests/test_mqtt_broker.py::TestTopicStructure::test_bridge_topic_filtering 
+[gw0][36m [ 34%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestTopicStructure::test_bridge_topic_filtering 
+tests/test_mqtt_broker.py::TestDockerIntegration::test_dockerfile_exists 
+[gw0][36m [ 34%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestDockerIntegration::test_dockerfile_exists 
+tests/test_mqtt_broker.py::TestDockerIntegration::test_volume_mounts_documented 
+[gw0][36m [ 34%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestDockerIntegration::test_volume_mounts_documented 
+tests/test_mqtt_broker.py::TestLoggingConfiguration::test_logging_settings 
+[gw0][36m [ 34%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestLoggingConfiguration::test_logging_settings 
+tests/test_mqtt_broker.py::TestLoggingConfiguration::test_debug_logging_documented 
+[gw0][36m [ 35%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestLoggingConfiguration::test_debug_logging_documented 
+tests/test_mqtt_broker.py::TestWebSocketSupport::test_websocket_configuration 
+[gw0][36m [ 35%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestWebSocketSupport::test_websocket_configuration 
+tests/test_mqtt_broker.py::TestWebSocketSupport::test_websocket_examples_in_readme 
+[gw0][36m [ 35%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestWebSocketSupport::test_websocket_examples_in_readme 
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_can_be_disabled 
+[gw0][36m [ 35%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATConfigurationTests::test_qat_can_be_disabled 
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_configuration_in_training_script 
+[gw0][36m [ 36%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATConfigurationTests::test_qat_configuration_in_training_script 
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_default_configuration 
+[gw0][36m [ 36%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATConfigurationTests::test_qat_default_configuration 
+tests/test_qat_functionality.py::QATConfigurationTests::test_qat_start_epoch_validation 
+[gw0][36m [ 36%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATConfigurationTests::test_qat_start_epoch_validation 
+tests/test_qat_functionality.py::QATCallbackTests::test_qat_affects_model_export 
+tests/test_consensus.py::TestHealthMonitoring::test_camera_timeout_detection 
+[gw1][36m [ 36%] [0m[32mPASSED[0m tests/test_consensus.py::TestDetectionProcessing::test_process_malformed_detection 
+[gw7][36m [ 37%] [0m[32mPASSED[0m tests/test_consensus.py::TestIntegration::test_mixed_detection_sources 
+[gw5][36m [ 37%] [0m[32mPASSED[0m tests/test_consensus.py::TestHealthMonitoring::test_camera_timeout_detection 
+[gw3][36m [ 37%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_single_camera_no_consensus 
+tests/test_consensus.py::TestHealthMonitoring::test_stale_camera_cleanup 
+[gw9][36m [ 37%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestContainerSmoke::test_fire_consensus_import 
+tests/test_container_smoke.py::TestContainerSmoke::test_frigate_base_image 
+[gw0][36m [ 38%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATCallbackTests::test_qat_affects_model_export 
+tests/test_qat_functionality.py::QATCallbackTests::test_qat_callback_placeholder 
+[gw0][36m [ 38%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATCallbackTests::test_qat_callback_placeholder 
+tests/test_qat_functionality.py::QATQuantizationTests::test_int8_export_with_qat 
+tests/test_consensus.py::TestErrorHandling::test_malformed_json_handling 
+[gw5][36m [ 38%] [0m[32mPASSED[0m tests/test_consensus.py::TestHealthMonitoring::test_stale_camera_cleanup 
+[gw2][36m [ 38%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_output_in_summary 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size 
+[gw9][36m [ 39%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestContainerSmoke::test_frigate_base_image 
+tests/test_container_smoke.py::TestServiceEnvironment::test_mqtt_tls_defaults 
+[gw9][36m [ 39%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestServiceEnvironment::test_mqtt_tls_defaults 
+tests/test_container_smoke.py::TestServiceEnvironment::test_certificates_exist 
+[gw9][36m [ 39%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestServiceEnvironment::test_certificates_exist 
+tests/test_container_smoke.py::TestServiceEnvironment::test_utils_module_exists 
+[gw9][36m [ 40%] [0m[32mPASSED[0m tests/test_container_smoke.py::TestServiceEnvironment::test_utils_module_exists 
+tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_inference_speed 
+[gw9][36m [ 40%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_inference_speed 
+tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_model_accuracy_benchmark 
+[gw9][36m [ 40%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_model_accuracy_benchmark 
+tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_model_size 
+[gw9][36m [ 40%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATBenchmarkTests::test_qat_model_size 
+tests/test_qat_functionality.py::QATIntegrationTests::test_qat_documentation 
+[gw9][36m [ 41%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATIntegrationTests::test_qat_documentation 
+tests/test_qat_functionality.py::QATIntegrationTests::test_qat_export_pipeline 
+[gw0][36m [ 41%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATQuantizationTests::test_int8_export_with_qat 
+tests/test_qat_functionality.py::QATQuantizationTests::test_qat_calibration_data_usage 
+[gw0][36m [ 41%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATQuantizationTests::test_qat_calibration_data_usage 
+tests/test_qat_functionality.py::QATQuantizationTests::test_qat_model_quantization_aware 
+[gw0][36m [ 41%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATQuantizationTests::test_qat_model_quantization_aware 
+tests/test_scripts.py::TestCertificateGeneration::test_generate_certs_help 
+[gw0][36m [ 42%] [0m[32mPASSED[0m tests/test_scripts.py::TestCertificateGeneration::test_generate_certs_help 
+tests/test_scripts.py::TestCertificateGeneration::test_generate_default_certs 
+[gw0][36m [ 42%] [0m[33mSKIPPED[0m tests/test_scripts.py::TestCertificateGeneration::test_generate_default_certs 
+tests/test_scripts.py::TestSecurityConfiguration::test_configure_security_status 
+[gw0][36m [ 42%] [0m[32mPASSED[0m tests/test_scripts.py::TestSecurityConfiguration::test_configure_security_status 
+tests/test_scripts.py::TestSecurityConfiguration::test_configure_security_commands 
+[gw0][36m [ 42%] [0m[32mPASSED[0m tests/test_scripts.py::TestSecurityConfiguration::test_configure_security_commands 
+tests/test_scripts.py::TestBuildScripts::test_multiplatform_build_script 
+[gw0][36m [ 43%] [0m[32mPASSED[0m tests/test_scripts.py::TestBuildScripts::test_multiplatform_build_script 
+tests/test_scripts.py::TestBuildScripts::test_docker_permissions_script 
+[gw0][36m [ 43%] [0m[32mPASSED[0m tests/test_scripts.py::TestBuildScripts::test_docker_permissions_script 
+tests/test_scripts.py::TestStartupCoordinator::test_startup_coordinator_imports 
+[gw0][36m [ 43%] [0m[32mPASSED[0m tests/test_scripts.py::TestStartupCoordinator::test_startup_coordinator_imports 
+tests/test_scripts.py::TestStartupCoordinator::test_startup_coordinator_dry_run 
+tests/test_consensus.py::TestHealthMonitoring::test_consensus_event_tracking 
+[gw4][36m [ 43%] [0m[32mPASSED[0m tests/test_consensus.py::TestErrorHandling::test_malformed_json_handling 
+[gw5][36m [ 44%] [0m[32mPASSED[0m tests/test_consensus.py::TestHealthMonitoring::test_consensus_event_tracking 
+tests/test_consensus.py::TestConsensusAlgorithm::test_multiple_fire_objects_per_camera 
+[gw9][36m [ 44%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATIntegrationTests::test_qat_export_pipeline 
+tests/test_qat_functionality.py::QATIntegrationTests::test_qat_training_flow 
+[gw9][36m [ 44%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATIntegrationTests::test_qat_training_flow 
+tests/test_qat_functionality.py::QATValidationTests::test_qat_affects_frigate_deployment 
+[gw9][36m [ 44%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATValidationTests::test_qat_affects_frigate_deployment 
+tests/test_qat_functionality.py::QATValidationTests::test_verify_qat_enabled_in_model 
+[gw9][36m [ 45%] [0m[32mPASSED[0m tests/test_qat_functionality.py::QATValidationTests::test_verify_qat_enabled_in_model 
+tests/test_scripts.py::TestScriptExistence::test_all_scripts_exist 
+[gw9][36m [ 45%] [0m[32mPASSED[0m tests/test_scripts.py::TestScriptExistence::test_all_scripts_exist 
+tests/test_scripts.py::TestScriptExistence::test_scripts_are_executable 
+[gw9][36m [ 45%] [0m[32mPASSED[0m tests/test_scripts.py::TestScriptExistence::test_scripts_are_executable 
+tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_documented_files_exist 
+[gw9][36m [ 45%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_documented_files_exist 
+tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_environment_variables_documented 
+[gw9][36m [ 46%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_environment_variables_documented 
+tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_model_sizes_documented 
+[gw9][36m [ 46%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_model_sizes_documented 
+tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_mqtt_topic_documentation 
+[gw9][36m [ 46%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_mqtt_topic_documentation 
+tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_hardware_support_table 
+[gw9][36m [ 47%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_hardware_support_table 
+tests/test_security_nvr_documentation.py::TestConfigurationFiles::test_nvr_base_config_format 
+[gw9][36m [ 47%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestConfigurationFiles::test_nvr_base_config_format 
+tests/test_security_nvr_documentation.py::TestConfigurationFiles::test_model_labels_configuration 
+[gw9][36m [ 47%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestConfigurationFiles::test_model_labels_configuration 
+tests/test_security_nvr_documentation.py::TestConfigurationFiles::test_recording_configuration 
+[gw9][36m [ 47%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestConfigurationFiles::test_recording_configuration 
+tests/test_security_nvr_documentation.py::TestDockerIntegration::test_dockerfile_exists 
+[gw9][36m [ 48%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDockerIntegration::test_dockerfile_exists 
+tests/test_security_nvr_documentation.py::TestDockerIntegration::test_docker_compose_service 
+[gw9][36m [ 48%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDockerIntegration::test_docker_compose_service 
+tests/test_security_nvr_documentation.py::TestDockerIntegration::test_volume_mounts 
+[gw9][36m [ 48%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDockerIntegration::test_volume_mounts 
+tests/test_security_nvr_documentation.py::TestDockerIntegration::test_device_access 
+[gw9][36m [ 48%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDockerIntegration::test_device_access 
+tests/test_security_nvr_documentation.py::TestPowerProfiles::test_power_profiles_documented 
+[gw9][36m [ 49%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestPowerProfiles::test_power_profiles_documented 
+tests/test_security_nvr_documentation.py::TestPowerProfiles::test_adaptive_settings 
+[gw9][36m [ 49%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestPowerProfiles::test_adaptive_settings 
+tests/test_security_nvr_documentation.py::TestTroubleshooting::test_common_problems_documented 
+[gw9][36m [ 49%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestTroubleshooting::test_common_problems_documented 
+tests/test_security_nvr_documentation.py::TestTroubleshooting::test_debug_commands_documented 
+[gw9][36m [ 49%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestTroubleshooting::test_debug_commands_documented 
+tests/test_security_nvr_documentation.py::TestAPIDocumentation::test_api_endpoints_documented 
+[gw9][36m [ 50%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestAPIDocumentation::test_api_endpoints_documented 
+tests/test_security_nvr_documentation.py::TestPerformanceGuidelines::test_hardware_specific_optimizations 
+[gw9][36m [ 50%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestPerformanceGuidelines::test_hardware_specific_optimizations 
+tests/test_security_nvr_documentation.py::TestPerformanceGuidelines::test_performance_metrics 
+[gw9][36m [ 50%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestPerformanceGuidelines::test_performance_metrics 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_frigate_service_running 
+[gw9][36m [ 50%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_frigate_service_running 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_frigate_stats_endpoint 
+[gw9][36m [ 51%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_frigate_stats_endpoint 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_hardware_detector_execution 
+[gw9][36m [ 51%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_hardware_detector_execution 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_detector_configuration 
+[gw9][36m [ 51%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_detector_configuration 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_camera_discovery_integration 
+[gw9][36m [ 51%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_camera_discovery_integration 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_camera_configuration_format 
+[gw9][36m [ 52%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_camera_configuration_format 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_mqtt_connection 
+[gw9][36m [ 52%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_mqtt_connection 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_mqtt_event_publishing 
+[gw9][36m [ 52%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_mqtt_event_publishing 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_fire_detection_event_format 
+[gw9][36m [ 52%] [0m[32mPASSED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_fire_detection_event_format 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_usb_storage_configuration 
+[gw9][36m [ 53%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_usb_storage_configuration 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_recording_directory_structure 
+[gw9][36m [ 53%] [0m[32mPASSED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_recording_directory_structure 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_wildfire_model_configuration 
+[gw9][36m [ 53%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_wildfire_model_configuration 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_detection_settings 
+[gw9][36m [ 54%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_detection_settings 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_events_api 
+[gw9][36m [ 54%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_events_api 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_recordings_api 
+[gw9][36m [ 54%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_recordings_api 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_cpu_usage 
+[gw9][36m [ 54%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_cpu_usage 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_detector_inference_speed 
+[gw9][36m [ 55%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_detector_inference_speed 
+tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_full_detection_flow 
+[gw9][36m [ 55%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestSecurityNVRIntegration::test_full_detection_flow 
+tests/test_security_nvr_integration.py::TestServiceDependencies::test_mqtt_broker_dependency 
+[gw9][36m [ 55%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestServiceDependencies::test_mqtt_broker_dependency 
+tests/test_security_nvr_integration.py::TestServiceDependencies::test_camera_detector_integration 
+[gw9][36m [ 55%] [0m[32mPASSED[0m tests/test_security_nvr_integration.py::TestServiceDependencies::test_camera_detector_integration 
+tests/test_security_nvr_integration.py::TestWebInterface::test_web_ui_accessible 
+[gw9][36m [ 56%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestWebInterface::test_web_ui_accessible 
+tests/test_security_nvr_integration.py::TestWebInterface::test_static_resources 
+[gw9][36m [ 56%] [0m[33mSKIPPED[0m tests/test_security_nvr_integration.py::TestWebInterface::test_static_resources 
+tests/test_telemetry.py::test_lwt_is_set 
+tests/test_model_converter.py::ValidationReportingTests::test_multi_size_validation_reporting 
+[gw1][36m [ 56%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationReportingTests::test_multi_size_validation_reporting 
+tests/test_model_converter.py::ValidationReportingTests::test_validation_summary_formatting 
+tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_area_calculation_with_4k_camera 
+[gw7][36m [ 56%] [0m[32mPASSED[0m tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_area_calculation_with_4k_camera 
+tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_area_calculation_with_low_res_camera 
+[gw7][36m [ 57%] [0m[32mPASSED[0m tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_area_calculation_with_low_res_camera 
+tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_different_resolutions_same_fire 
+[gw7][36m [ 57%] [0m[32mPASSED[0m tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_different_resolutions_same_fire 
+tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_normalized_area_calculation 
+[gw7][36m [ 57%] [0m[32mPASSED[0m tests/test_consensus_area_calculation.py::TestConsensusAreaCalculation::test_normalized_area_calculation 
+tests/test_consensus_integration.py::TestConsensusTrigger::test_single_camera_multiple_detections_should_trigger 
+[gw3][36m [ 57%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_multiple_fire_objects_per_camera 
+[gw1][36m [ 58%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationReportingTests::test_validation_summary_formatting 
+tests/test_model_converter_real.py::TestRealModelConversions::test_onnx_conversion_real 
+tests/test_consensus.py::TestErrorHandling::test_mqtt_disconnection_handling 
+tests/test_consensus.py::TestConsensusAlgorithm::test_growth_percentage_tolerance 
+[gw3][36m [ 58%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_growth_percentage_tolerance 
+[gw4][36m [ 58%] [0m[32mPASSED[0m tests/test_consensus.py::TestErrorHandling::test_mqtt_disconnection_handling 
+tests/test_consensus.py::TestConsensusAlgorithm::test_multi_camera_consensus_triggers 
+[gw2][36m [ 58%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_per_size 
+tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically 
+[gw9][36m [ 59%] [0m[32mPASSED[0m tests/test_telemetry.py::test_lwt_is_set 
+[gw7][36m [ 59%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestConsensusTrigger::test_single_camera_multiple_detections_should_trigger 
+tests/test_consensus.py::TestErrorHandling::test_empty_detection_fields 
+tests/test_consensus.py::TestConfiguration::test_config_class_loading 
+[gw5][36m [ 59%] [0m[32mPASSED[0m tests/test_consensus.py::TestConfiguration::test_config_class_loading 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_availability 
+[gw5][36m [ 60%] [0m[31mFAILED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_availability 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_fire_model_conversion 
+[gw5][36m [ 60%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_fire_model_conversion 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_int8_quantization 
+[gw5][36m [ 60%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_int8_quantization 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_inference_performance 
+[gw5][36m [ 60%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_inference_performance 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_real_camera_detection 
+[gw5][36m [ 61%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_real_camera_detection 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_multi_precision_comparison 
+[gw5][36m [ 61%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_multi_precision_comparison 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_batch_processing 
+[gw5][36m [ 61%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_batch_processing 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_dynamic_shapes 
+[gw5][36m [ 61%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_dynamic_shapes 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_memory_usage 
+[gw5][36m [ 62%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_memory_usage 
+tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_continuous_inference 
+[gw5][36m [ 62%] [0m[33mSKIPPED[0m tests/test_tensorrt_gpu_integration.py::TestTensorRTGPU::test_tensorrt_continuous_inference 
+tests/test_thread_safety.py::TestThreadSafeDict::test_concurrent_updates 
+[gw5][36m [ 62%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeDict::test_concurrent_updates 
+tests/test_thread_safety.py::TestThreadSafeDict::test_atomic_pop 
+[gw5][36m [ 62%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeDict::test_atomic_pop 
+tests/test_thread_safety.py::TestThreadSafeSet::test_concurrent_adds 
+[gw5][36m [ 63%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeSet::test_concurrent_adds 
+tests/test_thread_safety.py::TestThreadSafeCounter::test_concurrent_increments 
+[gw5][36m [ 63%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeCounter::test_concurrent_increments 
+tests/test_thread_safety.py::TestThreadSafeCameraRegistry::test_concurrent_camera_operations 
+[gw5][36m [ 63%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeCameraRegistry::test_concurrent_camera_operations 
+tests/test_thread_safety.py::TestThreadSafeCameraRegistry::test_ip_update_atomicity 
+[gw5][36m [ 63%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeCameraRegistry::test_ip_update_atomicity 
+tests/test_thread_safety.py::TestThreadSafeDetectionHistory::test_concurrent_detection_adds 
+[gw5][36m [ 64%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeDetectionHistory::test_concurrent_detection_adds 
+tests/test_thread_safety.py::TestThreadSafeDetectionHistory::test_cleanup_during_additions 
+tests/test_telemetry.py::test_publish_telemetry_basic 
+[gw4][36m [ 64%] [0m[32mPASSED[0m tests/test_consensus.py::TestErrorHandling::test_empty_detection_fields 
+[gw3][36m [ 64%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_multi_camera_consensus_triggers 
+tests/test_telemetry.py::test_telemetry_without_psutil 
+[gw8][36m [ 64%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestCooldownPeriod::test_cooldown_prevents_rapid_triggers 
+tests/test_consensus.py::TestConsensusAlgorithm::test_growing_fire_detection 
+[gw9][36m [ 65%] [0m[32mPASSED[0m tests/test_telemetry.py::test_publish_telemetry_basic 
+[gw5][36m [ 65%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeDetectionHistory::test_cleanup_during_additions 
+tests/test_thread_safety.py::TestThreadSafeConsensusState::test_cooldown_enforcement 
+[gw5][36m [ 65%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeConsensusState::test_cooldown_enforcement 
+tests/test_thread_safety.py::TestThreadSafeConsensusState::test_concurrent_trigger_checks 
+[gw5][36m [ 65%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestThreadSafeConsensusState::test_concurrent_trigger_checks 
+tests/test_thread_safety.py::TestRaceConditionScenarios::test_camera_discovery_race 
+[gw5][36m [ 66%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestRaceConditionScenarios::test_camera_discovery_race 
+tests/test_thread_safety.py::TestRaceConditionScenarios::test_detection_consensus_race 
+[gw5][36m [ 66%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestRaceConditionScenarios::test_detection_consensus_race 
+tests/test_thread_safety.py::test_thread_safety_mixin_integration 
+[gw5][36m [ 66%] [0m[31mFAILED[0m tests/test_thread_safety.py::test_thread_safety_mixin_integration 
+tests/test_timeout_configuration.py::test_short_test 
+[gw5][36m [ 67%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_short_test 
+tests/test_timeout_configuration.py::test_medium_test 
+[gw7][36m [ 67%] [0m[32mPASSED[0m tests/test_telemetry.py::test_telemetry_without_psutil 
+[gw3][36m [ 67%] [0m[32mPASSED[0m tests/test_consensus.py::TestConsensusAlgorithm::test_growing_fire_detection 
+tests/test_consensus_integration.py::TestEdgeCases::test_invalid_detection_format_ignored 
+[gw2][36m [ 67%] [0m[32mPASSED[0m tests/test_model_converter.py::ValidationIntegrationTests::test_validation_runs_automatically 
+tests/test_model_converter.py::EndToEndValidationTests::test_cli_integration 
+tests/test_telemetry.py::test_system_metrics_included 
+[gw2][36m [ 68%] [0m[32mPASSED[0m tests/test_model_converter.py::EndToEndValidationTests::test_cli_integration 
+tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation 
+tests/test_telemetry.py::test_telemetry_message_format 
+tests/test_telemetry.py::test_config_environment_variables 
+[gw5][36m [ 68%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_medium_test 
+tests/test_timeout_configuration.py::test_long_timeout_decorator 
+[gw9][36m [ 68%] [0m[32mPASSED[0m tests/test_telemetry.py::test_system_metrics_included 
+tests/test_thread_safety.py::TestPeriodicTask::test_periodic_execution 
+[gw7][36m [ 68%] [0m[32mPASSED[0m tests/test_telemetry.py::test_telemetry_message_format 
+[gw4][36m [ 69%] [0m[32mPASSED[0m tests/test_telemetry.py::test_config_environment_variables 
+[gw3][36m [ 69%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestPeriodicTask::test_periodic_execution 
+tests/test_thread_safety.py::TestPeriodicTask::test_stop_prevents_execution 
+[gw3][36m [ 69%] [0m[32mPASSED[0m tests/test_thread_safety.py::TestPeriodicTask::test_stop_prevents_execution 
+tests/test_timeout_configuration.py::test_timeout_configuration_validation 
+[gw3][36m [ 69%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_timeout_configuration_validation 
+tests/test_timeout_configuration.py::test_baseline_performance 
+[gw3][36m [ 70%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_baseline_performance 
+tests/test_timeout_configuration.py::test_multiple_timeout_contexts 
+tests/test_telemetry.py::test_real_mqtt_publish_qos_and_retain 
+tests/test_timeout_configuration.py::test_mqtt_infrastructure_simulation 
+tests/test_telemetry.py::test_mqtt_connection_parameters 
+[gw6][36m [ 70%] [0m[32mPASSED[0m tests/test_model_converter_real.py::TestRealModelConversions::test_conversion_with_validation 
+tests/test_model_converter_real.py::TestRealModelConversions::test_error_recovery 
+[gw7][36m [ 70%] [0m[32mPASSED[0m tests/test_telemetry.py::test_mqtt_connection_parameters 
+[gw8][36m [ 70%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestEdgeCases::test_invalid_detection_format_ignored 
+[gw1][36m [ 71%] [0m[32mPASSED[0m tests/test_model_converter_real.py::TestRealModelConversions::test_onnx_conversion_real 
+tests/test_model_converter_real.py::TestRealModelConversions::test_tflite_conversion_real 
+[gw4][36m [ 71%] [0m[32mPASSED[0m tests/test_telemetry.py::test_real_mqtt_publish_qos_and_retain 
+[gw6][36m [ 71%] [0m[32mPASSED[0m tests/test_model_converter_real.py::TestRealModelConversions::test_error_recovery 
+tests/test_model_converter_real.py::TestRealModelConversions::test_conversion_summary 
+tests/test_timeout_configuration.py::test_variable_timeout_delays[0.5] 
+[gw2][36m [ 71%] [0m[32mPASSED[0m tests/test_model_converter.py::EndToEndValidationTests::test_end_to_end_conversion_with_validation 
+tests/test_timeout_configuration.py::test_integration_timeout_handling 
+[gw7][36m [ 72%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_variable_timeout_delays[0.5] 
+tests/test_timeout_configuration.py::test_variable_timeout_delays[1.0] 
+tests/test_consensus_integration.py::TestEdgeCases::test_low_confidence_detections_ignored 
+tests/test_telemetry.py::test_multiple_telemetry_publishes 
+[gw3][36m [ 72%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_multiple_timeout_contexts 
+tests/test_timeout_configuration.py::test_variable_timeout_delays[0.1] 
+[gw7][36m [ 72%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_variable_timeout_delays[1.0] 
+tests/test_timeout_configuration.py::test_timeout_configuration_summary 
+[gw7][36m [ 72%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_timeout_configuration_summary 
+tests/test_tls_integration_consolidated.py::TestCertificateManagement::test_default_certificate_warning 
+[gw7][36m [ 73%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestCertificateManagement::test_default_certificate_warning 
+tests/test_tls_integration_consolidated.py::TestMQTTBrokerTLS::test_tls_port_listening 
+[gw7][36m [ 73%] [0m[33mSKIPPED[0m tests/test_tls_integration_consolidated.py::TestMQTTBrokerTLS::test_tls_port_listening 
+tests/test_tls_integration_consolidated.py::TestMQTTBrokerTLS::test_tls_connection_with_valid_cert 
+[gw7][36m [ 73%] [0m[33mSKIPPED[0m tests/test_tls_integration_consolidated.py::TestMQTTBrokerTLS::test_tls_connection_with_valid_cert 
+tests/test_tls_integration_consolidated.py::TestMQTTBrokerTLS::test_tls_publish_subscribe 
+[gw7][36m [ 74%] [0m[33mSKIPPED[0m tests/test_tls_integration_consolidated.py::TestMQTTBrokerTLS::test_tls_publish_subscribe 
+tests/test_tls_integration_consolidated.py::TestServiceTLS::test_services_read_tls_config 
+[gw7][36m [ 74%] [0m[31mFAILED[0m tests/test_tls_integration_consolidated.py::TestServiceTLS::test_services_read_tls_config 
+tests/test_tls_integration_consolidated.py::TestServiceTLS::test_service_tls_connection 
+[gw7][36m [ 74%] [0m[33mSKIPPED[0m tests/test_tls_integration_consolidated.py::TestServiceTLS::test_service_tls_connection 
+tests/test_tls_integration_consolidated.py::TestDockerTLS::test_docker_compose_tls_config 
+[gw7][36m [ 74%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestDockerTLS::test_docker_compose_tls_config 
+tests/test_tls_integration_consolidated.py::TestDockerTLS::test_services_mount_certificates 
+[gw7][36m [ 75%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestDockerTLS::test_services_mount_certificates 
+tests/test_tls_integration_consolidated.py::TestTLSFailureModes::test_invalid_certificate_rejected 
+[gw7][36m [ 75%] [0m[33mSKIPPED[0m tests/test_tls_integration_consolidated.py::TestTLSFailureModes::test_invalid_certificate_rejected 
+tests/test_tls_integration_consolidated.py::TestTLSFailureModes::test_plain_mqtt_with_tls_env 
+[gw7][36m [ 75%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestTLSFailureModes::test_plain_mqtt_with_tls_env 
+tests/test_tls_integration_consolidated.py::TestSecurityScripts::test_configure_security_script_exists 
+[gw7][36m [ 75%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestSecurityScripts::test_configure_security_script_exists 
+tests/test_tls_integration_consolidated.py::TestSecurityScripts::test_generate_certs_script_exists 
+[gw7][36m [ 76%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestSecurityScripts::test_generate_certs_script_exists 
+tests/test_tls_integration_consolidated.py::TestSecurityScripts::test_env_example_has_tls 
+[gw3][36m [ 76%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_variable_timeout_delays[0.1] 
+[gw7][36m [ 76%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestSecurityScripts::test_env_example_has_tls 
+tests/test_tls_integration_consolidated.py::TestCertificateManagement::test_certificate_validity 
+tests/test_trigger.py::TestBasicOperation::test_initialization 
+[gw3][36m [ 76%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestCertificateManagement::test_certificate_validity 
+tests/test_trigger.py::TestBasicOperation::test_fire_trigger_starts_sequence 
+[gw5][36m [ 77%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_long_timeout_decorator 
+tests/test_timeout_configuration.py::test_timeout_with_exception 
+[gw5][36m [ 77%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_timeout_with_exception 
+tests/test_trigger.py::TestSafety::test_valve_must_be_open_for_ignition 
+[gw7][36m [ 77%] [0m[32mPASSED[0m tests/test_trigger.py::TestBasicOperation::test_initialization 
+[gw9][36m [ 77%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_mqtt_infrastructure_simulation 
+tests/test_timeout_configuration.py::test_real_mqtt_broker_timeout 
+[gw2][36m [ 78%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_integration_timeout_handling 
+tests/test_timeout_configuration.py::test_variable_timeout_delays[2.0] 
+[gw3][36m [ 78%] [0m[32mPASSED[0m tests/test_trigger.py::TestBasicOperation::test_fire_trigger_starts_sequence 
+[gw4][36m [ 78%] [0m[32mPASSED[0m tests/test_telemetry.py::test_multiple_telemetry_publishes 
+tests/test_trigger.py::TestBasicOperation::test_normal_shutdown_sequence 
+[gw9][36m [ 78%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_real_mqtt_broker_timeout 
+tests/test_trigger.py::TestSafety::test_rpm_reduction_before_shutdown 
+[gw5][36m [ 79%] [0m[32mPASSED[0m tests/test_trigger.py::TestSafety::test_valve_must_be_open_for_ignition 
+tests/test_tls_integration_consolidated.py::TestCertificateManagement::test_certificates_exist 
+[gw4][36m [ 79%] [0m[32mPASSED[0m tests/test_tls_integration_consolidated.py::TestCertificateManagement::test_certificates_exist 
+tests/test_trigger.py::TestConcurrency::test_trigger_during_shutdown 
+[gw2][36m [ 79%] [0m[32mPASSED[0m tests/test_timeout_configuration.py::test_variable_timeout_delays[2.0] 
+tests/test_trigger.py::TestSafety::test_emergency_valve_open_on_trigger 
+tests/test_trigger.py::TestBasicOperation::test_multiple_triggers_extend_runtime 
+[gw7][36m [ 80%] [0m[32mPASSED[0m tests/test_trigger.py::TestBasicOperation::test_normal_shutdown_sequence 
+[gw4][36m [ 80%] [0m[32mPASSED[0m tests/test_trigger.py::TestConcurrency::test_trigger_during_shutdown 
+tests/test_trigger.py::TestSafety::test_max_runtime_enforcement 
+[gw9][36m [ 80%] [0m[32mPASSED[0m tests/test_trigger.py::TestSafety::test_rpm_reduction_before_shutdown 
+[gw8][36m [ 80%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestEdgeCases::test_low_confidence_detections_ignored 
+[gw3][36m [ 81%] [0m[32mPASSED[0m tests/test_trigger.py::TestBasicOperation::test_multiple_triggers_extend_runtime 
+[gw2][36m [ 81%] [0m[32mPASSED[0m tests/test_trigger.py::TestSafety::test_emergency_valve_open_on_trigger 
+tests/test_trigger.py::TestConcurrency::test_trigger_during_cooldown 
+tests/test_trigger.py::TestSafety::test_refill_valve_runtime_multiplier 
+tests/test_trigger.py::TestConcurrency::test_concurrent_triggers 
+tests/test_consensus_integration.py::TestZoneBasedActivation::test_zone_mapping_in_trigger_payload 
+tests/test_trigger.py::TestConcurrency::test_state_transitions_are_atomic 
+[gw9][36m [ 81%] [0m[32mPASSED[0m tests/test_trigger.py::TestConcurrency::test_concurrent_triggers 
+[gw4][36m [ 81%] [0m[32mPASSED[0m tests/test_trigger.py::TestConcurrency::test_trigger_during_cooldown 
+tests/test_trigger.py::TestErrorHandling::test_gpio_failure_handling 
+tests/test_trigger.py::TestMQTT::test_mqtt_connection_and_subscription 
+[gw7][36m [ 82%] [0m[32mPASSED[0m tests/test_trigger.py::TestSafety::test_refill_valve_runtime_multiplier 
+[gw2][36m [ 82%] [0m[32mPASSED[0m tests/test_trigger.py::TestConcurrency::test_state_transitions_are_atomic 
+[gw5][36m [ 82%] [0m[32mPASSED[0m tests/test_trigger.py::TestSafety::test_max_runtime_enforcement 
+[gw3][36m [ 82%] [0m[32mPASSED[0m tests/test_trigger.py::TestErrorHandling::test_gpio_failure_handling 
+[gw9][36m [ 83%] [0m[32mPASSED[0m tests/test_trigger.py::TestMQTT::test_mqtt_connection_and_subscription 
+[gw8][36m [ 83%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestZoneBasedActivation::test_zone_mapping_in_trigger_payload 
+tests/test_consensus_integration.py::TestZoneBasedActivation::test_zone_activation_disabled 
+tests/test_trigger.py::TestErrorHandling::test_error_state_ignores_triggers 
+tests/test_trigger.py::TestErrorHandling::test_mqtt_disconnection_handling 
+tests/test_trigger.py::TestErrorHandling::test_timer_exception_handling 
+tests/test_trigger.py::TestMQTT::test_fire_trigger_via_mqtt 
+[gw5][36m [ 83%] [0m[32mPASSED[0m tests/test_trigger.py::TestErrorHandling::test_error_state_ignores_triggers 
+tests/test_trigger.py::TestMQTT::test_telemetry_events_published 
+[gw4][36m [ 83%] [0m[32mPASSED[0m tests/test_trigger.py::TestErrorHandling::test_mqtt_disconnection_handling 
+[gw7][36m [ 84%] [0m[32mPASSED[0m tests/test_trigger.py::TestErrorHandling::test_timer_exception_handling 
+[gw2][36m [ 84%] [0m[31mFAILED[0m tests/test_trigger.py::TestMQTT::test_fire_trigger_via_mqtt 
+tests/test_trigger.py::TestMQTT::test_health_reports_published 
+tests/test_trigger.py::TestMQTT::test_lwt_configuration 
+[gw3][36m [ 84%] [0m[32mPASSED[0m tests/test_trigger.py::TestMQTT::test_telemetry_events_published 
+[gw8][36m [ 84%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestZoneBasedActivation::test_zone_activation_disabled 
+tests/test_consensus_integration.py::TestSingleCameraMode::test_single_camera_immediate_trigger 
+[gw9][36m [ 85%] [0m[32mPASSED[0m tests/test_trigger.py::TestMQTT::test_health_reports_published 
+[gw5][36m [ 85%] [0m[32mPASSED[0m tests/test_trigger.py::TestMQTT::test_lwt_configuration 
+tests/test_trigger.py::TestIntegration::test_rapid_on_off_cycles 
+tests/test_trigger.py::TestIntegration::test_cleanup_from_various_states 
+tests/test_trigger.py::TestIntegration::test_complete_fire_cycle 
+tests/test_trigger.py::TestREADMECompliance::test_fire_detection_sprinkler_activation_sequence 
+tests/test_trigger.py::TestPerformance::test_timer_scheduling_performance 
+tests/test_trigger.py::TestPerformance::test_concurrent_event_handling 
+[gw8][36m [ 85%] [0m[32mPASSED[0m tests/test_consensus_integration.py::TestSingleCameraMode::test_single_camera_immediate_trigger 
+tests/test_trigger.py::TestREADMECompliance::test_sprinkler_response_time_critical 
+[gw5][36m [ 85%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_fire_detection_sprinkler_activation_sequence 
+[gw3][36m [ 86%] [0m[32mPASSED[0m tests/test_trigger.py::TestPerformance::test_timer_scheduling_performance 
+[gw9][36m [ 86%] [0m[32mPASSED[0m tests/test_trigger.py::TestPerformance::test_concurrent_event_handling 
+[gw7][36m [ 86%] [0m[32mPASSED[0m tests/test_trigger.py::TestIntegration::test_rapid_on_off_cycles 
+[gw8][36m [ 87%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_sprinkler_response_time_critical 
+[gw0][36m [ 87%] [0m[32mPASSED[0m tests/test_scripts.py::TestStartupCoordinator::test_startup_coordinator_dry_run 
+tests/test_scripts.py::TestDockerTestRunner::test_run_docker_tests_script 
+[gw0][36m [ 87%] [0m[32mPASSED[0m tests/test_scripts.py::TestDockerTestRunner::test_run_docker_tests_script 
+tests/test_scripts.py::TestCertificateProvisioning::test_provision_certs_script 
+[gw0][36m [ 87%] [0m[32mPASSED[0m tests/test_scripts.py::TestCertificateProvisioning::test_provision_certs_script 
+tests/test_scripts.py::TestScriptIntegration::test_scripts_referenced_in_readme 
+[gw0][36m [ 88%] [0m[32mPASSED[0m tests/test_scripts.py::TestScriptIntegration::test_scripts_referenced_in_readme 
+tests/test_scripts.py::TestScriptIntegration::test_env_example_completeness 
+[gw0][36m [ 88%] [0m[32mPASSED[0m tests/test_scripts.py::TestScriptIntegration::test_env_example_completeness 
+tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_readme_exists 
+[gw0][36m [ 88%] [0m[32mPASSED[0m tests/test_security_nvr_documentation.py::TestDocumentationAccuracy::test_readme_exists 
+tests/test_trigger.py::TestREADMECompliance::test_refill_lockout_prevents_dry_start 
+tests/test_trigger.py::TestREADMECompliance::test_fire_detection_never_ignored_when_safe 
+tests/test_trigger.py::TestREADMECompliance::test_emergency_valve_open_overrides_all_states 
+tests/test_trigger.py::TestREADMECompliance::test_float_switch_stops_refill_immediately 
+tests/test_trigger.py::TestREADMECompliance::test_state_consistency_under_failures 
+tests/test_trigger.py::TestREADMECompliance::test_maximum_runtime_enforced_strictly 
+[gw8][36m [ 88%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_emergency_valve_open_overrides_all_states 
+[gw4][36m [ 89%] [0m[32mPASSED[0m tests/test_trigger.py::TestIntegration::test_complete_fire_cycle 
+[gw0][36m [ 89%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_refill_lockout_prevents_dry_start 
+[gw7][36m [ 89%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_fire_detection_never_ignored_when_safe 
+tests/test_trigger.py::TestREADMECompliance::test_refill_timeout_prevents_infinite_refill 
+tests/test_trigger.py::TestEnhancedSafetyFeatures::test_dry_run_protection_with_flow_sensor 
+tests/test_trigger.py::TestREADMECompliance::test_hardware_simulation_mode_warnings 
+[gw5][36m [ 89%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_float_switch_stops_refill_immediately 
+tests/test_trigger.py::TestREADMECompliance::test_priming_sequence_timing_correct 
+[gw9][36m [ 90%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_maximum_runtime_enforced_strictly 
+[gw7][36m [ 90%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_hardware_simulation_mode_warnings 
+[gw8][36m [ 90%] [0m[32mPASSED[0m tests/test_trigger.py::TestEnhancedSafetyFeatures::test_dry_run_protection_with_flow_sensor 
+[gw4][36m [ 90%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_refill_timeout_prevents_infinite_refill 
+[gw0][36m [ 91%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_priming_sequence_timing_correct 
+tests/test_trigger.py::TestEnhancedSafetyFeatures::test_emergency_button_manual_trigger 
+tests/test_trigger.py::TestStateMachineCompliance::test_valid_state_transitions_only 
+tests/test_trigger.py::TestEmergencyBypass_DISABLED::test_mqtt_emergency_command 
+[gw5][36m [ 91%] [0m[32mPASSED[0m tests/test_trigger.py::TestEnhancedSafetyFeatures::test_emergency_button_manual_trigger 
+[gw7][36m [ 91%] [0m[31mFAILED[0m tests/test_trigger.py::TestEmergencyBypass_DISABLED::test_mqtt_emergency_command 
+tests/test_trigger.py::TestEmergencyBypass_DISABLED::test_emergency_switch_bypass 
+tests/test_trigger.py::TestStateMachineCompliance::test_error_state_recovery_requires_manual_intervention 
+[gw3][36m [ 91%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_state_consistency_under_failures 
+[gw4][36m [ 92%] [0m[32mPASSED[0m tests/test_trigger.py::TestStateMachineCompliance::test_error_state_recovery_requires_manual_intervention 
+[gw9][36m [ 92%] [0m[32mPASSED[0m tests/test_trigger.py::TestStateMachineCompliance::test_valid_state_transitions_only 
+tests/test_trigger.py::TestEnhancedSafetyFeatures::test_pressure_monitoring_shutdown 
+[gw3][36m [ 92%] [0m[32mPASSED[0m tests/test_trigger.py::TestEnhancedSafetyFeatures::test_pressure_monitoring_shutdown 
+[gw2][36m [ 92%] [0m[32mPASSED[0m tests/test_trigger.py::TestIntegration::test_cleanup_from_various_states 
+[gw8][36m [ 93%] [0m[31mFAILED[0m tests/test_trigger.py::TestEmergencyBypass_DISABLED::test_emergency_switch_bypass 
+tests/test_trigger.py::TestREADMECompliance::test_dry_run_protection_prevents_damage 
+[gw2][36m [ 93%] [0m[32mPASSED[0m tests/test_trigger.py::TestREADMECompliance::test_dry_run_protection_prevents_damage 
+[gw10][36m [ 93%] [0m[32mPASSED[0m tests/test_integration_docker_sdk.py::test_docker_sdk_integration 
+tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_service_startup_order 
+[gw1][36m [ 94%] [0m[32mPASSED[0m tests/test_model_converter_real.py::TestRealModelConversions::test_tflite_conversion_real 
+tests/test_model_converter_real.py::TestRealModelConversions::test_multi_size_conversion_real 
+[gw6][36m [ 94%] [0m[32mPASSED[0m tests/test_model_converter_real.py::TestRealModelConversions::test_conversion_summary 
+tests/test_mqtt_broker.py::TestConfigurationFiles::test_main_mosquitto_config_exists 
+[gw6][36m [ 94%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationFiles::test_main_mosquitto_config_exists 
+tests/test_mqtt_broker.py::TestConfigurationFiles::test_tls_config_exists 
+[gw6][36m [ 94%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationFiles::test_tls_config_exists 
+tests/test_mqtt_broker.py::TestConfigurationFiles::test_websocket_config_exists 
+[gw6][36m [ 95%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationFiles::test_websocket_config_exists 
+tests/test_mqtt_broker.py::TestConfigurationFiles::test_bridge_config_template 
+[gw6][36m [ 95%] [0m[32mPASSED[0m tests/test_mqtt_broker.py::TestConfigurationFiles::test_bridge_config_template 
+[gw1][36m [ 95%] [0m[32mPASSED[0m tests/test_model_converter_real.py::TestRealModelConversions::test_multi_size_conversion_real 
+tests/test_model_converter_real.py::TestRealModelConversions::test_tensorrt_conversion_prep 
+[gw10][36m [ 95%] [0m[32mPASSED[0m tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_service_startup_order 
+tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_camera_discovery_to_frigate 
+[gw10][36m [ 96%] [0m[31mERROR[0m tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_camera_discovery_to_frigate 
+tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_multi_camera_consensus 
+[gw10][36m [ 96%] [0m[31mERROR[0m tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_multi_camera_consensus 
+tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_pump_safety_timeout 
+[gw10][36m [ 96%] [0m[31mERROR[0m tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_pump_safety_timeout 
+tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_health_monitoring 
+[gw10][36m [ 96%] [0m[31mERROR[0m tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_health_monitoring 
+tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_mqtt_broker_recovery 
+[gw10][36m [ 97%] [0m[31mERROR[0m tests/test_integration_e2e_improved.py::TestE2EIntegrationImproved::test_mqtt_broker_recovery 
+tests/test_integration_e2e_improved.py::TestE2EPipelineWithRealCamerasImproved::test_complete_pipeline_with_real_cameras[insecure] 
+[gw10][36m [ 97%] [0m[33mSKIPPED[0m tests/test_integration_e2e_improved.py::TestE2EPipelineWithRealCamerasImproved::test_complete_pipeline_with_real_cameras[insecure] 
+tests/test_integration_e2e_improved.py::TestE2EPipelineWithRealCamerasImproved::test_complete_pipeline_with_real_cameras[tls] 
+[gw10][36m [ 97%] [0m[33mSKIPPED[0m tests/test_integration_e2e_improved.py::TestE2EPipelineWithRealCamerasImproved::test_complete_pipeline_with_real_cameras[tls] 
+[gw11][36m [ 97%] [0m[31mERROR[0m tests/test_e2e_fire_detection_full.py::TestE2EFireDetection::test_complete_fire_detection_pipeline 
+tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_camera_discovery_to_mqtt 
+[gw11][36m [ 98%] [0m[33mSKIPPED[0m tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_camera_discovery_to_mqtt 
+tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_ai_inference_on_camera_stream 
+[gw11][36m [ 98%] [0m[33mSKIPPED[0m tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_ai_inference_on_camera_stream 
+tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_fire_consensus_with_simulated_detections 
+[gw11][36m [ 98%] [0m[31mFAILED[0m tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_fire_consensus_with_simulated_detections 
+tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_gpio_trigger_responds_to_fire 
+[gw11][36m [ 98%] [0m[31mFAILED[0m tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_gpio_trigger_responds_to_fire 
+tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_complete_fire_detection_pipeline 
+[gw11][36m [ 99%] [0m[33mSKIPPED[0m tests/test_e2e_hardware_integration.py::TestE2EHardwareIntegration::test_complete_fire_detection_pipeline 

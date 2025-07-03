@@ -1,0 +1,311 @@
+{
+  "video": "/tmp/wildfire_test_videos/fire1.mov",
+  "frames_processed": 50,
+  "frames_with_detections": 0,
+  "total_detections": 0,
+  "avg_inference_ms": 63.81604614003663,
+  "p95_inference_ms": 65.63988140023866,
+  "fps": 15.670040068067213,
+  "results": [
+    {
+      "frame_id": 0,
+      "inference_time": 95.22942700004933,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 1,
+      "inference_time": 62.74061700059974,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 2,
+      "inference_time": 61.64145799994003,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 3,
+      "inference_time": 63.75091799964139,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 4,
+      "inference_time": 62.881854000806925,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 5,
+      "inference_time": 63.10487700011436,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 6,
+      "inference_time": 63.39404400023341,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 7,
+      "inference_time": 63.62007099960465,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 8,
+      "inference_time": 63.184507000187295,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 9,
+      "inference_time": 63.37530800010427,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 10,
+      "inference_time": 63.16034999963449,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 11,
+      "inference_time": 62.3649570006819,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 12,
+      "inference_time": 65.72009299998172,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 13,
+      "inference_time": 61.19448299978103,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 14,
+      "inference_time": 63.23000399970624,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 15,
+      "inference_time": 63.33302800067031,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 16,
+      "inference_time": 62.35027899947454,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 17,
+      "inference_time": 63.416916000278434,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 18,
+      "inference_time": 61.165598000116006,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 19,
+      "inference_time": 62.22476200036908,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 20,
+      "inference_time": 61.68657399939548,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 21,
+      "inference_time": 62.98619099925418,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 22,
+      "inference_time": 61.98165200021322,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 23,
+      "inference_time": 65.07371099996817,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 24,
+      "inference_time": 65.12122999993153,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 25,
+      "inference_time": 61.71318299948325,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 26,
+      "inference_time": 63.424128999940876,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 27,
+      "inference_time": 63.042247999874235,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 28,
+      "inference_time": 63.182883999616024,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 29,
+      "inference_time": 60.0465819998135,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 30,
+      "inference_time": 63.160030000290135,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 31,
+      "inference_time": 64.11974500042561,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 32,
+      "inference_time": 65.86802299989358,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 33,
+      "inference_time": 64.27517900010571,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 34,
+      "inference_time": 63.365470000462665,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 35,
+      "inference_time": 63.42967000000499,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 36,
+      "inference_time": 62.759673000073235,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 37,
+      "inference_time": 63.60962100006873,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 38,
+      "inference_time": 61.08927399964159,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 39,
+      "inference_time": 62.16746300015075,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 40,
+      "inference_time": 60.74255899966374,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 41,
+      "inference_time": 63.40259900025558,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 42,
+      "inference_time": 62.794539000606164,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 43,
+      "inference_time": 63.151103000564035,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 44,
+      "inference_time": 65.54184500055271,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 45,
+      "inference_time": 62.43220400028804,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 46,
+      "inference_time": 65.48555799963651,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 47,
+      "inference_time": 65.26721699992777,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 48,
+      "inference_time": 64.36235500041221,
+      "num_detections": 0,
+      "detections": []
+    },
+    {
+      "frame_id": 49,
+      "inference_time": 64.4362449993423,
+      "num_detections": 0,
+      "detections": []
+    }
+  ]
+}

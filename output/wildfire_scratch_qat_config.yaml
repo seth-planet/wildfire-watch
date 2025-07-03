@@ -1,0 +1,29 @@
+dataset:
+  data_dir: /media/seth/SketchScratch/fiftyone/train_yolo/
+  train_split: train
+  val_split: validation
+  validate_labels: true
+experiment_name: wildfire_scratch_qat
+log_level: INFO
+model:
+  architecture: yolo_nas_s
+  input_size:
+  - 640
+  - 640
+  num_classes: 32
+  pretrained_weights: null
+output_dir: ./output
+training:
+  batch_size: 16
+  epochs: 100
+  learning_rate: 0.001
+  lr_decay_factor: 0.1
+  lr_scheduler: cosine
+  mixed_precision: false
+  warmup_epochs: 3
+  workers: 8
+validation:
+  conf_threshold: 0.25
+  interval: 1
+  iou_threshold: 0.45
+  max_predictions: 300

@@ -4,3 +4,4 @@ python-dotenv==1.0.0
 numpy==1.24.3
 pyyaml==6.0.1
 pytest-xdist==3.6.1
+onvif-zeep==0.2.12

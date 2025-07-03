@@ -13,7 +13,7 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from fire_consensus.consensus import FireConsensus, Config
+from fire_consensus.consensus import FireConsensus, FireConsensusConfig
 
 
 class TestConsensusAreaCalculation(unittest.TestCase):
@@ -22,7 +22,7 @@ class TestConsensusAreaCalculation(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         # Create a test config
-        self.config = Config()
+        self.config = FireConsensusConfig()
         
         # Create consensus instance with mocked MQTT
         with patch('fire_consensus.consensus.FireConsensus._setup_mqtt'):

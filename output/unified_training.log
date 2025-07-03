@@ -1,0 +1,143 @@
+2025-06-08 21:04:32,318 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-08 21:04:32,318 [INFO] __main__: Checking training environment...
+2025-06-08 21:04:32,579 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-08 23:42:27,451 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-08 23:42:27,451 [INFO] __main__: Checking training environment...
+2025-06-08 23:42:27,700 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-09 07:19:21,936 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-09 07:19:21,936 [INFO] __main__: Checking training environment...
+2025-06-09 07:19:22,136 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-09 07:31:43,324 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-09 07:31:43,324 [INFO] __main__: Checking training environment...
+2025-06-09 07:31:43,550 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-09 07:37:39,295 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-09 07:37:39,295 [INFO] __main__: Checking training environment...
+2025-06-09 07:37:39,497 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-09 08:00:55,551 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-09 08:00:55,551 [INFO] __main__: Checking training environment...
+2025-06-09 08:00:55,820 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 03:51:33,869 [INFO] __main__: Starting unified YOLO training pipeline...
+2025-06-14 03:51:33,870 [INFO] __main__: Checking training environment...
+2025-06-14 03:51:34,108 [INFO] __main__: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 22:25:40,756 [INFO] unified_yolo_trainer: Starting unified YOLO training pipeline...
+2025-06-14 22:25:40,756 [INFO] unified_yolo_trainer: Checking training environment...
+2025-06-14 22:25:41,013 [INFO] unified_yolo_trainer: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 22:38:23,564 [INFO] unified_yolo_trainer: Starting unified YOLO training pipeline...
+2025-06-14 22:38:23,564 [INFO] unified_yolo_trainer: Checking training environment...
+2025-06-14 22:38:23,785 [INFO] unified_yolo_trainer: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 22:38:48,674 [INFO] unified_yolo_trainer: Starting unified YOLO training pipeline...
+2025-06-14 22:38:48,674 [INFO] unified_yolo_trainer: Checking training environment...
+2025-06-14 22:38:48,904 [INFO] unified_yolo_trainer: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 22:53:48,584 [INFO] unified_yolo_trainer: Starting unified YOLO training pipeline...
+2025-06-14 22:53:48,584 [INFO] unified_yolo_trainer: Checking training environment...
+2025-06-14 22:53:48,815 [INFO] unified_yolo_trainer: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 23:33:27,733 [INFO] unified_yolo_trainer: Starting unified YOLO training pipeline...
+2025-06-14 23:33:27,733 [INFO] unified_yolo_trainer: Checking training environment...
+2025-06-14 23:33:27,959 [INFO] unified_yolo_trainer: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
+2025-06-14 23:59:24,665 [INFO] unified_yolo_trainer: Starting unified YOLO training pipeline...
+2025-06-14 23:59:24,665 [INFO] unified_yolo_trainer: Checking training environment...
+2025-06-14 23:59:24,900 [INFO] unified_yolo_trainer: Environment: {
+  "python_version": "3.10.18 (main, Jun  4 2025, 08:56:00) [GCC 9.4.0]",
+  "cuda_available": true,
+  "gpu_count": 1,
+  "torch_version": "2.7.1+cu126",
+  "gpu_name": "NVIDIA RTX A2000 12GB",
+  "gpu_memory": "12.5 GB",
+  "cuda_version": "12.6"
+}
