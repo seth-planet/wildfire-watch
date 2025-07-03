@@ -5,6 +5,7 @@
 paho-mqtt>=2.0.0
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
+psutil>=5.9.0
 
 # Camera discovery and control
 onvif-zeep>=0.2.12

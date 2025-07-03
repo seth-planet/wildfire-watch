@@ -15,8 +15,8 @@ RUN apt-get update && \
       avahi-daemon libnss-mdns dbus && \
     rm -rf /var/lib/apt/lists/*
 
-COPY nsswitch.conf /etc/nsswitch.conf
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY gpio_trigger/nsswitch.conf /etc/nsswitch.conf
+COPY gpio_trigger/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 WORKDIR /app
@@ -27,7 +27,7 @@ COPY utils /utils
 ENV PYTHONPATH=/
 
 # Copy all requirements files
-COPY requirements*.txt ./
+COPY gpio_trigger/requirements*.txt ./
 
 # Install appropriate dependencies based on BUILD_ENV
 RUN if [ "$BUILD_ENV" = "test" ] && [ -f requirements_test.txt ]; then \
@@ -39,7 +39,7 @@ RUN if [ "$BUILD_ENV" = "test" ] && [ -f requirements_test.txt ]; then \
     fi
 
 # Copy the trigger script
-COPY trigger.py .
+COPY gpio_trigger/trigger.py .
 
 # Start Avahi, then run trigger.py
 ENTRYPOINT ["entrypoint.sh"]

@@ -173,8 +173,8 @@ services:
   # Fire Consensus - needs MQTT and waits for cameras
   fire_consensus:
     build:
-      context: ./fire_consensus
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./fire_consensus/Dockerfile
       args:
         - PLATFORM=${PLATFORM:-linux/amd64}
     image: wildfire-watch/fire_consensus:${VERSION:-latest}
@@ -208,8 +208,8 @@ services:
   # GPIO Controller - needs MQTT only
   gpio_trigger:
     build:
-      context: ./gpio_trigger
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: ./gpio_trigger/Dockerfile
       args:
         - PLATFORM=${PLATFORM:-linux/amd64}
     image: wildfire-watch/gpio_trigger:${VERSION:-latest}

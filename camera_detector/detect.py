@@ -64,6 +64,13 @@ class CameraDetectorConfig(ConfigBase):
             description="Unique service identifier"
         ),
         
+        # MQTT topic prefix
+        'topic_prefix': ConfigSchema(
+            str,
+            default="",
+            description="MQTT topic prefix for namespacing"
+        ),
+        
         # Camera discovery
         'discovery_interval': ConfigSchema(
             int,
@@ -634,6 +641,57 @@ class CameraDetector(MQTTService, ThreadSafeService):
         }
         
         self.publish_message(topic, payload, queue_if_offline=True)
+        
+    def _update_frigate_config(self):
+        """Update and publish Frigate configuration for all cameras."""
+        with self.cameras_lock:
+            cameras = list(self.cameras.values())
+            
+        # Generate Frigate config for all online cameras
+        frigate_config = {'cameras': {}}
+        
+        for camera in cameras:
+            if camera.online and camera.rtsp_urls:
+                # Use MAC address as camera ID for stability
+                camera_id = camera.mac.replace(':', '')
+                
+                # Get best RTSP URL
+                rtsp_url = camera.rtsp_urls.get('main') or camera.rtsp_urls.get('sub') or next(iter(camera.rtsp_urls.values()), None)
+                
+                if rtsp_url:
+                    frigate_config['cameras'][camera_id] = {
+                        'ffmpeg': {
+                            'inputs': [
+                                {
+                                    'path': rtsp_url,
+                                    'roles': ['detect', 'record', 'clips']
+                                }
+                            ]
+                        },
+                        'detect': {
+                            'width': 640,
+                            'height': 640,
+                            'fps': 5
+                        },
+                        'objects': {
+                            'track': ['fire', 'smoke'],
+                            'filters': {
+                                'fire': {
+                                    'min_score': 0.7,
+                                    'threshold': 0.8
+                                },
+                                'smoke': {
+                                    'min_score': 0.7,
+                                    'threshold': 0.8
+                                }
+                            }
+                        }
+                    }
+        
+        # Publish config in YAML format
+        import yaml
+        config_yaml = yaml.dump(frigate_config, default_flow_style=False)
+        self.publish_message("frigate/config/cameras", config_yaml, retain=True, queue_if_offline=True)
         
     def cleanup(self):
         """Clean shutdown of service."""

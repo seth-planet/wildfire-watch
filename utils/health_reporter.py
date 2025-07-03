@@ -110,7 +110,7 @@ class HealthReporter(ABC):
             'uptime': uptime,
             'uptime_hours': round(uptime / 3600, 2),
             'service': self.mqtt_service.service_name,
-            'version': self.mqtt_service.config.get('VERSION', 'unknown'),
+            'version': getattr(self.mqtt_service.config, 'version', 'unknown'),
             'mqtt_connected': self.mqtt_service.is_connected,
             'hostname': platform.node(),
             'pid': self._process.pid,

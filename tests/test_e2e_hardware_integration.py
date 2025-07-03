@@ -121,10 +121,10 @@ class TestE2EHardwareIntegration:
                 manufacturer="Test",
                 model="TestModel"
             )
-            test_camera.rtsp_urls = {
+            test_camera['rtsp_urls'] = {
                 'main': 'rtsp://192.168.1.100:554/stream1'
             }
-            detector.cameras[test_camera.mac] = test_camera
+            detector.cameras[test_camera['mac']] = test_camera
             detector._publish_camera_discovery(test_camera)
             discovered_count = 1
         
@@ -512,13 +512,13 @@ class TestE2EHardwareIntegration:
             # Try to connect to any discovered cameras
             if detector.cameras:
                 for cam_id, camera in detector.cameras.items():
-                    print(f"Found camera: {camera.name} at {camera.ip}")
-                    if camera.rtsp_urls:
-                        for stream_name, rtsp_url in camera.rtsp_urls.items():
+                    print(f"Found camera: {camera['name']} at {camera['ip']}")
+                    if camera['rtsp_urls']:
+                        for stream_name, rtsp_url in camera['rtsp_urls'].items():
                             print(f"Trying RTSP URL: {rtsp_url}")
                             cap = cv2.VideoCapture(rtsp_url)
                             if cap.isOpened():
-                                print(f"Connected to camera {camera.name} via {stream_name} stream")
+                                print(f"Connected to camera {camera['name']} via {stream_name} stream")
                                 break
                     if cap and cap.isOpened():
                         break

@@ -239,13 +239,13 @@ def consensus_service(class_mqtt_broker, monkeypatch):
     # The service connects asynchronously, so we need to wait for mqtt_connected flag
     start_time = time.time()
     while time.time() - start_time < 15:  # 15 second timeout
-        if hasattr(service, 'mqtt_connected') and service.mqtt_connected:
+        if hasattr(service, "_mqtt_connected") and service._mqtt_connected:
             # Give a bit more time for subscriptions to complete
             time.sleep(0.5)
             break
         time.sleep(0.1)
     
-    assert service.mqtt_connected, "Service must connect to test MQTT broker"
+    assert service._mqtt_connected, "Service must connect to test MQTT broker"
     
     yield service
     
@@ -277,7 +277,7 @@ class TestBasicOperation:
         assert consensus_service.config.consensus_threshold == 2
         assert consensus_service.cameras == {}
         assert consensus_service.trigger_count == 0
-        assert consensus_service.mqtt_client.is_connected()
+        assert consensus_service._mqtt_connected
         
         # Check MQTT service configuration
         expected_topics = [
@@ -860,15 +860,15 @@ class TestErrorHandling:
         msg.payload = b"invalid json {"  # Use bytes, not string
         
         # Should not crash
-        consensus_service._on_mqtt_message(consensus_service.mqtt_client, None, msg)
+        consensus_service._on_mqtt_message(consensus_service._mqtt_client, None, msg)
         assert len(consensus_service.cameras) == 0
     
     def test_mqtt_disconnection_handling(self, consensus_service, mqtt_publisher):
         """Test MQTT disconnection handling"""
         # Simulate disconnection
-        consensus_service._on_mqtt_disconnect(consensus_service.mqtt_client, None, 1)
+        consensus_service._on_mqtt_disconnect(consensus_service._mqtt_client, None, 1)
         
-        assert not consensus_service.mqtt_connected
+        assert not consensus_service._mqtt_connected
         
         # Service should continue functioning
         assert consensus_service.cameras is not None
@@ -994,7 +994,7 @@ class TestHealthMonitoring:
         self._add_growing_fire(consensus_service, 'cam2', 2)
         
         # Trigger health report
-        consensus_service._publish_health()
+        consensus_service.health_reporter.report_health()
         
         # Wait for and check health report was published
         health_reports = message_monitor.wait_for_message(consensus_service.config.topic_health, timeout=2)
@@ -1283,16 +1283,16 @@ class TestAdditionalFeatures:
     def test_mqtt_reconnection_behavior(self, consensus_service, mqtt_publisher):
         """Test MQTT reconnection behavior"""
         # Simulate unexpected disconnection
-        consensus_service._on_mqtt_disconnect(consensus_service.mqtt_client, None, 1)
+        consensus_service._on_mqtt_disconnect(consensus_service._mqtt_client, None, 1)
         
         # Service should mark as disconnected but remain functional
-        assert not consensus_service.mqtt_connected
+        assert not consensus_service._mqtt_connected
         
         # Simulate reconnection
-        consensus_service._on_mqtt_connect(consensus_service.mqtt_client, None, None, 0)
+        consensus_service._on_mqtt_connect(consensus_service._mqtt_client, None, None, 0)
         
         # Should be connected again
-        assert consensus_service.mqtt_connected
+        assert consensus_service._mqtt_connected
         
         # Should resubscribe to topics
         expected_topics = [

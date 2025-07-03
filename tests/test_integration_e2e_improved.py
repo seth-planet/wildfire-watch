@@ -35,7 +35,6 @@ except ImportError:
 @pytest.mark.timeout_expected
 @pytest.mark.timeout(1800)  # 30 minutes for complete E2E tests
 @pytest.mark.xdist_group("integration_e2e")  # Run all tests in this class in the same worker
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestE2EIntegrationImproved:
     """Improved test suite for complete system integration"""
     
@@ -71,6 +70,10 @@ class TestE2EIntegrationImproved:
             # Get environment variables
             env_vars = self.parallel_context.get_service_env(service.replace('-', '_'))
             
+            # Fix environment variable names for refactored services
+            if 'MQTT_TOPIC_PREFIX' in env_vars:
+                env_vars['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
+            
             # Add service-specific configuration
             if service == 'gpio-trigger':
                 env_vars['MAX_ENGINE_RUNTIME'] = '10'  # 10 second timeout for tests
@@ -84,7 +87,7 @@ class TestE2EIntegrationImproved:
                 env_vars['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
             
             # Debug: print environment
-            print(f"[DEBUG] Starting {service} with env: MQTT_BROKER={env_vars.get('MQTT_BROKER')}, MQTT_PORT={env_vars.get('MQTT_PORT')}, PREFIX={env_vars.get('MQTT_TOPIC_PREFIX')}")
+            print(f"[DEBUG] Starting {service} with env: MQTT_BROKER={env_vars.get('MQTT_BROKER')}, MQTT_PORT={env_vars.get('MQTT_PORT')}, PREFIX={env_vars.get('TOPIC_PREFIX')}")
             
             try:
                 container = self.docker_manager.start_container(
@@ -302,7 +305,7 @@ class TestE2EIntegrationImproved:
         if frigate_msgs:
             config = frigate_msgs[-1][1]
             assert 'cameras' in config, "No cameras in Frigate config"
-            assert len(config.cameras) > 0, "No cameras configured"
+            assert len(config['cameras']) > 0, "No cameras configured"
     
     def test_multi_camera_consensus(self, mqtt_client):
         """Test that consensus requires multiple cameras to agree"""
@@ -1022,7 +1025,6 @@ client.disconnect()
 @pytest.mark.integration
 @pytest.mark.e2e
 @pytest.mark.timeout(1800)
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestE2EPipelineWithRealCamerasImproved:
     """Improved E2E pipeline test with comprehensive coverage"""
     
@@ -1233,7 +1235,7 @@ require_certificate false
             cam_id = f"camera_{i}"
             rtsp_url = cam.get('rtsp_url', '')
             if rtsp_url:
-                frigate_config.cameras[cam_id] = {
+                frigate_config['cameras'][cam_id] = {
                     'ffmpeg': {
                         'inputs': [{
                             'path': rtsp_url,

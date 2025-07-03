@@ -64,7 +64,7 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     # Wait for MQTT connection
     start_time = time.time()
     while time.time() - start_time < 10:
-        if hasattr(consensus, 'mqtt_connected') and consensus.mqtt_connected:
+        if hasattr(consensus, "_mqtt_connected") and consensus._mqtt_connected:
             time.sleep(0.5)  # Give extra time for subscriptions
             break
         time.sleep(0.1)
@@ -101,7 +101,7 @@ def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     # Wait for connection
     start_time = time.time()
     while time.time() - start_time < 10:
-        if hasattr(consensus, 'mqtt_connected') and consensus.mqtt_connected:
+        if hasattr(consensus, "_mqtt_connected") and consensus._mqtt_connected:
             time.sleep(0.5)
             break
         time.sleep(0.1)

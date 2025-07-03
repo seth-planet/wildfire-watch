@@ -135,10 +135,10 @@ class StateManager:
                     service.stop_background_tasks()
                 
                 # Stop MQTT client
-                if hasattr(service, 'mqtt_client'):
-                    if hasattr(service.mqtt_client, 'loop_stop'):
+                if hasattr(service, "_mqtt_client"):
+                    if hasattr(service._mqtt_client, 'loop_stop'):
                         service.mqtt_client.loop_stop()
-                    if hasattr(service.mqtt_client, 'disconnect'):
+                    if hasattr(service._mqtt_client, 'disconnect'):
                         service.mqtt_client.disconnect()
                 
                 # Call cleanup method
@@ -146,7 +146,7 @@ class StateManager:
                     service.cleanup()
                 elif hasattr(service, 'stop'):
                     service.stop()
-                elif hasattr(service, 'shutdown'):
+                elif hasattr(service, "_shutdown"):
                     service.shutdown()
                     
                 # Set shutdown flag
@@ -312,10 +312,10 @@ def fire_consensus_clean(mqtt_broker, monkeypatch, state_manager, thread_monitor
     
     # Wait for connection
     start_time = time.time()
-    while not service.mqtt_connected and time.time() - start_time < 10:
+    while not service._mqtt_connected and time.time() - start_time < 10:
         time.sleep(0.1)
     
-    assert service.mqtt_connected, "Service must connect to MQTT broker"
+    assert service._mqtt_connected, "Service must connect to MQTT broker"
     
     yield service
     
@@ -330,7 +330,7 @@ def fire_consensus_clean(mqtt_broker, monkeypatch, state_manager, thread_monitor
             service._cleanup_timer.cancel()
         
         # Stop MQTT
-        if hasattr(service, 'mqtt_client'):
+        if hasattr(service, "_mqtt_client"):
             service.mqtt_client.loop_stop()
             service.mqtt_client.disconnect()
         
@@ -385,10 +385,10 @@ def camera_detector_clean(mqtt_broker, monkeypatch, state_manager, thread_monito
     
     # Wait for connection
     start_time = time.time()
-    while not detector.mqtt_connected and time.time() - start_time < 10:
+    while not detector._mqtt_connected and time.time() - start_time < 10:
         time.sleep(0.1)
     
-    assert detector.mqtt_connected, "Detector must connect to MQTT broker"
+    assert detector._mqtt_connected, "Detector must connect to MQTT broker"
     
     yield detector
     
@@ -396,12 +396,12 @@ def camera_detector_clean(mqtt_broker, monkeypatch, state_manager, thread_monito
     try:
         detector.stop_background_tasks()
         
-        if hasattr(detector, 'mqtt_client'):
+        if hasattr(detector, "_mqtt_client"):
             detector.mqtt_client.loop_stop()
             detector.mqtt_client.disconnect()
         
         if hasattr(detector, 'executor'):
-            detector.executor.shutdown(wait=False)
+            detector._executor.shutdown(wait=False)
         
         # Clear state
         detector.cameras.clear()

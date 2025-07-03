@@ -10,7 +10,7 @@ RUN apt-get update && \
         && rm -rf /var/lib/apt/lists/*
 
 # Configure mDNS resolution
-COPY nsswitch.conf /etc/nsswitch.conf
+COPY fire_consensus/nsswitch.conf /etc/nsswitch.conf
 
 # Create non-root user for security
 RUN useradd -m -s /bin/bash consensus && \
@@ -25,12 +25,12 @@ COPY utils /utils
 ENV PYTHONPATH=/
 
 # Install Python dependencies
-COPY requirements.txt .
+COPY fire_consensus/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY consensus.py .
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY fire_consensus/consensus.py .
+COPY fire_consensus/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Switch to non-root user

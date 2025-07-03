@@ -86,6 +86,7 @@ class MQTTService:
         # Create client with unique ID
         client_id = f"{self.service_name}_{os.getpid()}"
         self._mqtt_client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id,
             clean_session=True,
             protocol=mqtt.MQTTv311
@@ -130,13 +131,24 @@ class MQTTService:
         client_key = getattr(self.config, 'tls_key_path', self.config.get('MQTT_CLIENT_KEY', None) if hasattr(self.config, 'get') else None)
         
         # Configure TLS
-        self._mqtt_client.tls_set(
-            ca_certs=ca_cert,
-            certfile=client_cert,
-            keyfile=client_key,
-            cert_reqs=mqtt.ssl.CERT_REQUIRED,
-            tls_version=mqtt.ssl.PROTOCOL_TLSv1_2
-        )
+        # Only use client certs if both are provided and not empty
+        if client_cert and client_key:
+            self._mqtt_client.tls_set(
+                ca_certs=ca_cert,
+                certfile=client_cert,
+                keyfile=client_key,
+                cert_reqs=mqtt.ssl.CERT_REQUIRED,
+                tls_version=mqtt.ssl.PROTOCOL_TLSv1_2
+            )
+        else:
+            # CA cert only (no client authentication)
+            self._mqtt_client.tls_set(
+                ca_certs=ca_cert,
+                certfile=None,
+                keyfile=None,
+                cert_reqs=mqtt.ssl.CERT_REQUIRED,
+                tls_version=mqtt.ssl.PROTOCOL_TLSv1_2
+            )
         
         # Optionally disable hostname verification for self-signed certs
         tls_insecure = getattr(self.config, 'tls_insecure', self.config.get('MQTT_TLS_INSECURE', False) if hasattr(self.config, 'get') else False)
@@ -168,7 +180,7 @@ class MQTTService:
                     self._max_reconnect_delay
                 )
     
-    def _on_mqtt_connect(self, client, userdata, flags, rc):
+    def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Handle MQTT connection events."""
         if rc == 0:
             self.logger.info("Connected to MQTT broker")
@@ -198,7 +210,7 @@ class MQTTService:
             with self._mqtt_lock:
                 self._mqtt_connected = False
     
-    def _on_mqtt_disconnect(self, client, userdata, rc):
+    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None):
         """Handle MQTT disconnection events."""
         with self._mqtt_lock:
             self._mqtt_connected = False

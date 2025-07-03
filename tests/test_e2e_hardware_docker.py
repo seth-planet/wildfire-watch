@@ -858,7 +858,7 @@ class TestE2EHardwareDocker:
             'environment': {
                 'MQTT_BROKER': 'localhost',
                 'MQTT_PORT': str(mqtt_port),
-                'MQTT_TOPIC_PREFIX': topic_prefix,
+                'TOPIC_PREFIX': topic_prefix,
                 'CONSENSUS_THRESHOLD': '1',  # Single camera threshold for testing
                 'TIME_WINDOW': '30',
                 'MIN_CONFIDENCE': '0.7',  # Lower confidence to ensure detection
@@ -894,7 +894,7 @@ class TestE2EHardwareDocker:
             'environment': {
                 'MQTT_BROKER': 'localhost',
                 'MQTT_PORT': str(mqtt_port),
-                'MQTT_TOPIC_PREFIX': topic_prefix,
+                'TOPIC_PREFIX': topic_prefix,
                 'GPIO_SIMULATION': 'true',  # Always simulate for tests
                 'MAX_ENGINE_RUNTIME': '30',
                 'LOG_LEVEL': 'DEBUG'

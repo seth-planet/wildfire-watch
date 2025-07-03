@@ -40,7 +40,7 @@ def camera_detector_with_mqtt(test_mqtt_broker, mqtt_topic_factory, monkeypatch,
     config_dir.mkdir()
     
     # Set environment variables using monkeypatch
-    monkeypatch.setenv('MQTT_TOPIC_PREFIX', prefix)
+    monkeypatch.setenv('TOPIC_PREFIX', prefix)
     monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
     monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
     monkeypatch.setenv('MQTT_TLS', 'false')
@@ -189,14 +189,23 @@ class TestCameraDiscovery:
         received_messages = []
         
         def on_message(client, userdata, msg):
+            print(f"Received message on topic: {msg.topic}")  # Debug
+            try:
+                payload = json.loads(msg.payload.decode())
+            except json.JSONDecodeError:
+                payload = msg.payload.decode()  # Handle non-JSON messages
             received_messages.append({
                 'topic': msg.topic,
-                'payload': json.loads(msg.payload.decode())
+                'payload': payload
             })
         
         mqtt_client.on_message = on_message
         mqtt_client.subscribe(discovery_topic)
         mqtt_client.subscribe(status_topic)
+        
+        # Also subscribe to all topics for debugging
+        mqtt_client.subscribe(f"{prefix}/#")
+        print(f"Subscribed to topics with prefix: {prefix}")  # Debug
         
         # Give time for subscription to complete
         time.sleep(0.2)
@@ -213,13 +222,26 @@ class TestCameraDiscovery:
             'main': 'rtsp://admin:pass@192.168.1.100:554/stream1'
         }
         
-        detector._publish_camera_discovery(camera)
+        # Add camera to detector's cameras dict first
+        with detector.cameras_lock:
+            detector.cameras[camera.mac] = camera
+        
+        print(f"Publishing camera with MAC: {camera.mac}")  # Debug
+        detector._publish_camera(camera)
+        
+        # Also try publishing directly to check connectivity
+        test_topic = f"{prefix}/test/debug"
+        mqtt_client.publish(test_topic, json.dumps({"test": "message"}))
+        print(f"Published test message to {test_topic}")  # Debug
         
         # Wait for message with timeout
         start_time = time.time()
         timeout = 5.0  # Increased timeout for reliability
-        while len(received_messages) == 0 and time.time() - start_time < timeout:
+        while time.time() - start_time < timeout:
             time.sleep(0.1)
+            # Check if we received the discovery message
+            if any('discovery' in msg['topic'] for msg in received_messages):
+                break
         
         # Verify message was published
         assert len(received_messages) > 0, f"No messages received within {timeout}s"
@@ -234,13 +256,14 @@ class TestCameraDiscovery:
         assert discovery_msg is not None
         payload = discovery_msg['payload']
         
-        # The payload has 'camera' field with the camera data
-        assert 'camera' in payload
-        camera_data = payload['camera']
-        assert camera_data['ip'] == "192.168.1.100"
-        assert camera_data['mac'] == "AA:BB:CC:DD:EE:FF"
-        assert camera_data['name'] == "Test Camera"
-        assert camera_data['manufacturer'] == "Hikvision"
+        # In refactored version, the payload is the camera data directly
+        assert payload['ip'] == "192.168.1.100"
+        assert payload['mac'] == "AA:BB:CC:DD:EE:FF"
+        assert payload['name'] == "Test Camera"
+        assert payload['manufacturer'] == "Hikvision"
+        assert payload['model'] == "DS-2CD2042WD"
+        assert 'rtsp_urls' in payload
+        assert payload['rtsp_urls']['main'] == 'rtsp://admin:pass@192.168.1.100:554/stream1'
     
     def test_onvif_discovery_with_mqtt(self, camera_detector_with_mqtt, mqtt_client):
         """Test ONVIF discovery with real hardware when available"""
@@ -317,7 +340,8 @@ class TestCameraDiscovery:
         }
         camera.online = True
         
-        detector.cameras[camera.mac] = camera
+        with detector.cameras_lock:
+            detector.cameras[camera.mac] = camera
         
         # Publish Frigate config
         detector._update_frigate_config()
@@ -332,7 +356,15 @@ class TestCameraDiscovery:
         assert len(received_config) > 0, f"No config received within {timeout}s"
         config = received_config[0]
         assert 'cameras' in config
-        assert camera.mac in config.cameras
+        # The camera ID is the MAC address without colons
+        camera_id = camera.mac.replace(':', '')
+        assert camera_id in config['cameras']
+        
+        # Verify camera config structure
+        cam_config = config['cameras'][camera_id]
+        assert 'ffmpeg' in cam_config
+        assert 'detect' in cam_config
+        assert 'objects' in cam_config
 
 
 class TestCameraDetectorTLS:
@@ -349,11 +381,15 @@ class TestCameraDetectorTLS:
         config_dir.mkdir()
         
         # Set environment for TLS
-        monkeypatch.setenv('MQTT_TOPIC_PREFIX', prefix)
+        monkeypatch.setenv('TOPIC_PREFIX', prefix)
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_tls_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_tls_broker.tls_port))  # Use TLS port
         monkeypatch.setenv('MQTT_TLS', 'true')
         monkeypatch.setenv('TLS_CA_PATH', test_mqtt_tls_broker.ca_cert)  # Correct env var name
+        # Don't set client certificates - we'll use CA only for testing
+        monkeypatch.setenv('TLS_CERT_PATH', '')
+        monkeypatch.setenv('TLS_KEY_PATH', '')
+        monkeypatch.setenv('TLS_INSECURE', 'true')  # Allow self-signed certs
         monkeypatch.setenv('CAMERA_CREDENTIALS', '')
         monkeypatch.setenv('FRIGATE_CONFIG_PATH', str(config_dir / 'frigate_config.yml'))
         monkeypatch.setenv('DISCOVERY_INTERVAL', '300')
@@ -400,7 +436,7 @@ class TestHealthReporting:
         detector, prefix = camera_detector_with_mqtt
         
         # Subscribe to health topic
-        health_topic = f"{prefix}/system/camera_detector_health"
+        health_topic = f"{prefix}/system/camera_detector/health"
         
         received_health = []
         
@@ -415,7 +451,7 @@ class TestHealthReporting:
         time.sleep(0.2)
         
         # Trigger health report
-        detector.health_reporter.report_health()
+        detector.health_reporter.force_health_update()
         
         # Wait for message with timeout
         start_time = time.time()
@@ -426,15 +462,16 @@ class TestHealthReporting:
         # Verify health was published
         assert len(received_health) > 0, f"No health status received within {timeout}s"
         health = received_health[0]
-        assert 'status' in health
         assert 'timestamp' in health
-        assert 'stats' in health
-        assert 'cameras' in health
+        assert 'service' in health
+        assert health['service'] == 'camera_detector'
+        assert 'mqtt_connected' in health
+        assert 'resources' in health
         
-        # Check stats structure
-        stats = health['stats']
-        assert 'online_cameras' in stats
-        assert stats['online_cameras'] == 0  # No cameras added yet
+        # Check for camera-specific health data
+        assert 'total_cameras' in health
+        assert 'online_cameras' in health
+        assert health['online_cameras'] == 0  # No cameras added yet
 
 
 if __name__ == "__main__":

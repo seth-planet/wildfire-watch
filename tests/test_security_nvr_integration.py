@@ -184,8 +184,8 @@ class TestSecurityNVRIntegration:
     def setup(self, test_mqtt_broker, frigate_container, docker_container_manager):
         """Setup test environment with real MQTT broker and Frigate"""
         self.mqtt_messages = []
-        self.mqtt_connected = False
-        self.mqtt_client = None
+        self._mqtt_connected = False
+        self._mqtt_client = None
         self.mqtt_broker = test_mqtt_broker
         self.frigate_container = frigate_container
         self.docker_manager = docker_container_manager
@@ -200,7 +200,7 @@ class TestSecurityNVRIntegration:
         yield
         
         # Cleanup after each test
-        if self.mqtt_client and self.mqtt_connected:
+        if self._mqtt_client and self._mqtt_connected:
             self.mqtt_client.loop_stop()
             self.mqtt_client.disconnect()
     
@@ -318,10 +318,10 @@ class TestSecurityNVRIntegration:
             
             # Wait for connection
             timeout = time.time() + 5
-            while not self.mqtt_connected and time.time() < timeout:
+            while not self._mqtt_connected and time.time() < timeout:
                 time.sleep(0.1)
             
-            assert self.mqtt_connected, "Failed to connect to MQTT broker"
+            assert self._mqtt_connected, "Failed to connect to MQTT broker"
             
             # Publish camera discovery message
             camera_data = {

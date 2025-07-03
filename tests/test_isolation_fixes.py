@@ -116,10 +116,10 @@ class ServiceStateManager:
         for service in list(self._services):
             try:
                 # Stop MQTT client first
-                if hasattr(service, 'mqtt_client'):
-                    if hasattr(service.mqtt_client, 'loop_stop'):
+                if hasattr(service, "_mqtt_client"):
+                    if hasattr(service._mqtt_client, 'loop_stop'):
                         service.mqtt_client.loop_stop()
-                    if hasattr(service.mqtt_client, 'disconnect'):
+                    if hasattr(service._mqtt_client, 'disconnect'):
                         service.mqtt_client.disconnect()
                         
                 # Stop the service
@@ -127,7 +127,7 @@ class ServiceStateManager:
                     service.cleanup()
                 elif hasattr(service, 'stop'):
                     service.stop()
-                elif hasattr(service, 'shutdown'):
+                elif hasattr(service, "_shutdown"):
                     service.shutdown()
                     
                 # Clear any state
@@ -221,10 +221,10 @@ def consensus_service_isolated(test_mqtt_broker, monkeypatch, service_state_mana
     
     # Wait for connection
     start_time = time.time()
-    while not service.mqtt_connected and time.time() - start_time < 10:
+    while not service._mqtt_connected and time.time() - start_time < 10:
         time.sleep(0.1)
     
-    assert service.mqtt_connected, "Service must connect to MQTT broker"
+    assert service._mqtt_connected, "Service must connect to MQTT broker"
     
     yield service
     
@@ -239,7 +239,7 @@ def consensus_service_isolated(test_mqtt_broker, monkeypatch, service_state_mana
             service._cleanup_timer.cancel()
             
         # Stop MQTT
-        if hasattr(service, 'mqtt_client'):
+        if hasattr(service, "_mqtt_client"):
             service.mqtt_client.loop_stop()
             service.mqtt_client.disconnect()
             
@@ -284,10 +284,10 @@ def camera_detector_isolated(test_mqtt_broker, monkeypatch, service_state_manage
     
     # Wait for connection
     start_time = time.time()
-    while not detector.mqtt_connected and time.time() - start_time < 10:
+    while not detector._mqtt_connected and time.time() - start_time < 10:
         time.sleep(0.1)
     
-    assert detector.mqtt_connected, "Detector must connect to MQTT broker"
+    assert detector._mqtt_connected, "Detector must connect to MQTT broker"
     
     yield detector
     
@@ -295,12 +295,12 @@ def camera_detector_isolated(test_mqtt_broker, monkeypatch, service_state_manage
     try:
         detector.stop_background_tasks()
         
-        if hasattr(detector, 'mqtt_client'):
+        if hasattr(detector, "_mqtt_client"):
             detector.mqtt_client.loop_stop()
             detector.mqtt_client.disconnect()
             
         if hasattr(detector, 'executor'):
-            detector.executor.shutdown(wait=False)
+            detector._executor.shutdown(wait=False)
             
         time.sleep(0.2)
         
