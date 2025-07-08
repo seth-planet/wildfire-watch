@@ -18,6 +18,7 @@ import time
 import json
 import socket
 import logging
+import threading
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
@@ -137,6 +138,52 @@ class TelemetryHealthReporter(HealthReporter):
                     
         return health
     
+    def _publish_health(self) -> None:
+        """Override to publish to telemetry topic instead of health topic."""
+        if self._shutdown:
+            return
+        
+        try:
+            self.mqtt_service.logger.info(f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
+            
+            # Check MQTT connection first
+            if not self.mqtt_service.is_connected:
+                self.mqtt_service.logger.warning(f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
+                # Still reschedule to try again later
+            else:
+                # Gather health data
+                health_data = self._get_base_health_data()
+                
+                # Add service-specific health data
+                service_health = self.get_service_health()
+                if service_health:
+                    health_data.update(service_health)
+                
+                # Publish to telemetry topic instead of health topic
+                topic = self.telemetry.config.telemetry_topic
+                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Publishing telemetry to {topic} with data keys: {list(health_data.keys())}")
+                result = self.mqtt_service.publish_message(
+                    topic,
+                    health_data,
+                    retain=False,  # Telemetry messages should not be retained
+                    qos=1
+                )
+                if result:
+                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Telemetry published successfully to {topic}")
+                else:
+                    self.mqtt_service.logger.error(f"[HEALTH DEBUG] Failed to publish telemetry to {topic}")
+            
+        except Exception as e:
+            self.mqtt_service.logger.error(f"[HEALTH DEBUG] Error publishing telemetry: {e}", exc_info=True)
+        
+        # Reschedule next health report
+        if not self._shutdown:
+            with self._lock:
+                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Scheduling next telemetry report in {self.interval}s")
+                self._health_timer = threading.Timer(self.interval, self._publish_health)
+                self._health_timer.daemon = True
+                self._health_timer.start()
+    
     def _get_system_metrics(self) -> Dict[str, Any]:
         """Collect system health metrics using psutil."""
         metrics = {}
@@ -196,7 +243,12 @@ class TelemetryService(MQTTService, ThreadSafeService):
             subscriptions=[]
         )
         
-        self.logger.info(f"Telemetry Service initialized: {self.config.camera_id}")
+        self.logger.info(f"Telemetry Service configured: {self.config.camera_id}")
+        
+        # Connect to MQTT after everything is initialized
+        # This prevents race conditions during startup
+        self.connect()
+        self.logger.info(f"Telemetry Service fully initialized and connected: {self.config.camera_id}")
         
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback."""
@@ -206,9 +258,7 @@ class TelemetryService(MQTTService, ThreadSafeService):
         
     def _start_telemetry_reporting(self):
         """Start the telemetry reporting cycle."""
-        # Instead of using our own timer, leverage the HealthReporter
-        # but override the topic to use the telemetry topic
-        self.health_reporter.health_topic = self.config.telemetry_topic
+        # Start health reporting which will use our overridden _publish_health
         self.health_reporter.start_health_reporting()
         
     def cleanup(self):

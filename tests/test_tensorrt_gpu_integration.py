@@ -25,7 +25,6 @@ from tests.mqtt_test_broker import MQTTTestBroker as TestMQTTBroker
 from tests.helpers import DockerContainerManager, ParallelTestContext
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestTensorRTGPU:
     """Test TensorRT GPU integration for fire detection"""
     

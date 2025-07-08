@@ -46,6 +46,9 @@ class HealthReporter(ABC):
     def start_health_reporting(self) -> None:
         """Start periodic health reporting."""
         self._shutdown = False
+        self.mqtt_service.logger.info(f"[HEALTH DEBUG] Starting health reporting for {self.mqtt_service.service_name} with interval {self.interval}s")
+        self.mqtt_service.logger.info(f"[HEALTH DEBUG] MQTT connected: {self.mqtt_service.is_connected}")
+        self.mqtt_service.logger.info(f"[HEALTH DEBUG] Calling _publish_health immediately")
         self._publish_health()
         
     def stop_health_reporting(self) -> None:
@@ -62,27 +65,41 @@ class HealthReporter(ABC):
             return
         
         try:
-            # Gather health data
-            health_data = self._get_base_health_data()
+            self.mqtt_service.logger.info(f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
             
-            # Add service-specific health data
-            service_health = self.get_service_health()
-            if service_health:
-                health_data.update(service_health)
-            
-            # Publish health status
-            self.mqtt_service.publish_message(
-                f"system/{self.mqtt_service.service_name}/health",
-                health_data,
-                retain=True
-            )
+            # Check MQTT connection first
+            if not self.mqtt_service.is_connected:
+                self.mqtt_service.logger.warning(f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
+                # Still reschedule to try again later
+            else:
+                # Gather health data
+                health_data = self._get_base_health_data()
+                
+                # Add service-specific health data
+                service_health = self.get_service_health()
+                if service_health:
+                    health_data.update(service_health)
+                
+                # Publish health status
+                topic = f"system/{self.mqtt_service.service_name}/health"
+                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Publishing health to {topic} with data keys: {list(health_data.keys())}")
+                result = self.mqtt_service.publish_message(
+                    topic,
+                    health_data,
+                    retain=True
+                )
+                if result:
+                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Health published successfully to {topic}")
+                else:
+                    self.mqtt_service.logger.error(f"[HEALTH DEBUG] Failed to publish health to {topic}")
             
         except Exception as e:
-            self.mqtt_service.logger.error(f"Error publishing health: {e}")
+            self.mqtt_service.logger.error(f"[HEALTH DEBUG] Error publishing health: {e}", exc_info=True)
         
         # Reschedule next health report
         if not self._shutdown:
             with self._lock:
+                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Scheduling next health report in {self.interval}s")
                 self._health_timer = threading.Timer(self.interval, self._publish_health)
                 self._health_timer.daemon = True
                 self._health_timer.start()

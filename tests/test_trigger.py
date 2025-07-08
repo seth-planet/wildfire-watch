@@ -46,9 +46,10 @@ def cleanup_threads():
     initial_gpio_state = None
     
     # Capture GPIO state if available
+    initial_gpio_state = None
     try:
-        from trigger import GPIO
-        if hasattr(GPIO, '_state'):
+        from gpio_trigger.trigger import GPIO
+        if GPIO is not None and hasattr(GPIO, '_state'):
             initial_gpio_state = GPIO._state.copy()
     except:
         pass
@@ -63,13 +64,13 @@ def cleanup_threads():
     
     # Reset GPIO state completely
     try:
-        from trigger import GPIO
-        if hasattr(GPIO, '_state'):
+        from gpio_trigger.trigger import GPIO
+        if GPIO is not None and hasattr(GPIO, '_state'):
             with GPIO._lock:
                 GPIO._state.clear()
                 if initial_gpio_state:
                     GPIO._state.update(initial_gpio_state)
-        if hasattr(GPIO, 'cleanup'):
+        if GPIO is not None and hasattr(GPIO, 'cleanup'):
             GPIO.cleanup()
     except Exception:
         pass
@@ -120,6 +121,11 @@ def cleanup_threads():
 @pytest.fixture
 def mock_gpio():
     """Reset GPIO state before each test"""
+    # Only proceed if GPIO is available (not None)
+    if GPIO is None:
+        yield
+        return
+        
     # Ensure GPIO lock exists
     if not hasattr(GPIO, '_lock'):
         GPIO._lock = threading.RLock()
@@ -154,7 +160,7 @@ def controller(mock_gpio, monkeypatch, test_mqtt_broker, mqtt_topic_factory):
     monkeypatch.setenv("FIRE_OFF_DELAY", "0.5")
     monkeypatch.setenv("VALVE_CLOSE_DELAY", "0.3")
     monkeypatch.setenv("IGNITION_OFF_DURATION", "0.1")
-    monkeypatch.setenv("MAX_ENGINE_RUNTIME", "2.0")
+    monkeypatch.setenv("MAX_ENGINE_RUNTIME", "2")
     monkeypatch.setenv("REFILL_MULTIPLIER", "2")
     monkeypatch.setenv("PRIMING_DURATION", "0.2")
     monkeypatch.setenv("RPM_REDUCTION_LEAD", "0.5")
@@ -162,8 +168,8 @@ def controller(mock_gpio, monkeypatch, test_mqtt_broker, mqtt_topic_factory):
     
     # Disable optional monitoring threads to prevent thread leaks in tests
     # Note: Dry run protection is always enabled for safety
-    monkeypatch.setenv("RESERVOIR_FLOAT_PIN", "")
-    monkeypatch.setenv("EMERGENCY_BUTTON_PIN", "")
+    monkeypatch.setenv("RESERVOIR_FLOAT_PIN", "0")  # 0 = disabled
+    monkeypatch.setenv("EMERGENCY_BUTTON_PIN", "0")  # 0 = disabled
     monkeypatch.setenv("HARDWARE_VALIDATION_ENABLED", "false")
     
     # Configure MQTT for testing (real client, real broker)
@@ -359,8 +365,18 @@ class TestBasicOperation:
     def test_initialization(self, controller, mock_gpio):
         """Test controller initializes to safe state"""
         assert controller._state == PumpState.IDLE
-        assert all(not mock_gpio.input(CONFIG[pin])
-                  for pin in ['MAIN_VALVE_PIN', 'IGN_ON_PIN', 'IGN_START_PIN'])
+        
+        # In simulation mode, GPIO is None, so check state differently
+        if mock_gpio is not None:
+            assert all(not mock_gpio.input(CONFIG[pin])
+                      for pin in ['MAIN_VALVE_PIN', 'IGN_ON_PIN', 'IGN_START_PIN'])
+        else:
+            # In simulation mode, check the state snapshot instead
+            state = controller._get_state_snapshot()
+            assert not state['main_valve']
+            assert not state['ignition_on']
+            assert not state['ignition_start']
+            
         assert controller._shutting_down is False
         assert controller._engine_start_time is None
     
@@ -403,12 +419,12 @@ class TestBasicOperation:
             # correctly handles startup failures
             return
         
-        # Wait for fire off delay (0.5s) + a bit more for processing
-        time.sleep(0.6)
+        # Wait for fire off delay (0.5s) + time for RPM reduction
+        time.sleep(1.0)
         
         # Should be in shutdown sequence or completed refill
         # The engine should have shut down by now due to fire off delay
-        assert controller._state in [PumpState.REFILLING, PumpState.STOPPING, PumpState.COOLDOWN, PumpState.IDLE]
+        assert controller._state in [PumpState.REDUCING_RPM, PumpState.REFILLING, PumpState.STOPPING, PumpState.COOLDOWN, PumpState.IDLE]
         
         # Engine should be off
         assert GPIO.input(CONFIG['IGN_ON_PIN']) is False

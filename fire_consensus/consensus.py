@@ -215,6 +215,7 @@ class ConsensusHealthReporter(HealthReporter):
     
     def __init__(self, consensus):
         self.consensus = consensus
+        # Pass the consensus instance as mqtt_service since FireConsensus extends MQTTService
         super().__init__(consensus, consensus.config.health_interval)
         
     def get_service_health(self) -> Dict[str, any]:
@@ -238,6 +239,7 @@ class ConsensusHealthReporter(HealthReporter):
                     consensus_state = "cooldown"
                     
             health = {
+                'healthy': True,  # Service is healthy if we get this far
                 'consensus_state': consensus_state,
                 'trigger_count': self.consensus.trigger_count,
                 'last_trigger_ago': int(now - self.consensus.last_trigger_time) if self.consensus.last_trigger_time > 0 else -1,
@@ -281,9 +283,9 @@ class FireConsensus(MQTTService, ThreadSafeService):
         # Load configuration
         self.config = FireConsensusConfig()
         
-        # Initialize base classes
-        MQTTService.__init__(self, "fire_consensus", self.config)
+        # Initialize base classes - ThreadSafeService first to set up timer_manager
         ThreadSafeService.__init__(self, "fire_consensus", logging.getLogger(__name__))
+        MQTTService.__init__(self, "fire_consensus", self.config)
         
         # Core state
         self.cameras: Dict[str, CameraState] = {}
@@ -291,9 +293,6 @@ class FireConsensus(MQTTService, ThreadSafeService):
         self.trigger_count = 0
         self.consensus_events = deque(maxlen=1000)
         self.lock = threading.RLock()
-        
-        # Setup health reporter
-        self.health_reporter = ConsensusHealthReporter(self)
         
         # Setup MQTT with subscriptions
         subscriptions = [
@@ -312,10 +311,58 @@ class FireConsensus(MQTTService, ThreadSafeService):
         # Enable offline queue for resilience
         self.enable_offline_queue(max_size=100)
         
-        # Start background tasks
-        self._start_background_tasks()
+        try:
+            # Start background tasks
+            self.logger.info("Starting background tasks...")
+            self._start_background_tasks()
+            self.logger.info("Background tasks started successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to start background tasks: {e}", exc_info=True)
+            raise
         
-        self.logger.info(f"Fire Consensus initialized: {self.config.service_id}")
+        self.logger.info(f"Fire Consensus configured: {self.config.service_id}")
+        
+        # Connect to MQTT before creating health reporter
+        # This ensures MQTT is ready for health messages
+        try:
+            self.logger.info("Connecting to MQTT...")
+            self.connect()
+            self.logger.info("MQTT connection initiated")
+        except Exception as e:
+            self.logger.error(f"Failed to connect to MQTT: {e}", exc_info=True)
+            raise
+        
+        # Setup health reporter AFTER MQTT connection is initiated
+        self.logger.info("Creating ConsensusHealthReporter...")
+        self.health_reporter = ConsensusHealthReporter(self)
+        self.logger.info("ConsensusHealthReporter created successfully")
+        
+        # Start health reporting
+        try:
+            self.logger.info("Starting health reporting with interval: %s seconds", self.config.health_interval)
+            self.health_reporter.start_health_reporting()
+            self.logger.info("Health reporting started")
+        except Exception as e:
+            self.logger.error(f"Failed to start health reporting: {e}", exc_info=True)
+            raise
+        
+        self.logger.info(f"Fire Consensus fully initialized: {self.config.service_id}")
+        
+        # Publish initial health status after connection
+        try:
+            self.logger.info("Publishing initial health status...")
+            initial_health = {
+                'healthy': True,
+                'status': 'starting',
+                'service': 'fire_consensus',
+                'timestamp': time.time()
+            }
+            if self.publish_message("system/fire_consensus/health", initial_health, retain=True):
+                self.logger.info("Initial health status published successfully")
+            else:
+                self.logger.error("Failed to publish initial health status")
+        except Exception as e:
+            self.logger.error(f"Failed to publish initial health: {e}", exc_info=True)
         
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback."""
@@ -337,15 +384,18 @@ class FireConsensus(MQTTService, ThreadSafeService):
             
     def _start_background_tasks(self):
         """Start background tasks using timer manager."""
-        # Memory cleanup task
-        self.timer_manager.schedule(
-            "memory_cleanup",
-            self._cleanup_old_data,
-            self.config.memory_cleanup_interval
-        )
-        
-        # Start health reporting
-        self.health_reporter.start_health_reporting()
+        try:
+            # Memory cleanup task
+            self.logger.debug(f"Scheduling memory cleanup with interval {self.config.memory_cleanup_interval}s")
+            self.timer_manager.schedule(
+                "memory_cleanup",
+                self._cleanup_old_data,
+                self.config.memory_cleanup_interval
+            )
+            self.logger.info("Memory cleanup task scheduled successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to schedule memory cleanup: {e}", exc_info=True)
+            # Don't raise - memory cleanup is not critical
         
     def _handle_fire_detection(self, topic: str, payload: Dict):
         """Process fire detection from cameras."""
@@ -354,6 +404,10 @@ class FireConsensus(MQTTService, ThreadSafeService):
             parts = topic.split('/')
             camera_id = parts[2] if len(parts) > 2 else payload.get('camera_id', 'unknown')
             
+            # Validate camera_id
+            if not camera_id or camera_id == 'unknown':
+                return
+                
             # Validate detection
             confidence = float(payload.get('confidence', 0))
             if confidence < self.config.min_confidence:
@@ -361,12 +415,12 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 
             # Calculate area
             bbox = payload.get('bbox', [])
-            if len(bbox) == 4:
-                area = self._calculate_area(bbox)
-                if not (self.config.min_area_ratio <= area <= self.config.max_area_ratio):
-                    return
-            else:
-                area = 0.01  # Default area
+            if bbox is None or len(bbox) != 4:
+                return  # Invalid bbox
+            
+            area = self._calculate_area(bbox)
+            if not (self.config.min_area_ratio <= area <= self.config.max_area_ratio):
+                return
                 
             # Create detection
             object_id = str(payload.get('object_id', '0'))
@@ -396,7 +450,10 @@ class FireConsensus(MQTTService, ThreadSafeService):
             # Calculate area from box
             box = payload.get('after', {}).get('box', [])
             if len(box) == 4:
-                area = (box[2] - box[0]) * (box[3] - box[1])
+                # Use the helper to get normalized area
+                area = self._calculate_area(box)
+                if not (self.config.min_area_ratio <= area <= self.config.max_area_ratio):
+                    return
             else:
                 area = 0.01
                 
@@ -563,24 +620,44 @@ class FireConsensus(MQTTService, ThreadSafeService):
                     # Remove empty deques
                     if not detections:
                         del camera.detections[object_id]
-                        
+        
                 # Update online status
                 if current_time - camera.last_seen > self.config.camera_timeout:
                     camera.is_online = False
-                    
-        # Reschedule
-        self.timer_manager.schedule(
-            "memory_cleanup",
-            self._cleanup_old_data,
-            self.config.memory_cleanup_interval
-        )
+        
+        # Reschedule for next cleanup
+        if not getattr(self, '_shutdown', False):
+            self.timer_manager.schedule(
+                "memory_cleanup",
+                self._cleanup_old_data,
+                self.config.memory_cleanup_interval
+            )
         
     def _calculate_area(self, bbox: List[float]) -> float:
         """Calculate normalized area from bounding box."""
-        # Assuming 1920x1080 resolution (should be configurable)
-        width = bbox[2] - bbox[0]
-        height = bbox[3] - bbox[1]
-        return (width * height) / (1920 * 1080)
+        try:
+            # Validate bbox values
+            for val in bbox:
+                if math.isnan(val) or math.isinf(val) or val < 0:
+                    return 0
+            
+            # Assuming 1920x1080 resolution (should be configurable)
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
+            
+            # Check for negative dimensions
+            if width <= 0 or height <= 0:
+                return 0
+                
+            area = (width * height) / (1920 * 1080)
+            
+            # Final validation
+            if math.isnan(area) or math.isinf(area) or area < 0:
+                return 0
+                
+            return area
+        except (ValueError, TypeError):
+            return 0
         
     def cleanup(self):
         """Clean shutdown of service."""

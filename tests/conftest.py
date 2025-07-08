@@ -219,6 +219,29 @@ def test_mqtt_tls_broker(tmp_path):
 # Session cleanup hooks for parallel test isolation
 # ─────────────────────────────────────────────────────────────
 
+def pytest_sessionstart(session):
+    """Clean up any leftover containers before starting tests"""
+    import subprocess
+    
+    print("Pre-test cleanup: removing any leftover test containers...")
+    
+    try:
+        # Clean up any containers with our test labels
+        result = subprocess.run(['docker', 'ps', '-aq', '--filter', 'label=com.wildfire.test=true'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            container_ids = result.stdout.strip().split('\n')
+            for container_id in container_ids:
+                if container_id.strip():
+                    try:
+                        subprocess.run(['docker', 'rm', '-f', container_id.strip()], timeout=5)
+                        print(f"Removed leftover test container {container_id}")
+                    except:
+                        pass
+    except Exception as e:
+        print(f"Warning: Error in pre-test cleanup: {e}")
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Clean up all test resources at session end"""
     import subprocess

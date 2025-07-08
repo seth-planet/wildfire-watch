@@ -17,6 +17,7 @@ import docker
 import yaml
 import tempfile
 import shutil
+import subprocess
 from pathlib import Path
 from threading import Event
 from typing import Dict, List, Optional
@@ -85,6 +86,7 @@ class TestE2EIntegrationImproved:
                 env_vars['CONSENSUS_THRESHOLD'] = '1'  # Allow single camera
                 env_vars['DETECTION_WINDOW'] = '30'  # Longer window for test
                 env_vars['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
+                env_vars['HEALTH_INTERVAL'] = '10'  # Minimum allowed health interval
             
             # Debug: print environment
             print(f"[DEBUG] Starting {service} with env: MQTT_BROKER={env_vars.get('MQTT_BROKER')}, MQTT_PORT={env_vars.get('MQTT_PORT')}, PREFIX={env_vars.get('TOPIC_PREFIX')}")
@@ -425,7 +427,16 @@ class TestE2EIntegrationImproved:
         
         def on_message(client, userdata, msg):
             """Process messages from services with proper namespace handling"""
-            print(f"[DEBUG] Received message on {msg.topic}")
+            # Only log specific message types to reduce noise
+            if 'health' in msg.topic or 'consensus' in msg.topic or msg.topic.endswith('/lwt'):
+                print(f"[DEBUG] Received message on {msg.topic}")
+                
+                # Debug: Show first 200 chars of payload for non-binary messages
+                try:
+                    payload_preview = msg.payload.decode('utf-8')[:200]
+                    print(f"[DEBUG] Payload preview: {payload_preview}...")
+                except:
+                    print(f"[DEBUG] Binary payload, length: {len(msg.payload)}")
             
             try:
                 # Parse and route messages based on topic patterns
@@ -458,31 +469,36 @@ class TestE2EIntegrationImproved:
                     # Fire consensus triggered pump activation
                     print("[DEBUG] ✅ Fire trigger message sent from consensus to gpio-trigger!")
                     
-                elif msg.topic == f"{namespace_prefix}/system/consensus_telemetry":
-                    # Consensus service telemetry - monitor camera registration
+                elif msg.topic == f"{namespace_prefix}/system/fire_consensus/health":
+                    # Consensus service health - monitor service status
                     data = json.loads(msg.payload.decode())
-                    stats = data.get('stats', {})
-                    cameras = data.get('cameras', {})
+                    healthy = data.get('healthy', False)
+                    mqtt_connected = data.get('mqtt_connected', False)
                     status = data.get('status', 'unknown')
+                    consensus_state = data.get('consensus_state', 'unknown')
+                    total_cameras = data.get('cameras_total', data.get('total_cameras', 0))
+                    online_cameras = data.get('cameras_online', data.get('online_cameras', 0))
                     
-                    total_cameras = stats.get('total_cameras', 0)
-                    online_cameras = len(cameras.get('online', []))
+                    print(f"[DEBUG] Consensus health: healthy={healthy}, mqtt_connected={mqtt_connected}, status={status}, state={consensus_state}, cameras={total_cameras}, online={online_cameras}")
                     
-                    print(f"[DEBUG] Consensus: status={status}, cameras={total_cameras}, online={online_cameras}")
-                    
-                    # Mark consensus as ready when it's online
-                    if status == 'online':
+                    # Mark consensus as ready when it's healthy or mqtt_connected
+                    if healthy or mqtt_connected:
                         consensus_ready.set()
+                        print("[DEBUG] ✅ Consensus service is ready!")
                     
                     # Mark cameras as registered when consensus sees them
                     if total_cameras >= 2:
                         cameras_registered.set()
-                        print(f"[DEBUG] ✅ Cameras registered in consensus: {cameras}")
+                        print(f"[DEBUG] ✅ Cameras registered in consensus: {total_cameras} cameras")
                         
                 elif msg.topic.endswith('/lwt'):
                     # Last will testament - service disconnection
-                    lwt_data = json.loads(msg.payload.decode())
-                    print(f"[DEBUG] LWT: {lwt_data}")
+                    try:
+                        lwt_data = json.loads(msg.payload.decode())
+                        print(f"[DEBUG] LWT: {lwt_data}")
+                    except json.JSONDecodeError:
+                        # Some LWT messages might be plain text
+                        print(f"[DEBUG] LWT (plain text): {msg.payload.decode()}")
                     
                 elif '_telemetry' in msg.topic and not msg.topic.endswith('consensus_telemetry'):
                     # Other telemetry - minimal logging to reduce noise
@@ -500,13 +516,20 @@ class TestE2EIntegrationImproved:
         
         # Step 1: Wait for consensus service to be online
         print("[DEBUG] Step 1: Waiting for consensus service to be ready...")
-        if not consensus_ready.wait(timeout=15):
+        # Health interval is 10 seconds, so wait at least 25 seconds
+        # (5s startup + 10s first interval + 10s buffer)
+        if not consensus_ready.wait(timeout=25):
             # Try to get logs if consensus didn't start
             for container in self.e2e_containers:
                 if 'consensus' in container.name:
-                    logs = container.logs(tail=50).decode('utf-8')
-                    print(f"[DEBUG] Consensus logs:\n{logs}")
-            pytest.fail("Consensus service did not come online within 15 seconds")
+                    try:
+                        container.reload()
+                        print(f"[DEBUG] Consensus container status: {container.status}")
+                        logs = container.logs(tail=100).decode('utf-8')
+                        print(f"[DEBUG] Consensus logs:\n{logs}")
+                    except Exception as e:
+                        print(f"[DEBUG] Error getting consensus logs: {e}")
+            pytest.fail("Consensus service did not come online within 25 seconds")
         
         print("[DEBUG] ✅ Consensus service is online")
         
@@ -665,6 +688,9 @@ class TestE2EIntegrationImproved:
         self.docker_manager.cleanup_old_container(container_name)
         
         env_vars = self.parallel_context.get_service_env('camera_detector')
+        # Fix environment variable names for refactored services
+        if 'MQTT_TOPIC_PREFIX' in env_vars:
+            env_vars['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
         # Set faster health reporting for testing and reduce network scanning
         env_vars['HEALTH_REPORT_INTERVAL'] = '5'  # 5 seconds instead of 60
         env_vars['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
@@ -713,10 +739,10 @@ class TestE2EIntegrationImproved:
                 
                 # Direct pattern matching for known health topics
                 service_mapping = {
-                    'system/camera_detector_health': 'camera_detector',
-                    'system/consensus_telemetry': 'fire_consensus', 
-                    'system/gpio_trigger/health': 'gpio_trigger',
-                    'system/trigger_telemetry': 'gpio_trigger'  # GPIO trigger uses this topic
+                    'system/camera_detector/health': 'camera_detector',
+                    'system/fire_consensus/health': 'fire_consensus', 
+                    'system/gpio_trigger/health': 'gpio_trigger',  # New standardized topic
+                    'system/trigger_telemetry': 'gpio_trigger'  # Legacy topic for backward compatibility
                 }
                 
                 if base_topic in service_mapping:
@@ -739,10 +765,11 @@ class TestE2EIntegrationImproved:
         
         # Subscribe to the namespaced topics that services actually publish to
         # Services already include the namespace prefix in their topics
-        raw_client.subscribe(f"{namespace_prefix}/system/camera_detector_health")
-        raw_client.subscribe(f"{namespace_prefix}/system/consensus_telemetry")
+        raw_client.subscribe(f"{namespace_prefix}/system/camera_detector/health")
+        raw_client.subscribe(f"{namespace_prefix}/system/fire_consensus/health")
+        raw_client.subscribe(f"{namespace_prefix}/system/gpio_trigger/health")
         raw_client.subscribe(f"{namespace_prefix}/system/trigger_telemetry")  # GPIO trigger uses this
-        raw_client.subscribe(f"{namespace_prefix}/system/+")  # Catch all system topics
+        raw_client.subscribe(f"{namespace_prefix}/system/+/health")  # Catch all health topics
         print(f"[DEBUG] Subscribed to health topics with namespace: {namespace_prefix}")
         
         # Also subscribe to all topics for debugging
@@ -762,7 +789,8 @@ class TestE2EIntegrationImproved:
             print(f"[DEBUG] Container {container.name} status: {container.status}")
         
         # Wait for services to start publishing health
-        time.sleep(8)  # Give camera_detector time to start and connect to MQTT
+        # Camera detector has a 10s health interval (minimum enforced by ConfigBase)
+        time.sleep(12)  # Give camera_detector time to start, connect, and publish first health
         
         # Debug: Force a test publish from raw client to verify connectivity
         print(f"[DEBUG] Publishing test message directly...")
@@ -820,206 +848,267 @@ class TestE2EIntegrationImproved:
     @pytest.mark.infrastructure_dependent
     def test_mqtt_broker_recovery(self, docker_client, mqtt_client):
         """Test services recover from MQTT broker failure"""
-        # Start a dedicated MQTT broker for this test
-        mqtt_container_name = self.docker_manager.get_container_name("mqtt-recovery-test")
+        # Start a dedicated MQTT broker container for this test
+        broker_name = self.docker_manager.get_container_name("recovery-mqtt")
+        self.docker_manager.cleanup_old_container(broker_name)
         
-        # Clean up any existing container
-        self.docker_manager.cleanup_old_container(mqtt_container_name)
+        # Create mosquitto config
+        import tempfile
+        config_dir = tempfile.mkdtemp(prefix="mqtt_recovery_")
+        config_path = os.path.join(config_dir, "mosquitto.conf")
+        with open(config_path, 'w') as f:
+            f.write("allow_anonymous true\n")
+            f.write("listener 1883\n")
         
-        # Start MQTT broker with explicit port mapping
-        import socket
-        # Find a free port
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(('', 0))
-            mqtt_port = s.getsockname()[1]
-        
-        mqtt_container = docker_client.containers.run(
-            "eclipse-mosquitto:2.0",
-            name=mqtt_container_name,
-            ports={'1883/tcp': mqtt_port},  # Explicit port mapping
-            detach=True,
-            remove=True,
-            labels={'com.wildfire.test': 'true'}
+        # Start mosquitto container
+        mqtt_container = self.docker_manager.start_container(
+            image="eclipse-mosquitto:2.0",
+            name=broker_name,
+            config={
+                'ports': {'1883/tcp': None},  # Dynamic port
+                'detach': True,
+                'volumes': {config_dir: {'bind': '/mosquitto/config', 'mode': 'ro'}}
+            },
+            wait_timeout=10
         )
         
-        # Wait for broker to start
-        time.sleep(3)
-        
-        # Verify the container is running
+        # Get the assigned port
         mqtt_container.reload()
-        if mqtt_container.status != 'running':
-            pytest.fail(f"MQTT broker container failed to start: {mqtt_container.status}")
+        mqtt_port = int(mqtt_container.attrs['NetworkSettings']['Ports']['1883/tcp'][0]['HostPort'])
+        print(f"[DEBUG] Started dedicated MQTT broker on port {mqtt_port}")
         
-        # Set up monitoring for reconnection
-        reconnected_services = set()
+        # Start services with custom broker
+        # We'll start them manually to use our custom broker
+        services_to_start = ['fire-consensus', 'gpio-trigger', 'camera-detector']
+        service_containers = []
+        
+        for service in services_to_start:
+            container_name = self.docker_manager.get_container_name(f"recovery-{service}")
+            self.docker_manager.cleanup_old_container(container_name)
+            
+            # Get environment variables but override MQTT settings
+            env_vars = self.parallel_context.get_service_env(service.replace('-', '_'))
+            env_vars['MQTT_BROKER'] = 'localhost'
+            env_vars['MQTT_PORT'] = str(mqtt_port)
+            
+            # Fix environment variable names for refactored services
+            if 'MQTT_TOPIC_PREFIX' in env_vars:
+                env_vars['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
+                
+            # Service-specific settings
+            if service == 'gpio-trigger':
+                env_vars['MAX_ENGINE_RUNTIME'] = '10'
+                env_vars['GPIO_SIMULATION'] = 'true'
+            elif service == 'fire-consensus':
+                env_vars['SINGLE_CAMERA_TRIGGER'] = 'true'
+                env_vars['MIN_CONFIDENCE'] = '0.8'
+                env_vars['CONSENSUS_THRESHOLD'] = '1'
+                env_vars['DETECTION_WINDOW'] = '30'
+                env_vars['LOG_LEVEL'] = 'DEBUG'
+                env_vars['HEALTH_INTERVAL'] = '5'
+            elif service == 'camera-detector':
+                env_vars['HEALTH_REPORT_INTERVAL'] = '5'
+                env_vars['LOG_LEVEL'] = 'DEBUG'
+                env_vars['SMART_DISCOVERY_ENABLED'] = 'false'
+                env_vars['DISCOVERY_INTERVAL'] = '3600'
+                env_vars['MAC_TRACKING_ENABLED'] = 'false'
+            
+            # Start container
+            # Fix service name for image
+            if service == 'fire-consensus':
+                image_name = 'wildfire-watch/fire_consensus:latest'
+            elif service == 'gpio-trigger':
+                image_name = 'wildfire-watch/gpio_trigger:latest'
+            elif service == 'camera-detector':
+                image_name = 'wildfire-watch/camera_detector:latest'
+            else:
+                image_name = f'wildfire-watch/{service}:latest'
+            container = self.docker_manager.start_container(
+                image=image_name,
+                name=container_name,
+                config={
+                    'environment': env_vars,
+                    'network_mode': 'host',
+                    'detach': True
+                },
+                wait_timeout=10
+            )
+            service_containers.append(container)
+        
+        # Wait for services to be fully connected
+        time.sleep(10)
+        
+        # Set up monitoring for health messages
+        health_before_restart = {}
+        health_after_restart = {}
         reconnection_events = {
             'camera_detector': Event(),
             'fire_consensus': Event(),
             'gpio_trigger': Event()
         }
         
-        def on_reconnect_message(client, userdata, msg):
-            if 'health' in msg.topic:
-                parts = msg.topic.split('/')
-                if len(parts) >= 2:
-                    service = parts[-2]
-                    if service in reconnection_events:
-                        reconnected_services.add(service)
-                        reconnection_events[service].set()
-        
-        # Start some test services that connect to MQTT
-        services = {}
-        service_containers = []
-        
-        for service_name in ['camera_detector', 'fire_consensus', 'gpio_trigger']:
-            container_name = self.docker_manager.get_container_name(f"recovery-{service_name}")
-            self.docker_manager.cleanup_old_container(container_name)
-            
-            # Create a simple service that publishes health messages
-            service_script = f"""
-import paho.mqtt.client as mqtt
-import json
-import time
-import signal
-import sys
-
-service_name = '{service_name}'
-running = True
-
-def on_connect(client, userdata, flags, rc, properties):
-    print(f"{{service_name}} connected with result code {{rc}}")
-    client.connected = True
-
-def on_disconnect(client, userdata, rc, properties=None):
-    print(f"{{service_name}} disconnected with result code {{rc}}")
-    client.connected = False
-
-def signal_handler(sig, frame):
-    global running
-    running = False
-    sys.exit(0)
-
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
-
-client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"{{service_name}}_recovery_test")
-client.connected = False
-client.on_connect = on_connect
-client.on_disconnect = on_disconnect
-
-# Connect with automatic reconnect and retry logic
-def connect_with_retry():
-    for i in range(10):
-        try:
-            client.connect("host.docker.internal", {mqtt_port}, 60)
-            return True
-        except Exception as e:
-            print(f"{{service_name}} connection attempt {{i+1}} failed: {{e}}")
-            time.sleep(2)
-    return False
-
-if not connect_with_retry():
-    print(f"{{service_name}} failed to connect after 10 attempts")
-    sys.exit(1)
-
-client.loop_start()
-
-# Publish health messages with reconnect logic
-while running:
-    if not client.connected:
-        print(f"{{service_name}} lost connection, attempting to reconnect...")
-        client.loop_stop()
-        if connect_with_retry():
-            client.loop_start()
-        else:
-            print(f"{{service_name}} failed to reconnect")
-            time.sleep(5)
-            continue
-    
-    if client.connected:
-        try:
-            health_msg = {{
-                'service': service_name,
-                'healthy': True,
-                'timestamp': time.time(),
-                'reconnected': True
-            }}
-            client.publish(f"system/{{service_name}}/health", json.dumps(health_msg))
-        except Exception as e:
-            print(f"{{service_name}} publish failed: {{e}}")
-            client.connected = False
-    time.sleep(2)
-
-client.loop_stop()
-client.disconnect()
-"""
-            
-            # Create container with this script
-            service_containers.append(
-                docker_client.containers.run(
-                    "python:3.12-slim",
-                    name=container_name,
-                    command=["python3.12", "-c", service_script],
-                    detach=True,
-                    remove=True,
-                    network_mode="host",
-                    labels={'com.wildfire.test': 'true'},
-                    environment={'PYTHONUNBUFFERED': '1'}
-                )
-            )
-        
-        # Wait for services to connect
-        time.sleep(5)
-        
-        # Restart MQTT broker
-        print("Restarting MQTT broker...")
-        mqtt_container.restart(timeout=10)
-        
-        # Wait for broker to be ready again
-        time.sleep(5)
-        
-        # Create new client to monitor reconnections
-        monitor_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "monitor_client")
-        monitor_client.on_message = on_reconnect_message
-        
-        # Reconnect with retries
-        for i in range(10):
+        def on_health_message(client, userdata, msg):
             try:
-                monitor_client.connect("localhost", mqtt_port, 60)
-                break
-            except:
-                if i == 9:
-                    pytest.fail("Could not reconnect to MQTT broker after restart")
-                time.sleep(2)
+                print(f"[DEBUG] Received message on topic: {msg.topic}")
+                
+                # Extract service name from topic
+                topic_parts = msg.topic.split('/')
+                if 'health' in msg.topic or 'telemetry' in msg.topic:
+                    # Get service name from topic pattern
+                    if 'camera_detector' in msg.topic:
+                        service = 'camera_detector'
+                    elif 'fire_consensus' in msg.topic:
+                        service = 'fire_consensus'
+                    elif 'gpio_trigger' in msg.topic or 'trigger_telemetry' in msg.topic:
+                        service = 'gpio_trigger'
+                        print(f"[DEBUG] GPIO trigger health/telemetry detected from topic: {msg.topic}")
+                    else:
+                        return
+                    
+                    payload = json.loads(msg.payload.decode())
+                    timestamp = payload.get('timestamp', time.time())
+                    
+                    # Track health messages - use a flag to know when we're after restart
+                    if not hasattr(on_health_message, 'after_restart'):
+                        on_health_message.after_restart = False
+                        
+                    if not on_health_message.after_restart:
+                        health_before_restart[service] = timestamp
+                    else:
+                        if service not in health_after_restart:
+                            health_after_restart[service] = timestamp
+                            reconnection_events[service].set()
+                            print(f"[DEBUG] {service} reconnected and published health")
+            except Exception as e:
+                print(f"[DEBUG] Error processing health message: {e}")
         
-        monitor_client.subscribe("system/+/health")
+        # Create a monitor client to track health messages
+        monitor_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "recovery_monitor")
+        monitor_client.on_message = on_health_message
+        
+        # Add debug logging
+        def on_connect(client, userdata, flags, rc, properties=None):
+            print(f"[DEBUG] Monitor client connected with result code {rc}")
+            
+        monitor_client.on_connect = on_connect
+        monitor_client.connect("localhost", mqtt_port, 60)
+        
+        # Subscribe to all health topics with namespace
+        namespace = self.parallel_context.namespace.namespace
+        monitor_client.subscribe(f"{namespace}/system/+/health")
+        monitor_client.subscribe(f"{namespace}/system/trigger_telemetry")
+        # Also subscribe to all topics for debugging
+        monitor_client.subscribe(f"{namespace}/#")
+        print(f"[DEBUG] Monitor subscribed to namespace: {namespace}")
         monitor_client.loop_start()
         
-        # Wait for all services to reconnect and send health messages (increased timeout)
-        for service, event in reconnection_events.items():
-            reconnected = event.wait(timeout=120)  # Increased from 60 to 120 seconds
-            if not reconnected:
-                # Get container logs for debugging
-                service_container = next((c for c in service_containers if service in c.name), None)
-                if service_container:
-                    logs = service_container.logs(tail=50).decode()
-                    print(f"Service {service} logs:\n{logs}")
-            assert reconnected, f"{service} did not reconnect after MQTT broker restart (waited 120s)"
+        # Wait to collect some health messages before restart
+        print("[DEBUG] Waiting for health messages from services...")
+        time.sleep(15)
         
+        # Check we have health messages from all services
+        print(f"[DEBUG] Health messages before restart: {list(health_before_restart.keys())}")
+        
+        # If no health messages, check container logs
+        if not health_before_restart:
+            print("[DEBUG] No health messages received, checking container logs...")
+            for container in service_containers:
+                try:
+                    logs = container.logs(tail=30).decode('utf-8')
+                    print(f"[DEBUG] {container.name} logs:\n{logs}")
+                except Exception as e:
+                    print(f"[DEBUG] Failed to get logs from {container.name}: {e}")
+        
+        # Restart the MQTT container to simulate broker failure
+        print("[DEBUG] Simulating MQTT broker failure by restarting container...")
+        
+        # Stop the MQTT container
+        mqtt_container.stop(timeout=5)
+        print("[DEBUG] MQTT broker stopped")
+        
+        # Wait a bit for services to detect disconnection
+        time.sleep(10)
+        
+        # Restart the MQTT container
+        print("[DEBUG] Restarting MQTT broker...")
+        mqtt_container.start()
+        
+        # Wait for container to be running
+        mqtt_container.reload()
+        
+        # Check if port changed after restart
+        new_port = int(mqtt_container.attrs['NetworkSettings']['Ports']['1883/tcp'][0]['HostPort'])
+        if new_port != mqtt_port:
+            print(f"[DEBUG] MQTT port changed from {mqtt_port} to {new_port}")
+            mqtt_port = new_port
+        
+        # Wait for broker to be ready
+        start_time = time.time()
+        while time.time() - start_time < 30:
+            try:
+                test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test_restart")
+                test_client.connect("localhost", mqtt_port, 60)
+                test_client.disconnect()
+                print(f"[DEBUG] MQTT broker is ready on port {mqtt_port}")
+                break
+            except Exception as e:
+                print(f"[DEBUG] Connection attempt failed: {e}")
+                time.sleep(1)
+        else:
+            pytest.fail("MQTT broker failed to restart within 30 seconds")
+        
+        # Mark that we're now tracking post-restart messages
+        on_health_message.after_restart = True
+        
+        # Wait for all services to reconnect
+        print("[DEBUG] Waiting for services to reconnect...")
+        all_reconnected = True
+        for service, event in reconnection_events.items():
+            reconnected = event.wait(timeout=60)
+            if not reconnected:
+                print(f"[DEBUG] {service} failed to reconnect within timeout")
+                # Check container logs
+                for container in service_containers:
+                    if service.replace('_', '-') in container.name:
+                        try:
+                            logs = container.logs(tail=50).decode('utf-8')
+                            print(f"[DEBUG] {service} logs:\n{logs}")
+                        except:
+                            pass
+                all_reconnected = False
+            else:
+                print(f"[DEBUG] {service} successfully reconnected")
+        
+        # Assert all services reconnected
+        assert all_reconnected, "Not all services reconnected after broker restart"
+        
+        print(f"[DEBUG] All services successfully reconnected after broker restart")
+        print(f"[DEBUG] Health timestamps after restart: {health_after_restart}")
+        
+        # Cleanup
         monitor_client.loop_stop()
         monitor_client.disconnect()
         
-        print(f"All services reconnected: {reconnected_services}")
-        
-        # Cleanup
-        mqtt_container.stop()
-        mqtt_container.remove()
+        # Stop and remove containers
         for container in service_containers:
             try:
-                container.stop()
+                container.stop(timeout=5)
                 container.remove()
             except:
                 pass
+                
+        # Stop MQTT container
+        try:
+            mqtt_container.stop(timeout=5)
+            mqtt_container.remove()
+        except:
+            pass
+            
+        # Cleanup config directory
+        try:
+            shutil.rmtree(config_dir)
+        except:
+            pass
 
 
 @pytest.mark.integration

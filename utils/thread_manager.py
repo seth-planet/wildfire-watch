@@ -47,9 +47,10 @@ class SafeTimerManager:
             self.logger.debug(f"Ignoring timer schedule '{name}' - manager shutting down")
             return
             
+        # Cancel existing timer with same name (before acquiring lock)
+        self.cancel(name)
+        
         with self._lock:
-            # Cancel existing timer with same name
-            self.cancel(name)
             
             def wrapped_func():
                 """Wrapper that handles cleanup and errors."""
@@ -176,10 +177,10 @@ class ThreadSafeService:
             target: Function to run in thread
             daemon: Whether thread should be daemon
         """
+        # Stop existing thread with same name (before acquiring lock)
+        self.stop_thread(name)
+        
         with self._thread_lock:
-            # Stop existing thread with same name
-            self.stop_thread(name)
-            
             # Create wrapper that logs exceptions
             def thread_wrapper():
                 try:

@@ -11,37 +11,9 @@ Wildfire Watch is an automated fire detection and suppression system that runs o
 ### Parallel Tool Execution
 When performing multiple independent operations, use parallel tool calls in a single message for optimal performance:
 
-```python
-# ✅ Good: Parallel tool execution
-bash_tool.run("git status")
-bash_tool.run("git diff") 
-read_tool.read("file1.py")
-read_tool.read("file2.py")
-
-# ❌ Bad: Sequential messages with single tool calls
-```
-
 **Benefits:** Faster execution, more efficient workflow, better performance for complex tasks
 
 ## Development Commands
-
-### Build and Deployment
-```bash
-# Generate secure certificates (required for production)
-./scripts/generate_certs.sh custom
-
-# Development with hot reload
-docker-compose --env-file .env.dev up
-
-# Full deployment
-docker-compose up -d
-
-# Multi-platform builds
-./scripts/build_multiplatform.sh
-
-# Balena deployment
-balena push wildfire-watch
-```
 
 ### Testing
 ```bash
@@ -95,19 +67,6 @@ This project requires Python 3.12. All commands should use `python3.12` and `pip
    - Use `python3.10` instead of `python3.12`
    - Install: `python3.10 -m pip install super-gradients`
    - Training scripts: `python3.10 converted_models/train_yolo_nas.py`
-
-### Service Management
-```bash
-# Individual services
-docker-compose up mqtt-broker camera-detector
-docker-compose logs -f fire-consensus
-
-# Service shell access
-docker exec -it camera-detector /bin/bash
-
-# Enable debug logging
-LOG_LEVEL=DEBUG docker-compose up
-```
 
 ## Architecture Overview
 
@@ -229,10 +188,6 @@ If conversions timeout:
    - ✅ Good: Actually instantiate and use `FireConsensus` class
 
 2. **Only mock external dependencies**:
-   - ✅ Mock: `RPi.GPIO`, `docker`, `requests`
-   - ✅ Mock: File I/O, network calls, hardware interfaces
-   - ✅ Mock: Time delays (`time.sleep`) for faster tests
-   - ❌ **DO NOT Mock: `paho.mqtt.client`** - Use real MQTT broker
 
 3. **MQTT Integration Testing Requirements**:
    - **Always use real MQTT broker** - Use `TestMQTTBroker` class
@@ -245,143 +200,20 @@ If conversions timeout:
 #### Use DockerContainerManager for Container Tests
 When writing tests that use Docker containers, always use `DockerContainerManager` for proper isolation and cleanup:
 
-```python
-# ✅ Good: Proper container management with isolation
-@pytest.fixture
-def mqtt_broker(self, docker_container_manager):
-    container = docker_container_manager.start_container(
-        image="eclipse-mosquitto:2.0",
-        name=docker_container_manager.get_container_name("mqtt"),
-        config={'ports': {'1883/tcp': None}}  # Dynamic port allocation
-    )
-    return container
-
-# ❌ Bad: Manual container management without isolation
-def test_something():
-    client = docker.from_env()
-    container = client.containers.run("image", name="test", detach=True)
-    # No cleanup, no isolation, conflicts with parallel tests
-```
-
 #### Use ParallelTestContext for Multi-Service Tests
 For complex tests involving multiple services, use `ParallelTestContext` to get proper topic namespacing and environment variables:
-
-```python
-# ✅ Good: Parallel test context with automatic topic prefixing
-@pytest.fixture(autouse=True)
-def setup_parallel_context(self, parallel_test_context, test_mqtt_broker, docker_container_manager):
-    self.parallel_context = parallel_test_context
-    self.mqtt_broker = test_mqtt_broker
-    self.docker_manager = docker_container_manager
-    
-    # Services get proper environment with topic prefixes
-    env_vars = self.parallel_context.get_service_env('fire_consensus')
-    # env_vars includes MQTT_TOPIC_PREFIX=test/worker_id automatically
-
-# ❌ Bad: Manual environment setup without test isolation
-def test_services():
-    env = {'MQTT_BROKER': 'localhost', 'MQTT_PORT': '1883'}
-    # No topic prefixing = tests conflict with each other
-```
 
 #### Topic Namespace Strategy for Test Isolation
 All MQTT topics must be namespaced to prevent test interference:
 
-```python
-# ✅ Good: Proper topic namespacing
-def test_fire_detection(self, parallel_test_context):
-    topic_prefix = parallel_test_context.get_topic_prefix()  # Returns "test/worker_id"
-    
-    # Publish to namespaced topic
-    mqtt_client.publish(f"{topic_prefix}/fire/detection", payload)
-    
-    # Subscribe to namespaced topics
-    mqtt_client.subscribe(f"{topic_prefix}/fire/trigger")
-    
-    # Services automatically use prefixed topics via MQTT_TOPIC_PREFIX env var
-
-# ❌ Bad: No topic namespacing
-def test_fire_detection():
-    mqtt_client.publish("fire/detection", payload)  # Conflicts with other tests
-    mqtt_client.subscribe("fire/trigger")  # Gets messages from other tests
-```
-
 #### Container Environment Best Practices
 Always set proper environment variables for container isolation:
-
-```python
-# ✅ Good: Complete environment setup with topic prefixing
-def start_consensus_service(self, docker_container_manager):
-    worker_id = docker_container_manager.worker_id
-    topic_prefix = f"test/{worker_id}"
-    
-    config = {
-        'environment': {
-            'MQTT_BROKER': 'localhost',
-            'MQTT_PORT': str(self.mqtt_broker.port),
-            'MQTT_TOPIC_PREFIX': topic_prefix,  # Critical for test isolation
-            'CONSENSUS_THRESHOLD': '1',  # Test-specific config
-            'LOG_LEVEL': 'DEBUG'
-        },
-        'network_mode': 'host'  # Required for localhost MQTT access
-    }
-    
-    return docker_container_manager.start_container("service:latest", name, config)
-
-# ❌ Bad: Missing topic prefix and test-specific configuration
-def start_service():
-    config = {
-        'environment': {
-            'MQTT_BROKER': 'localhost',
-            'MQTT_PORT': '1883'
-            # Missing MQTT_TOPIC_PREFIX = topic conflicts
-            # Missing test-specific timeouts = tests hang
-        }
-    }
-```
 
 #### Test Data Isolation Patterns
 Ensure test data doesn't interfere between parallel workers:
 
-```python
-# ✅ Good: Worker-specific temporary directories
-@pytest.fixture
-def temp_config_dir(self, docker_container_manager):
-    temp_dir = tempfile.mkdtemp(prefix=f"test_{docker_container_manager.worker_id}_")
-    yield temp_dir
-    shutil.rmtree(temp_dir, ignore_errors=True)
-
-# ✅ Good: Worker-specific container names
-container_name = docker_container_manager.get_container_name('frigate')
-# Returns: wf-{worker_id}-frigate
-
-# ❌ Bad: Hardcoded names and paths cause conflicts
-temp_dir = "/tmp/test_config"  # Multiple workers conflict
-container_name = "test_frigate"  # Name collision between workers
-```
-
 #### Error Handling and Cleanup
 Always implement proper cleanup even when tests fail:
-
-```python
-# ✅ Good: Comprehensive cleanup with try/finally
-def test_complex_pipeline(self, docker_container_manager):
-    containers = {}
-    try:
-        containers['service1'] = docker_container_manager.start_container(...)
-        containers['service2'] = docker_container_manager.start_container(...)
-        
-        # Test logic here
-        
-    finally:
-        # DockerContainerManager handles container cleanup automatically
-        # But clean up other resources manually
-        for resource in test_resources:
-            try:
-                resource.cleanup()
-            except:
-                pass  # Don't fail cleanup due to cleanup errors
-```
 
 #### When to Use Each Testing Approach
 
@@ -513,33 +345,6 @@ All Python code should follow Sphinx documentation standards. Use Google-style d
 5. **Thread Safety**: Document synchronization requirements
 6. **MQTT Topics**: Document all pub/sub topics
 
-#### Example Docstring
-```python
-def process_detection(self, detection: Dict[str, Any]) -> bool:
-    """Process a fire detection from a camera and update consensus state.
-    
-    Args:
-        detection: Detection data containing:
-            - camera_id (str): Unique camera identifier
-            - confidence (float): Detection confidence (0.0-1.0)
-            - object_type (str): 'fire' or 'smoke'
-    
-    Returns:
-        bool: True if consensus threshold is met
-        
-    Side Effects:
-        - Updates internal detection history
-        - May publish to 'trigger/fire_detected' if consensus reached
-        
-    MQTT Topics:
-        - Subscribes to: frigate/+/fire, frigate/+/smoke
-        - Publishes to: trigger/fire_detected (on consensus)
-        
-    Thread Safety:
-        This method is thread-safe due to internal locking
-    """
-```
-
 ## AI Assistant Guidelines
 
 ### MCP Tool Usage for Enhanced Development
@@ -650,6 +455,18 @@ Choose models based on task complexity and domain:
 - Library features and compatibility
 - Error message solutions
 - Breaking changes between versions
+
+Context7 MCP provides the following tools that LLMs can use:
+
+    resolve-library-id: Resolves a general library name into a Context7-compatible library ID.
+        libraryName (required): The name of the library to search for
+
+    get-library-docs: Fetches documentation for a library using a Context7-compatible library ID.
+        context7CompatibleLibraryID (required): Exact Context7-compatible library ID (e.g., /mongodb/docs, /vercel/next.js)
+        topic (optional): Focus the docs on a specific topic (e.g., "routing", "hooks")
+        tokens (optional, default 10000): Max number of tokens to return. Values less than the default value of 10000 are automatically increased to 10000.
+
+
 
 **For difficult debugging problems:**
 - **Search local .md files first** - Look for similar problems and solutions in project documentation

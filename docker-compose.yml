@@ -205,7 +205,7 @@ services:
     labels:
       io.balena.features.dbus: '1'
 
-  # GPIO Controller - needs MQTT only
+  # GPIO Controller - Refactored with base classes
   gpio_trigger:
     build:
       context: .
@@ -227,6 +227,7 @@ services:
       - /dev/gpiochip1:/dev/gpiochip1
     environment:
       <<: *common-variables
+      # Pin configuration
       MAIN_VALVE_PIN: ${MAIN_VALVE_PIN:-18}
       IGNITION_START_PIN: ${IGNITION_START_PIN:-23}
       IGNITION_ON_PIN: ${IGNITION_ON_PIN:-24}
@@ -234,9 +235,15 @@ services:
       REFILL_VALVE_PIN: ${REFILL_VALVE_PIN:-22}
       PRIMING_VALVE_PIN: ${PRIMING_VALVE_PIN:-26}
       RPM_REDUCE_PIN: ${RPM_REDUCE_PIN:-27}
+      # Safety settings
       MAX_ENGINE_RUNTIME: ${MAX_ENGINE_RUNTIME:-1800}
       REFILL_MULTIPLIER: ${REFILL_MULTIPLIER:-40}
       GPIO_SIMULATION: ${GPIO_SIMULATION:-false}  # Auto-detect on non-Pi
+      # Health reporting
+      HEALTH_REPORT_INTERVAL: ${HEALTH_REPORT_INTERVAL:-60}
+      # MQTT reconnection settings
+      MQTT_RECONNECT_MIN_DELAY: ${MQTT_RECONNECT_MIN_DELAY:-1.0}
+      MQTT_RECONNECT_MAX_DELAY: ${MQTT_RECONNECT_MAX_DELAY:-60.0}
     volumes:
       - gpio_data:/data
       - certs:/mnt/data/certs:ro
@@ -249,7 +256,7 @@ services:
     labels:
       io.balena.features.kernel-modules: '1'
 
-  # Telemetry Service - can start anytime after MQTT
+  # Telemetry Service - Refactored with base classes
   cam_telemetry:
     build:
       context: ./cam_telemetry
@@ -270,6 +277,11 @@ services:
       RTSP_STREAM_URL: ${RTSP_STREAM_URL:-}
       MODEL_PATH: ${MODEL_PATH:-}
       DETECTOR: ${DETECTOR:-}
+      # Health reporting
+      HEALTH_REPORT_INTERVAL: ${HEALTH_REPORT_INTERVAL:-60}
+      # MQTT reconnection settings
+      MQTT_RECONNECT_MIN_DELAY: ${MQTT_RECONNECT_MIN_DELAY:-1.0}
+      MQTT_RECONNECT_MAX_DELAY: ${MQTT_RECONNECT_MAX_DELAY:-60.0}
     volumes:
       - certs:/mnt/data/certs:ro
     networks:

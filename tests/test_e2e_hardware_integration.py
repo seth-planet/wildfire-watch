@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'gpio_trigger')
 
 @pytest.mark.integration
 @pytest.mark.hardware
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestE2EHardwareIntegration:
     """Test complete system with real hardware"""
     
@@ -121,11 +120,11 @@ class TestE2EHardwareIntegration:
                 manufacturer="Test",
                 model="TestModel"
             )
-            test_camera['rtsp_urls'] = {
+            test_camera.rtsp_urls = {
                 'main': 'rtsp://192.168.1.100:554/stream1'
             }
-            detector.cameras[test_camera['mac']] = test_camera
-            detector._publish_camera_discovery(test_camera)
+            detector.cameras[test_camera.mac] = test_camera
+            detector._publish_camera(test_camera)
             discovered_count = 1
         
         # Wait for MQTT messages
@@ -143,10 +142,11 @@ class TestE2EHardwareIntegration:
         if camera_topics:
             for msg in camera_topics:
                 if 'discovery' in msg['topic']:
-                    assert 'camera' in msg['payload']
-                    cam = msg['payload']['camera']
+                    # The payload directly contains camera data
+                    cam = msg['payload']
                     assert 'ip' in cam
                     assert 'mac' in cam
+                    assert 'name' in cam
     
     # AI hardware is available - don't skip
     @pytest.mark.coral_tpu
@@ -437,9 +437,16 @@ class TestE2EHardwareIntegration:
                     pass
     
     def _test_coral_inference_on_stream(self):
-        """Test Coral TPU inference on camera stream"""
+        """Test Coral TPU inference on camera stream
+        
+        IMPORTANT: This method requires Python 3.8 for Coral TPU!
+        If running with Python 3.12, this will be skipped.
+        Use: python3.8 -m pytest tests/test_e2e_hardware_integration.py
+        """
         if sys.version_info[:2] != (3, 8):
-            pytest.skip("Coral requires Python 3.8")
+            pytest.skip("Coral TPU requires Python 3.8. Current version: "
+                       f"{sys.version_info.major}.{sys.version_info.minor}. "
+                       "Please run with python3.8 -m pytest")
         
         from pycoral.utils.edgetpu import make_interpreter
         from pycoral.adapters import common
@@ -599,7 +606,6 @@ class TestE2EHardwareIntegration:
 
 
 @pytest.mark.hardware
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestHardwareCompatibility:
     """Test hardware compatibility and configuration"""
     

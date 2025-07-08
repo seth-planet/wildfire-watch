@@ -64,13 +64,6 @@ class CameraDetectorConfig(ConfigBase):
             description="Unique service identifier"
         ),
         
-        # MQTT topic prefix
-        'topic_prefix': ConfigSchema(
-            str,
-            default="",
-            description="MQTT topic prefix for namespacing"
-        ),
-        
         # Camera discovery
         'discovery_interval': ConfigSchema(
             int,
@@ -338,7 +331,16 @@ class CameraDetector(MQTTService, ThreadSafeService):
         # Setup background tasks using BackgroundTaskRunner
         self._setup_background_tasks()
         
-        self.logger.info(f"Camera Detector initialized: {self.config.service_id}")
+        self.logger.info(f"Camera Detector configured: {self.config.service_id}")
+        
+        # Connect to MQTT after everything is initialized
+        # This prevents race conditions during startup
+        self.connect()
+        
+        # Start health reporting after MQTT connection
+        self.health_reporter.start_health_reporting()
+        
+        self.logger.info(f"Camera Detector fully initialized and connected: {self.config.service_id}")
         
     def _parse_credentials(self) -> List[Tuple[str, str]]:
         """Parse camera credentials from config."""
@@ -405,8 +407,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
             )
             self.mac_tracking_task.start()
             
-        # Start health reporting
-        self.health_reporter.start_health_reporting()
+        # Don't start health reporting here - it will be started after MQTT connection
         
     def _discovery_cycle(self):
         """Main discovery cycle."""

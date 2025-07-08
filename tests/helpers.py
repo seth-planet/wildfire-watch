@@ -567,6 +567,16 @@ class DockerContainerManager:
             config['name'] = name
             config['image'] = image
             
+            # Add label for cleanup identification
+            config.setdefault('labels', {})
+            config['labels']['com.wildfire.test'] = 'true'
+            
+            # Add resource limits if not already specified
+            if 'mem_limit' not in config:
+                config['mem_limit'] = '512m'
+            if 'cpu_quota' not in config:
+                config['cpu_quota'] = 50000  # 50% of one CPU
+            
             container = self.client.containers.run(**config)
             self.created_containers.append(container)
             

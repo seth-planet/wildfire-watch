@@ -172,7 +172,7 @@ class YoloNasIntegrationTests(unittest.TestCase):
             print("✓ Class detection passed")
             
             # Validate dataset (only if enabled in config)
-            if trainer.config.dataset.get('validate_labels', True):
+            if trainer.config['dataset'].get('validate_labels', True):
                 validation_results = trainer.validate_dataset_labels()
                 if validation_results and 'train' in validation_results:
                     self.assertIn('success_rate', validation_results['train'])
@@ -364,13 +364,13 @@ class YoloNasIntegrationTests(unittest.TestCase):
         ]
         
         for config in model_configs:
-            with self.subTest(model_size=config.size):
+            with self.subTest(model_size=config['size']):
                 trainer = UnifiedYOLOTrainer()
                 trainer.config = {
                     'model': {
                         'architecture': 'yolo_nas_s',
                         'num_classes': 32,
-                        'input_size': config.size
+                        'input_size': config['size']
                     },
                     'dataset': {'data_dir': str(self.dataset_dir)},
                     'training': {'batch_size': 2, 'workers': 0},
@@ -378,8 +378,8 @@ class YoloNasIntegrationTests(unittest.TestCase):
                 }
                 
                 # Verify configuration
-                self.assertEqual(trainer.config.model['input_size'], config.size)
-                print(f"✓ Model size {config.size} configured for {config.desc}")
+                self.assertEqual(trainer.config['model']['input_size'], config['size'])
+                print(f"✓ Model size {config['size']} configured for {config['desc']}")
     
     def test_qat_configuration(self):
         """Test Quantization-Aware Training configuration"""
@@ -390,8 +390,8 @@ class YoloNasIntegrationTests(unittest.TestCase):
         # Test default QAT config
         default_config = trainer._get_default_config()
         self.assertIn('qat', default_config)
-        self.assertTrue(default_config.qat['enabled'])
-        self.assertEqual(default_config.qat['start_epoch'], 150)
+        self.assertTrue(default_config['qat']['enabled'])
+        self.assertEqual(default_config['qat']['start_epoch'], 150)
         
         # Test custom QAT config
         trainer.config = {
@@ -402,9 +402,9 @@ class YoloNasIntegrationTests(unittest.TestCase):
             }
         }
         
-        self.assertTrue(trainer.config.qat['enabled'])
-        self.assertEqual(trainer.config.qat['start_epoch'], 100)
-        self.assertEqual(trainer.config.qat['calibration_batches'], 50)
+        self.assertTrue(trainer.config['qat']['enabled'])
+        self.assertEqual(trainer.config['qat']['start_epoch'], 100)
+        self.assertEqual(trainer.config['qat']['calibration_batches'], 50)
 
 
 class FrigateNVRIntegrationTests(unittest.TestCase):
@@ -448,9 +448,9 @@ class FrigateNVRIntegrationTests(unittest.TestCase):
         }
         
         # Verify Fire class configuration
-        self.assertEqual(config.model['labelmap'][26], 'Fire')
-        self.assertIn('Fire', config.objects['track'])
-        self.assertIn('Fire', config.objects['filters'])
+        self.assertEqual(config['model']['labelmap'][26], 'Fire')
+        self.assertIn('Fire', config['objects']['track'])
+        self.assertIn('Fire', config['objects']['filters'])
         
         print("✓ Frigate configuration validated for Fire detection")
     

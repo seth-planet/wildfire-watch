@@ -12,8 +12,8 @@ RUN apt-get update && \
       avahi-daemon libnss-mdns dbus && \
     rm -rf /var/lib/apt/lists/*
 
-COPY nsswitch.conf /etc/nsswitch.conf
-COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY cam_telemetry/nsswitch.conf /etc/nsswitch.conf
+COPY cam_telemetry/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # Create app directory
@@ -25,11 +25,11 @@ COPY utils /utils
 ENV PYTHONPATH=/
 
 # Install Python deps
-COPY requirements.txt .
+COPY cam_telemetry/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy telemetry code
-COPY telemetry.py .
+COPY cam_telemetry/telemetry.py .
 
 
 # Start Avahi, then run telemetry.py

@@ -121,8 +121,9 @@ class MQTTService:
             retain=True
         )
         
-        # Start connection
-        self._connect_with_retry()
+        # Don't connect yet - let subclass decide when to connect
+        # This prevents race conditions during initialization
+        # self._connect_with_retry()
         
     def _setup_tls(self) -> None:
         """Configure TLS for MQTT connection."""
@@ -154,6 +155,12 @@ class MQTTService:
         tls_insecure = getattr(self.config, 'tls_insecure', self.config.get('MQTT_TLS_INSECURE', False) if hasattr(self.config, 'get') else False)
         if tls_insecure:
             self._mqtt_client.tls_insecure_set(True)
+    
+    def connect(self) -> None:
+        """Connect to the MQTT broker and start the network loop."""
+        if self._mqtt_client and not self._shutdown:
+            self.logger.info("Starting MQTT connection process...")
+            self._connect_with_retry()
     
     def _connect_with_retry(self) -> None:
         """Connect to MQTT broker with exponential backoff."""
@@ -210,7 +217,7 @@ class MQTTService:
             with self._mqtt_lock:
                 self._mqtt_connected = False
     
-    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None):
+    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """Handle MQTT disconnection events."""
         with self._mqtt_lock:
             self._mqtt_connected = False
@@ -252,6 +259,9 @@ class MQTTService:
             Formatted topic with prefix
         """
         if self._topic_prefix:
+            # Ensure proper separator between prefix and topic
+            if not self._topic_prefix.endswith('/'):
+                return f"{self._topic_prefix}/{topic}"
             return f"{self._topic_prefix}{topic}"
         return topic
     
@@ -303,6 +313,7 @@ class MQTTService:
                 
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
                     self.logger.debug(f"Published to {full_topic}")
+                    self.logger.info(f"[MQTT DEBUG] Successfully published to full topic: '{full_topic}' (prefix: '{self._topic_prefix}')")
                     return True
                 else:
                     self.logger.error(f"Failed to publish to {full_topic}: {mqtt.error_string(result.rc)}")
