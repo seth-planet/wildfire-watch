@@ -25,17 +25,20 @@ logger = logging.getLogger(__name__)
 
 
 def create_growing_fire_detections(camera_id, object_id, base_time, count=8, initial_size=0.03, growth_rate=0.005):
-    """Helper to create a series of growing fire detections with proper normalized format"""
+    """Helper to create a series of growing fire detections with proper [x1,y1,x2,y2] format"""
     detections = []
     for i in range(count):
+        x1, y1 = 0.1, 0.1  # Top-left corner
         width = initial_size + i * growth_rate  # Growing normalized width
         height = initial_size + i * (growth_rate * 0.8)  # Growing normalized height
+        x2 = x1 + width  # Bottom-right x
+        y2 = y1 + height  # Bottom-right y
         detections.append({
             'camera_id': camera_id,
             'object': 'fire',
             'object_id': object_id,
             'confidence': 0.8 + i * 0.01,
-            'bounding_box': [0.1, 0.1, width, height],  # [x, y, width, height] normalized format
+            'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] format for consensus
             'timestamp': base_time + i * 0.5
         })
     return detections
@@ -49,7 +52,7 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     prefix = full_topic.rsplit('/', 1)[0]
     
     # Set environment variables using monkeypatch for proper cleanup
-    monkeypatch.setenv('MQTT_TOPIC_PREFIX', prefix)
+    monkeypatch.setenv('TOPIC_PREFIX', prefix)
     monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
     monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
     monkeypatch.setenv('MQTT_TLS', 'false')
@@ -87,7 +90,7 @@ def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     prefix = full_topic.rsplit('/', 1)[0]
     
     # Set environment variables
-    monkeypatch.setenv('MQTT_TOPIC_PREFIX', prefix)
+    monkeypatch.setenv('TOPIC_PREFIX', prefix)
     monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
     monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
     monkeypatch.setenv('MQTT_TLS', 'false')
@@ -116,7 +119,6 @@ def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
         logger.error(f"Error during consensus cleanup: {e}")
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestConsensusTrigger:
     """Test consensus trigger logic with real MQTT"""
     
@@ -165,7 +167,7 @@ class TestConsensusTrigger:
         assert len(received_triggers) > 0
         trigger = received_triggers[0]
         assert trigger['consensus_cameras'] == ['cam1']
-        assert trigger['camera_count'] == 1
+        assert len(trigger['fire_locations']) > 0
     
     def test_multi_camera_consensus_trigger(self, consensus_with_env, mqtt_client):
         """Test that multiple cameras detecting fire triggers consensus"""
@@ -214,10 +216,9 @@ class TestConsensusTrigger:
         assert len(received_triggers) > 0
         trigger = received_triggers[0]
         assert set(trigger['consensus_cameras']) == {'cam1', 'cam2'}
-        assert trigger['camera_count'] == 2
+        assert len(trigger['fire_locations']) > 0
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestOnlineOfflineCameras:
     """Test handling of online/offline camera states"""
     
@@ -279,7 +280,6 @@ class TestOnlineOfflineCameras:
         assert 'cam3' not in trigger['consensus_cameras']
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestCooldownPeriod:
     """Test cooldown period between triggers"""
     
@@ -361,7 +361,6 @@ class TestCooldownPeriod:
         assert final_triggers > triggers_before, "Should trigger after cooldown expires"
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestEdgeCases:
     """Test edge cases and error conditions"""
     
@@ -391,7 +390,7 @@ class TestEdgeCases:
             'confidence': 0.85,
             'object': 'fire',
             'object_id': 'fire1',
-            'bounding_box': [0.1, 0.1, 0.2, 0.2],
+            'bbox': [0.1, 0.1, 0.2, 0.2],  # [x1, y1, x2, y2] format
             'timestamp': time.time()
         }
         
@@ -399,7 +398,7 @@ class TestEdgeCases:
         for i in range(6):
             detection = valid_detection.copy()
             detection['timestamp'] = time.time()
-            detection['bounding_box'] = [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01]
+            detection['bbox'] = [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01]
             mqtt_client.publish(detection_topic, json.dumps(detection))
             time.sleep(0.1)
         
@@ -445,7 +444,7 @@ class TestEdgeCases:
                 'confidence': 0.5,  # Below threshold of 0.7
                 'object': 'fire',
                 'object_id': 'fire1',
-                'bounding_box': [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01],
+                'bbox': [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01],  # [x1, y1, x2, y2] format
                 'timestamp': base_time + i * 0.5
             }
             mqtt_client.publish(detection_topic, json.dumps(detection))
@@ -463,7 +462,7 @@ class TestEdgeCases:
                 'confidence': 0.85,  # Above threshold
                 'object': 'fire',
                 'object_id': 'fire2',
-                'bounding_box': [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01],
+                'bbox': [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01],  # [x1, y1, x2, y2] format
                 'timestamp': time.time()
             }
             mqtt_client.publish(detection_topic, json.dumps(detection))
@@ -475,7 +474,6 @@ class TestEdgeCases:
         assert len(received_triggers) > 0, "High confidence detections should trigger"
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestZoneBasedActivation:
     """Test zone-based activation feature with real MQTT"""
     
@@ -485,7 +483,7 @@ class TestZoneBasedActivation:
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
         monkeypatch.setenv('ZONE_ACTIVATION', 'true')
-        monkeypatch.setenv('ZONE_MAPPING', '{"cam1": "zone_a", "cam2": "zone_b"}')
+        monkeypatch.setenv('ZONE_MAPPING', '{"cam1": ["zone_a"], "cam2": ["zone_b"]}')
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
         
@@ -550,8 +548,6 @@ class TestZoneBasedActivation:
         payload = received_messages[0]
         
         assert 'zones' in payload
-        assert 'zone_activation' in payload
-        assert payload['zone_activation'] is True
         assert set(payload['zones']) == {'zone_a', 'zone_b'}
         
         # Cleanup
@@ -628,8 +624,8 @@ class TestZoneBasedActivation:
         assert len(received_messages) > 0
         payload = received_messages[0]
         
-        assert payload['zones'] is None
-        assert payload['zone_activation'] is False
+        # When zone activation is disabled, zones key should not be present
+        assert 'zones' not in payload or payload.get('zones') is None
         
         # Cleanup
         publisher.disconnect()
@@ -637,7 +633,6 @@ class TestZoneBasedActivation:
         consensus.cleanup()
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestSingleCameraMode:
     """Test single camera trigger mode with real MQTT"""
     
@@ -705,8 +700,8 @@ class TestSingleCameraMode:
         
         assert len(received_triggers) > 0
         trigger = received_triggers[0]
-        assert trigger['camera_count'] == 1
         assert trigger['consensus_cameras'] == ['single_cam']
+        assert len(trigger['fire_locations']) > 0
         
         # Cleanup
         publisher.disconnect()

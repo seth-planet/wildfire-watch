@@ -226,19 +226,19 @@ print(f"Device: {device_idx}")
 print("SUCCESS")
 '''
             
-            # Run the script with Python 3.8
-            result = subprocess.run(['python3.8', '-c', test_script], 
-                                  capture_output=True, text=True)
-            
-            if result.returncode == 0 and "SUCCESS" in result.stdout:
-                success = True
-                last_error = None
-                print(f"Successfully used Coral TPU device {device_idx}")
-                break
-            else:
-                last_error = result.stderr
-                print(f"Failed to use device {device_idx}: {result.stderr[:100]}...")
-                continue
+                # Run the script with Python 3.8
+                result = subprocess.run(['python3.8', '-c', test_script], 
+                                      capture_output=True, text=True)
+                
+                if result.returncode == 0 and "SUCCESS" in result.stdout:
+                    success = True
+                    last_error = None
+                    print(f"Successfully used Coral TPU device {device_idx}")
+                    break
+                else:
+                    last_error = result.stderr
+                    print(f"Failed to use device {device_idx}: {result.stderr[:100]}...")
+                    continue
         
         if not success:
             result = type('Result', (), {'returncode': 1, 'stderr': last_error or 'All devices failed', 'stdout': ''})

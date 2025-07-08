@@ -371,13 +371,21 @@ class FireConsensus(MQTTService, ThreadSafeService):
     def _on_message(self, topic: str, payload: any):
         """Handle incoming MQTT messages."""
         try:
+            # Debug: Log all received messages
+            self.logger.debug(f"Received message on topic '{topic}': {str(payload)[:100]}...")
+            
             # Route messages based on topic
             if topic.startswith("fire/detection"):
+                self.logger.debug(f"Processing fire detection message on topic '{topic}'")
                 self._handle_fire_detection(topic, payload)
             elif topic == "frigate/events":
+                self.logger.debug(f"Processing frigate event message on topic '{topic}'")
                 self._handle_frigate_event(payload)
             elif topic == "system/camera_telemetry":
+                self.logger.debug(f"Processing camera telemetry message on topic '{topic}'")
                 self._handle_camera_telemetry(payload)
+            else:
+                self.logger.debug(f"Ignoring message on topic '{topic}' (no handler)")
                 
         except Exception as e:
             self.logger.error(f"Error processing message on {topic}: {e}", exc_info=True)
@@ -633,23 +641,44 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 self.config.memory_cleanup_interval
             )
         
-    def _calculate_area(self, bbox: List[float]) -> float:
-        """Calculate normalized area from bounding box."""
+    def _calculate_area(self, bbox: List[float], camera_resolution: Optional[Tuple[int, int]] = None) -> float:
+        """Calculate normalized area from bounding box.
+        
+        Args:
+            bbox: Bounding box in format [x1, y1, x2, y2]
+            camera_resolution: Optional (width, height) tuple. If None, uses 1920x1080 default.
+        
+        Returns:
+            Area as fraction of frame (0.0 to 1.0)
+        """
         try:
             # Validate bbox values
             for val in bbox:
                 if math.isnan(val) or math.isinf(val) or val < 0:
                     return 0
             
-            # Assuming 1920x1080 resolution (should be configurable)
-            width = bbox[2] - bbox[0]
-            height = bbox[3] - bbox[1]
-            
-            # Check for negative dimensions
-            if width <= 0 or height <= 0:
-                return 0
+            # Handle both pixel coordinates and normalized coordinates
+            if all(0 <= val <= 1 for val in bbox):
+                # Normalized coordinates (0-1) - already correct
+                width = bbox[2] - bbox[0]
+                height = bbox[3] - bbox[1]
+                area = width * height
+            else:
+                # Pixel coordinates - need to normalize
+                width = bbox[2] - bbox[0]
+                height = bbox[3] - bbox[1]
                 
-            area = (width * height) / (1920 * 1080)
+                # Use provided resolution or default to 1920x1080
+                if camera_resolution:
+                    frame_width, frame_height = camera_resolution
+                else:
+                    frame_width, frame_height = 1920, 1080
+                
+                # Check for negative dimensions
+                if width <= 0 or height <= 0:
+                    return 0
+                    
+                area = (width * height) / (frame_width * frame_height)
             
             # Final validation
             if math.isnan(area) or math.isinf(area) or area < 0:

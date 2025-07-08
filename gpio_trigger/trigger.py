@@ -407,6 +407,9 @@ class PumpController(MQTTService, ThreadSafeService):
     
     def _on_message(self, topic, payload):
         """Handle incoming MQTT messages."""
+        # Debug: Log all received messages
+        self.logger.debug(f"GPIO trigger received message on topic '{topic}': {str(payload)[:100]}...")
+        
         if topic == self.config.trigger_topic:
             self.logger.info(f"Received fire trigger on {topic}")
             self.handle_fire_trigger()
@@ -417,6 +420,8 @@ class PumpController(MQTTService, ThreadSafeService):
             else:
                 command = payload if isinstance(payload, str) else payload.decode()
             self.handle_emergency_command(command)
+        else:
+            self.logger.debug(f"Ignoring message on topic '{topic}' (not {self.config.trigger_topic} or {self.config.emergency_topic})")
     
     def _publish_event(self, action: str, extra_data: Optional[Dict] = None):
         """Publish telemetry event."""
