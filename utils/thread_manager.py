@@ -32,6 +32,29 @@ class SafeTimerManager:
         self._lock = threading.Lock()
         self.logger = logger or logging.getLogger(__name__)
         self._shutdown = False
+    
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks."""
+        try:
+            logger = getattr(self, 'logger', None)
+            if not logger:
+                return
+                
+            # Check if logger has handlers and they're not closed
+            if not hasattr(logger, 'handlers') or not logger.handlers:
+                return
+                
+            # Check each handler to ensure it's not closed
+            for handler in logger.handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                    if handler.stream.closed:
+                        return
+                        
+            # Log the message
+            getattr(logger, level.lower())(message, exc_info=exc_info)
+        except (ValueError, AttributeError, OSError):
+            # Silently ignore logging errors during shutdown
+            pass
         
     def schedule(self, name: str, func: Callable, delay: float,
                 error_handler: Optional[Callable[[str, Exception], None]] = None) -> None:
@@ -46,14 +69,14 @@ class SafeTimerManager:
         with self._lock:
             # Check shutdown status inside lock to prevent race condition
             if self._shutdown:
-                self.logger.debug(f"Ignoring timer schedule '{name}' - manager shutting down")
+                self._safe_log('debug', f"Ignoring timer schedule '{name}' - manager shutting down")
                 return
             
             # Cancel existing timer with same name (now inside lock)
             timer = self._timers.pop(name, None)
             if timer and timer.is_alive():
                 timer.cancel()
-                self.logger.debug(f"Cancelled existing timer '{name}'")
+                self._safe_log('debug', f"Cancelled existing timer '{name}'")
             
             def wrapped_func():
                 """Wrapper that handles cleanup and errors."""
@@ -111,7 +134,7 @@ class SafeTimerManager:
             self._timers.clear()
             
         if cancelled > 0:
-            self.logger.info(f"Cancelled {cancelled} active timers")
+            self._safe_log('info', f"Cancelled {cancelled} active timers")
         return cancelled
     
     def has_timer(self, name: str) -> bool:
@@ -188,6 +211,29 @@ class ThreadSafeService:
         # Service state
         self._state_lock = threading.Lock()
         self._state = "initialized"
+    
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks."""
+        try:
+            logger = getattr(self, 'logger', None)
+            if not logger:
+                return
+                
+            # Check if logger has handlers and they're not closed
+            if not hasattr(logger, 'handlers') or not logger.handlers:
+                return
+                
+            # Check each handler to ensure it's not closed
+            for handler in logger.handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                    if handler.stream.closed:
+                        return
+                        
+            # Log the message
+            getattr(logger, level.lower())(message, exc_info=exc_info)
+        except (ValueError, AttributeError, OSError):
+            # Silently ignore logging errors during shutdown
+            pass
         
     def start_thread(self, name: str, target: Callable, daemon: bool = True) -> None:
         """Start a managed background thread.
@@ -320,7 +366,7 @@ class ThreadSafeService:
     
     def shutdown(self) -> None:
         """Gracefully shutdown the service."""
-        self.logger.info(f"Shutting down {self.service_name}")
+        self._safe_log('info', f"Shutting down {self.service_name}")
         
         # Set shutdown flag
         self._shutdown_event.set()
@@ -333,7 +379,7 @@ class ThreadSafeService:
         if failed > 0:
             self.logger.warning(f"{failed} threads did not stop cleanly")
         
-        self.logger.info(f"{self.service_name} shutdown complete")
+        self._safe_log('info', f"{self.service_name} shutdown complete")
 
 
 class BackgroundTaskRunner:

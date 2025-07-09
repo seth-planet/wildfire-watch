@@ -702,9 +702,32 @@ class FireConsensus(MQTTService, ThreadSafeService):
         except (ValueError, TypeError):
             return 0
         
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks."""
+        try:
+            logger = getattr(self, 'logger', None)
+            if not logger:
+                return
+                
+            # Check if logger has handlers and they're not closed
+            if not hasattr(logger, 'handlers') or not logger.handlers:
+                return
+                
+            # Check each handler to ensure it's not closed
+            for handler in logger.handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                    if handler.stream.closed:
+                        return
+                        
+            # Log the message
+            getattr(logger, level.lower())(message, exc_info=exc_info)
+        except (ValueError, AttributeError, OSError):
+            # Silently ignore logging errors during shutdown
+            pass
+
     def cleanup(self):
         """Clean shutdown of service."""
-        self.logger.info("Shutting down Fire Consensus")
+        self._safe_log('info', "Shutting down Fire Consensus")
         
         # Stop health reporting
         if hasattr(self, 'health_reporter'):
@@ -717,7 +740,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
         ThreadSafeService.shutdown(self)
         MQTTService.shutdown(self)
         
-        self.logger.info("Fire Consensus shutdown complete")
+        self._safe_log('info', "Fire Consensus shutdown complete")
         
 
 # ─────────────────────────────────────────────────────────────

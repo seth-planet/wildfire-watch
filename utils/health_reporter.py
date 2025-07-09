@@ -62,20 +62,40 @@ class HealthReporter(ABC):
                     self._health_timer.join(timeout=2.0)
                 self._health_timer = None
     
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks."""
+        try:
+            logger = getattr(self.mqtt_service, 'logger', None)
+            if not logger:
+                return
+                
+            # Check if logger has handlers and they're not closed
+            if not hasattr(logger, 'handlers') or not logger.handlers:
+                return
+                
+            # Check each handler to ensure it's not closed
+            for handler in logger.handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                    if handler.stream.closed:
+                        return
+                        
+            # Log the message
+            getattr(logger, level.lower())(message, exc_info=exc_info)
+        except (ValueError, AttributeError, OSError):
+            # Silently ignore logging errors during shutdown
+            pass
+
     def _publish_health(self) -> None:
         """Publish health status and reschedule."""
         if self._shutdown:
             return
         
         try:
-            # Add safety check for logging before attempting to log
-            if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
-                self.mqtt_service.logger.info(f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
+            self._safe_log('info', f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
             
             # Check MQTT connection first
             if not self.mqtt_service.is_connected:
-                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
-                    self.mqtt_service.logger.warning(f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
+                self._safe_log('warning', f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
                 # Still reschedule to try again later
             else:
                 # Gather health data
@@ -88,29 +108,24 @@ class HealthReporter(ABC):
                 
                 # Publish health status
                 topic = f"system/{self.mqtt_service.service_name}/health"
-                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
-                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Publishing health to {topic} with data keys: {list(health_data.keys())}")
+                self._safe_log('info', f"[HEALTH DEBUG] Publishing health to {topic} with data keys: {list(health_data.keys())}")
                 result = self.mqtt_service.publish_message(
                     topic,
                     health_data,
                     retain=True
                 )
-                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
-                    if result:
-                        self.mqtt_service.logger.info(f"[HEALTH DEBUG] Health published successfully to {topic}")
-                    else:
-                        self.mqtt_service.logger.error(f"[HEALTH DEBUG] Failed to publish health to {topic}")
+                if result:
+                    self._safe_log('info', f"[HEALTH DEBUG] Health published successfully to {topic}")
+                else:
+                    self._safe_log('error', f"[HEALTH DEBUG] Failed to publish health to {topic}")
             
         except Exception as e:
-            # Safe logging for exceptions
-            if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
-                self.mqtt_service.logger.error(f"[HEALTH DEBUG] Error publishing health: {e}", exc_info=True)
+            self._safe_log('error', f"[HEALTH DEBUG] Error publishing health: {e}", exc_info=True)
         
         # Reschedule next health report
         if not self._shutdown:
             with self._lock:
-                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
-                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Scheduling next health report in {self.interval}s")
+                self._safe_log('info', f"[HEALTH DEBUG] Scheduling next health report in {self.interval}s")
                 self._health_timer = threading.Timer(self.interval, self._publish_health)
                 # Set daemon=False so thread can be properly joined
                 self._health_timer.daemon = False

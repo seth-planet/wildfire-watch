@@ -170,7 +170,7 @@ class MQTTService:
             try:
                 mqtt_broker = getattr(self.config, 'mqtt_broker', self.config.get('MQTT_BROKER', 'localhost') if hasattr(self.config, 'get') else 'localhost')
                 mqtt_port = getattr(self.config, 'mqtt_port', self.config.get('MQTT_PORT', 1883) if hasattr(self.config, 'get') else 1883)
-                self.logger.info(f"Connecting to MQTT broker at {mqtt_broker}:{mqtt_port}")
+                self._safe_log('info', f"Connecting to MQTT broker at {mqtt_broker}:{mqtt_port}")
                 self._mqtt_client.connect(
                     mqtt_broker,
                     mqtt_port,
@@ -179,8 +179,8 @@ class MQTTService:
                 self._mqtt_client.loop_start()
                 break
             except Exception as e:
-                self.logger.error(f"MQTT connection failed: {e}")
-                self.logger.info(f"Retrying in {self._reconnect_delay}s...")
+                self._safe_log('error', f"MQTT connection failed: {e}")
+                self._safe_log('info', f"Retrying in {self._reconnect_delay}s...")
                 time.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(
                     self._reconnect_delay * 2,
@@ -217,15 +217,38 @@ class MQTTService:
             with self._mqtt_lock:
                 self._mqtt_connected = False
     
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks."""
+        try:
+            logger = getattr(self, 'logger', None)
+            if not logger:
+                return
+                
+            # Check if logger has handlers and they're not closed
+            if not hasattr(logger, 'handlers') or not logger.handlers:
+                return
+                
+            # Check each handler to ensure it's not closed
+            for handler in logger.handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                    if handler.stream.closed:
+                        return
+                        
+            # Log the message
+            getattr(logger, level.lower())(message, exc_info=exc_info)
+        except (ValueError, AttributeError, OSError):
+            # Silently ignore logging errors during shutdown
+            pass
+
     def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """Handle MQTT disconnection events."""
         with self._mqtt_lock:
             self._mqtt_connected = False
         
         if rc != 0:
-            self.logger.warning(f"Unexpected MQTT disconnection: {mqtt.error_string(rc)}")
+            self._safe_log('warning', f"Unexpected MQTT disconnection: {mqtt.error_string(rc)}")
             if not self._shutdown:
-                self.logger.info("Attempting to reconnect...")
+                self._safe_log('info', "Attempting to reconnect...")
                 threading.Thread(target=self._connect_with_retry, daemon=True).start()
     
     def _on_mqtt_message(self, client, userdata, msg):
