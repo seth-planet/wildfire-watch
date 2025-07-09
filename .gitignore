@@ -80,6 +80,8 @@ simple_*.py
 *.pth
 *.h5
 *.pb
+*.engine
+wildfire_calibration_data.tar.gz
 converted_models/output/
 hailo_qat_output/
 
