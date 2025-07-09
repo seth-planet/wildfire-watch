@@ -159,7 +159,7 @@ class MQTTService:
     def connect(self) -> None:
         """Connect to the MQTT broker and start the network loop."""
         if self._mqtt_client and not self._shutdown:
-            self.logger.info("Starting MQTT connection process...")
+            self._safe_log('info', "Starting MQTT connection process...")
             self._connect_with_retry()
     
     def _connect_with_retry(self) -> None:
@@ -190,7 +190,7 @@ class MQTTService:
     def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Handle MQTT connection events."""
         if rc == 0:
-            self.logger.info("Connected to MQTT broker")
+            self._safe_log('info', "Connected to MQTT broker")
             with self._mqtt_lock:
                 self._mqtt_connected = True
                 self._reconnect_delay = 1.0  # Reset delay on success
@@ -203,7 +203,7 @@ class MQTTService:
             for topic in self._subscriptions:
                 formatted_topic = self._format_topic(topic)
                 client.subscribe(formatted_topic)
-                self.logger.debug(f"Subscribed to {formatted_topic}")
+                self._safe_log('debug', f"Subscribed to {formatted_topic}")
             
             # Process offline queue if enabled
             if self._offline_queue_enabled:
@@ -213,7 +213,7 @@ class MQTTService:
             if self._on_connect_callback:
                 self._on_connect_callback(client, userdata, flags, rc)
         else:
-            self.logger.error(f"Failed to connect to MQTT broker: {mqtt.error_string(rc)}")
+            self._safe_log('error', f"Failed to connect to MQTT broker: {mqtt.error_string(rc)}")
             with self._mqtt_lock:
                 self._mqtt_connected = False
     
@@ -270,7 +270,7 @@ class MQTTService:
                 self._on_message_callback(topic, payload)
                 
         except Exception as e:
-            self.logger.error(f"Error processing message on {msg.topic}: {e}")
+            self._safe_log('error', f"Error processing message on {msg.topic}: {e}")
     
     def _format_topic(self, topic: str) -> str:
         """Format topic with prefix if configured.
@@ -308,12 +308,12 @@ class MQTTService:
                 if queue_if_offline and self._offline_queue_enabled:
                     if len(self._offline_queue) < self._max_offline_queue_size:
                         self._offline_queue.append((topic, payload, retain, qos))
-                        self.logger.debug(f"Queued message for {topic} (queue size: {len(self._offline_queue)})")
+                        self._safe_log('debug', f"Queued message for {topic} (queue size: {len(self._offline_queue)})")
                         return True
                     else:
-                        self.logger.warning(f"Offline queue full, dropping message for {topic}")
+                        self._safe_log('warning', f"Offline queue full, dropping message for {topic}")
                 else:
-                    self.logger.warning(f"Cannot publish to {topic} - not connected")
+                    self._safe_log('warning', f"Cannot publish to {topic} - not connected")
                 return False
             
             full_topic = self._format_topic(topic)
@@ -335,15 +335,15 @@ class MQTTService:
                 )
                 
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                    self.logger.debug(f"Published to {full_topic}")
-                    self.logger.info(f"[MQTT DEBUG] Successfully published to full topic: '{full_topic}' (prefix: '{self._topic_prefix}')")
+                    self._safe_log('debug', f"Published to {full_topic}")
+                    self._safe_log('info', f"[MQTT DEBUG] Successfully published to full topic: '{full_topic}' (prefix: '{self._topic_prefix}')")
                     return True
                 else:
-                    self.logger.error(f"Failed to publish to {full_topic}: {mqtt.error_string(result.rc)}")
+                    self._safe_log('error', f"Failed to publish to {full_topic}: {mqtt.error_string(result.rc)}")
                     return False
                     
             except Exception as e:
-                self.logger.error(f"Exception publishing to {full_topic}: {e}")
+                self._safe_log('error', f"Exception publishing to {full_topic}: {e}")
                 return False
     
     def enable_offline_queue(self, max_size: int = 100) -> None:
@@ -354,14 +354,14 @@ class MQTTService:
         """
         self._offline_queue_enabled = True
         self._max_offline_queue_size = max_size
-        self.logger.info(f"Offline message queuing enabled (max size: {max_size})")
+        self._safe_log('info', f"Offline message queuing enabled (max size: {max_size})")
     
     def _process_offline_queue(self) -> None:
         """Process queued messages after reconnection."""
         if not self._offline_queue:
             return
         
-        self.logger.info(f"Processing {len(self._offline_queue)} queued messages")
+        self._safe_log('info', f"Processing {len(self._offline_queue)} queued messages")
         
         # Copy and clear queue
         with self._mqtt_lock:
@@ -374,7 +374,7 @@ class MQTTService:
     
     def shutdown(self) -> None:
         """Gracefully shutdown MQTT connection."""
-        self.logger.info(f"Shutting down {self.service_name} MQTT service")
+        self._safe_log('info', f"Shutting down {self.service_name} MQTT service")
         self._shutdown = True
         
         if self._mqtt_client:
@@ -395,10 +395,10 @@ class MQTTService:
                 time.sleep(0.1)
                 
             except Exception as e:
-                self.logger.error(f"Error during MQTT shutdown: {e}")
+                self._safe_log('error', f"Error during MQTT shutdown: {e}")
         
         self._mqtt_connected = False
-        self.logger.info(f"{self.service_name} MQTT service shutdown complete")
+        self._safe_log('info', f"{self.service_name} MQTT service shutdown complete")
     
     @property
     def is_connected(self) -> bool:

@@ -16,6 +16,29 @@ from collections import deque
 
 logger = logging.getLogger(__name__)
 
+def _safe_log(level: str, message: str, exc_info: bool = False) -> None:
+    """Safely log a message with comprehensive checks."""
+    try:
+        test_logger = logging.getLogger(__name__)
+        if not test_logger:
+            return
+            
+        # Check if logger has handlers and they're not closed
+        if not hasattr(test_logger, 'handlers') or not test_logger.handlers:
+            return
+            
+        # Check each handler to ensure it's not closed
+        for handler in test_logger.handlers:
+            if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                if handler.stream.closed:
+                    return
+                    
+        # Log the message
+        getattr(test_logger, level.lower())(message, exc_info=exc_info)
+    except (ValueError, AttributeError, OSError):
+        # Silently ignore logging errors during shutdown
+        pass
+
 # Add consensus module to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../fire_consensus")))
 
@@ -42,7 +65,7 @@ def class_mqtt_broker():
     sys.path.insert(0, os.path.dirname(__file__))
     from mqtt_test_broker import MQTTTestBroker
     
-    logger.info("Starting class-scoped MQTT broker for consensus tests")
+    _safe_log('info', "Starting class-scoped MQTT broker for consensus tests")
     broker = MQTTTestBroker()
     broker.start()
     
@@ -50,11 +73,11 @@ def class_mqtt_broker():
         raise RuntimeError("Class MQTT broker failed to start")
         
     conn_params = broker.get_connection_params()
-    logger.info(f"Class MQTT broker ready on {conn_params['host']}:{conn_params['port']}")
+    _safe_log('info', f"Class MQTT broker ready on {conn_params['host']}:{conn_params['port']}")
     
     yield broker
     
-    logger.info("Stopping class-scoped MQTT broker")
+    _safe_log('info', "Stopping class-scoped MQTT broker")
     broker.stop()
 
 @pytest.fixture
@@ -71,7 +94,7 @@ def mqtt_publisher(class_mqtt_broker):
         nonlocal connected
         connected = True
     
-    def on_disconnect(client, userdata, rc, properties=None):
+    def on_disconnect(client, userdata, flags, rc, properties=None):
         nonlocal connected
         connected = False
     

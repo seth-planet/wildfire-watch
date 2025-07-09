@@ -16,6 +16,29 @@ import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)
 
+def _safe_log(level: str, message: str, exc_info: bool = False) -> None:
+    """Safely log a message with comprehensive checks."""
+    try:
+        test_logger = logging.getLogger(__name__)
+        if not test_logger:
+            return
+            
+        # Check if logger has handlers and they're not closed
+        if not hasattr(test_logger, 'handlers') or not test_logger.handlers:
+            return
+            
+        # Check each handler to ensure it's not closed
+        for handler in test_logger.handlers:
+            if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                if handler.stream.closed:
+                    return
+                    
+        # Log the message
+        getattr(test_logger, level.lower())(message, exc_info=exc_info)
+    except (ValueError, AttributeError, OSError):
+        # Silently ignore logging errors during shutdown
+        pass
+
 # Configuration toggle for per-worker brokers vs shared broker
 USE_PER_WORKER_BROKERS = os.getenv('TEST_PER_WORKER_BROKERS', 'true').lower() == 'true'
 
@@ -36,7 +59,7 @@ class ConnectionPool:
                 client.connect(self.broker_host, self.broker_port, keepalive=60)
                 client.loop_start()
                 self.connections[client_id] = client
-                logger.debug(f"Created new client: {client_id}")
+                _safe_log('debug', f"Created new client: {client_id}")
             return self.connections[client_id]
     
     def release_client(self, client_id: str):
@@ -51,9 +74,9 @@ class ConnectionPool:
                 try:
                     client.loop_stop()
                     client.disconnect()
-                    logger.debug(f"Disconnected client: {client_id}")
+                    _safe_log('debug', f"Disconnected client: {client_id}")
                 except Exception as e:
-                    logger.warning(f"Error disconnecting {client_id}: {e}")
+                    _safe_log('warning', f"Error disconnecting {client_id}: {e}")
             self.connections.clear()
 
 class TestMQTTBroker:
@@ -117,7 +140,7 @@ class TestMQTTBroker:
         # Initialize tracking attributes for this instance
         self._subscribers = set()
         self._active_topics = set()
-        logger.debug(f"Reusing broker for worker {self.worker_id} on port {self.port}")
+        _safe_log('debug', f"Reusing broker for worker {self.worker_id} on port {self.port}")
     
     def _allocate_worker_port(self):
         """Allocate a port based on worker ID to prevent conflicts"""
@@ -168,7 +191,7 @@ class TestMQTTBroker:
                     TestMQTTBroker._worker_brokers[self.worker_id] = self
                     
             except (FileNotFoundError, RuntimeError) as e:
-                logger.error(f"Failed to start mosquitto for worker {self.worker_id}: {e}")
+                _safe_log('error', f"Failed to start mosquitto for worker {self.worker_id}: {e}")
                 raise
     
     def _start_mosquitto(self):
@@ -226,7 +249,7 @@ protocol mqtt
             if "bind" in error_msg.lower() or "address already in use" in error_msg.lower():
                 # Port conflict - try to allocate a different port
                 new_port = self._find_free_port()
-                logger.warning(f"Port {self.port} in use, retrying with port {new_port}")
+                _safe_log('warning', f"Port {self.port} in use, retrying with port {new_port}")
                 self.port = new_port
                 return self._start_mosquitto()  # Retry with new port
             raise RuntimeError(f"Failed to start mosquitto: {error_msg}")
@@ -240,13 +263,13 @@ protocol mqtt
             else:
                 raise RuntimeError("MQTT broker failed to become ready: timeout")
             
-        logger.info(f"Mosquitto broker started for worker {self.worker_id} on port {self.port}")
+        _safe_log('info', f"Mosquitto broker started for worker {self.worker_id} on port {self.port}")
     
     def stop(self):
         """Stop the test MQTT broker"""
         if self.session_scope:
             # Don't stop session broker
-            logger.debug("Not stopping session-scoped broker")
+            _safe_log('debug', "Not stopping session-scoped broker")
             return
             
         self._stop_broker()
@@ -261,19 +284,19 @@ protocol mqtt
             try:
                 if self.process.poll() is None:
                     # First try graceful termination
-                    logger.debug(f"Terminating mosquitto process {pid}")
+                    _safe_log('debug', f"Terminating mosquitto process {pid}")
                     self.process.terminate()
                     
                     # Use a shorter timeout and non-blocking approach
                     start_time = time.time()
                     while time.time() - start_time < 1.0:  # Reduced timeout to 1 second
                         if self.process.poll() is not None:
-                            logger.debug(f"Mosquitto process {pid} terminated gracefully")
+                            _safe_log('debug', f"Mosquitto process {pid} terminated gracefully")
                             break
                         time.sleep(0.05)  # Shorter sleep for faster detection
                     else:
                         # Force kill if graceful termination fails
-                        logger.warning(f"Force killing mosquitto process {pid}")
+                        _safe_log('warning', f"Force killing mosquitto process {pid}")
                         try:
                             # Kill process group if possible
                             if hasattr(os, 'killpg'):
@@ -288,20 +311,20 @@ protocol mqtt
                         start_time = time.time()
                         while time.time() - start_time < 0.5:  # Only wait 0.5 seconds for kill
                             if self.process.poll() is not None:
-                                logger.debug(f"Mosquitto process {pid} killed successfully")
+                                _safe_log('debug', f"Mosquitto process {pid} killed successfully")
                                 break
                             time.sleep(0.05)
                         else:
-                            logger.error(f"Failed to kill mosquitto process {pid}, giving up")
+                            _safe_log('error', f"Failed to kill mosquitto process {pid}, giving up")
                 else:
-                    logger.debug(f"Mosquitto process {pid} already terminated with code {self.process.returncode}")
+                    _safe_log('debug', f"Mosquitto process {pid} already terminated with code {self.process.returncode}")
                     
                 # Don't wait again, just clean up
                 pass
                     
                 self.process = None
             except Exception as e:
-                logger.error(f"Error stopping mosquitto process {pid}: {e}")
+                _safe_log('error', f"Error stopping mosquitto process {pid}: {e}")
                 # Force set to None to prevent further attempts
                 self.process = None
         
@@ -311,7 +334,7 @@ protocol mqtt
             try:
                 shutil.rmtree(self.data_dir)
             except Exception as e:
-                logger.warning(f"Error cleaning up temp directory {self.data_dir}: {e}")
+                _safe_log('warning', f"Error cleaning up temp directory {self.data_dir}: {e}")
     
     def get_connection_params(self):
         """Get connection parameters for clients"""
@@ -404,7 +427,7 @@ protocol mqtt
         self._active_topics.clear()
         
         # Note: We don't disconnect clients as they may be reused
-        logger.debug("Reset broker state for next test")
+        _safe_log('debug', "Reset broker state for next test")
     
     @classmethod
     def cleanup_session(cls, worker_id=None):
@@ -414,14 +437,14 @@ protocol mqtt
                 # Clean up specific worker's broker
                 if worker_id in cls._worker_brokers:
                     broker = cls._worker_brokers[worker_id]
-                    logger.info(f"Cleaning up broker for worker {worker_id}")
+                    _safe_log('info', f"Cleaning up broker for worker {worker_id}")
                     broker._stop_broker()
                     del cls._worker_brokers[worker_id]
             else:
                 # Clean up all worker brokers
-                logger.info(f"Cleaning up {len(cls._worker_brokers)} worker brokers")
+                _safe_log('info', f"Cleaning up {len(cls._worker_brokers)} worker brokers")
                 for worker_id, broker in list(cls._worker_brokers.items()):
-                    logger.debug(f"Stopping broker for worker {worker_id}")
+                    _safe_log('debug', f"Stopping broker for worker {worker_id}")
                     broker._stop_broker()
                 cls._worker_brokers.clear()
                 
@@ -445,15 +468,15 @@ protocol mqtt
                                 os.kill(pid_num, 0)  # Check if process exists
                                 # Still running, force kill
                                 os.kill(pid_num, signal.SIGKILL)
-                                logger.warning(f"Force killed stray mosquitto process {pid_num}")
+                                _safe_log('warning', f"Force killed stray mosquitto process {pid_num}")
                             except ProcessLookupError:
                                 # Process already terminated
-                                logger.debug(f"Terminated stray mosquitto process {pid_num}")
+                                _safe_log('debug', f"Terminated stray mosquitto process {pid_num}")
                             stray_count += 1
                         except (ValueError, ProcessLookupError, OSError):
                             # Invalid PID or process already gone
                             pass
                 if stray_count > 0:
-                    logger.info(f"Cleaned up {stray_count} stray mosquitto processes")
+                    _safe_log('info', f"Cleaned up {stray_count} stray mosquitto processes")
         except Exception as e:
-            logger.warning(f"Error cleaning up stray processes: {e}")
+            _safe_log('warning', f"Error cleaning up stray processes: {e}")

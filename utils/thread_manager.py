@@ -362,7 +362,7 @@ class ThreadSafeService:
         with self._state_lock:
             old_state = self._state
             self._state = new_state
-            self.logger.info(f"State changed: {old_state} -> {new_state}")
+            self._safe_log('info', f"State changed: {old_state} -> {new_state}")
     
     def shutdown(self) -> None:
         """Gracefully shutdown the service."""
@@ -377,7 +377,7 @@ class ThreadSafeService:
         # Stop all threads
         failed = self.stop_all_threads()
         if failed > 0:
-            self.logger.warning(f"{failed} threads did not stop cleanly")
+            self._safe_log('warning', f"{failed} threads did not stop cleanly")
         
         self._safe_log('info', f"{self.service_name} shutdown complete")
 

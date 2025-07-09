@@ -132,14 +132,14 @@ class TestConfigurationFiles:
         assert "model" in config
         
         # Check MQTT configuration
-        mqtt_config = config.mqtt
-        assert mqtt_config.enabled is True
+        mqtt_config = config['mqtt']
+        assert mqtt_config['enabled'] is True
         assert "host" in mqtt_config
         assert "port" in mqtt_config
         assert "tls_ca_certs" in mqtt_config
         
         # Check detector configuration
-        detectors = config.detectors
+        detectors = config['detectors']
         assert "default" in detectors
         default_detector = detectors["default"]
         assert "type" in default_detector
@@ -147,8 +147,8 @@ class TestConfigurationFiles:
         
         # Check model dimensions
         model_config = default_detector["model"]
-        assert model_config.width == 640  # Should default to 640
-        assert model_config.height == 640
+        assert model_config['width'] == 640  # Should default to 640
+        assert model_config['height'] == 640
     
     def test_model_labels_configuration(self):
         """Test that wildfire-specific labels are configured"""
@@ -176,7 +176,7 @@ class TestConfigurationFiles:
         
         # Check recording settings
         assert "record" in config
-        record = config.record
+        record = config['record']
         assert record["enabled"] is True
         
         # Check retention settings

@@ -74,9 +74,9 @@ class QATConfigurationTests(unittest.TestCase):
         
         # Check QAT defaults
         self.assertIn('qat', default_config)
-        self.assertTrue(default_config.qat['enabled'])
-        self.assertEqual(default_config.qat['start_epoch'], 150)
-        self.assertEqual(default_config.qat['calibration_batches'], 100)
+        self.assertTrue(default_config['qat']['enabled'])
+        self.assertEqual(default_config['qat']['start_epoch'], 150)
+        self.assertEqual(default_config['qat']['calibration_batches'], 100)
     
     def test_qat_can_be_disabled(self):
         """Test QAT can be disabled via configuration"""
@@ -120,7 +120,7 @@ class QATConfigurationTests(unittest.TestCase):
             # Check QAT mentions
             self.assertIn('QAT', content)
             self.assertIn('Quantization Aware Training', content)
-            self.assertIn(str(config.qat['start_epoch']), content)
+            self.assertIn(str(config['qat']['start_epoch']), content)
             
         finally:
             shutil.rmtree(output_dir)

@@ -282,17 +282,17 @@ class TestSecurityNVRIntegration:
         assert "detectors" in config
         
         # Check that at least one detector is configured
-        detectors = config.detectors
+        detectors = config["detectors"]
         assert len(detectors) > 0, "No detectors configured"
         
         # Verify detector settings
         for detector_name, detector_config in detectors.items():
             assert "type" in detector_config
-            assert detector_config.type in ["cpu", "edgetpu", "openvino", "tensorrt"]
+            assert detector_config["type"] in ["cpu", "edgetpu", "openvino", "tensorrt"]
             
             # Check model configuration
             if "model" in detector_config:
-                model = detector_config.model
+                model = detector_config["model"]
                 assert "width" in model
                 assert "height" in model
                 assert model["width"] in [320, 416, 640]  # Valid model sizes
@@ -351,19 +351,19 @@ class TestSecurityNVRIntegration:
         assert response.status_code == 200
         config = response.json()
         
-        if "cameras" in config and len(config.cameras) > 0:
-            for camera_name, camera_config in config.cameras.items():
+        if "cameras" in config and len(config["cameras"]) > 0:
+            for camera_name, camera_config in config["cameras"].items():
                 # Check required camera configuration
                 assert "ffmpeg" in camera_config
                 assert "detect" in camera_config
                 
                 # Check ffmpeg inputs
-                ffmpeg = camera_config.ffmpeg
+                ffmpeg = camera_config["ffmpeg"]
                 assert "inputs" in ffmpeg
                 assert len(ffmpeg["inputs"]) > 0
                 
                 # Check detect settings
-                detect = camera_config.detect
+                detect = camera_config["detect"]
                 assert "width" in detect
                 assert "height" in detect
                 assert detect["width"] in [320, 416, 640]
@@ -553,15 +553,15 @@ class TestSecurityNVRIntegration:
         config = response.json()
         
         # Check for wildfire-specific configuration
-        if "objects" in config and "track" in config.objects:
-            tracked_objects = config.objects["track"]
+        if "objects" in config and "track" in config["objects"]:
+            tracked_objects = config["objects"]["track"]
             assert "fire" in tracked_objects, f"Fire detection not configured. Tracked objects: {tracked_objects}"
             
         # Check model configuration in detectors
         if "detectors" in config:
-            for detector_name, detector_config in config.detectors.items():
+            for detector_name, detector_config in config["detectors"].items():
                 if "model" in detector_config:
-                    model = detector_config.model
+                    model = detector_config["model"]
                     assert "width" in model
                     assert "height" in model
     
@@ -574,7 +574,7 @@ class TestSecurityNVRIntegration:
         
         # Check global detect settings
         if "detect" in config:
-            detect = config.detect
+            detect = config["detect"]
             if "fps" in detect:
                 assert 1 <= detect["fps"] <= 10, "Detection FPS out of expected range"
     

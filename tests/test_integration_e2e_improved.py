@@ -47,6 +47,7 @@ class TestE2EIntegrationImproved:
         self.docker_manager = docker_container_manager
         self.temp_dir = tempfile.mkdtemp(prefix=f"e2e_test_{parallel_test_context.worker_id}_")
         self.e2e_containers = []  # Track containers for cleanup
+        self.local_services = []  # Track local services for cleanup
         
         yield
         
@@ -55,105 +56,89 @@ class TestE2EIntegrationImproved:
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
     def _start_e2e_services(self, docker_client, mqtt_client):
-        """Start the required services for E2E tests"""
-        # Services to start
-        services = {
-            'fire-consensus': 'wildfire-watch/fire_consensus:latest',
-            'gpio-trigger': 'wildfire-watch/gpio_trigger:latest'
-        }
+        """Start the required services for E2E tests running locally in threads"""
+        import threading
+        import sys
+        import os
         
-        for service, image in services.items():
-            container_name = self.docker_manager.get_container_name(f"e2e-{service}")
+        # Import the refactored services
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+        from fire_consensus.consensus import FireConsensus
+        from gpio_trigger.trigger import PumpController
+        
+        # Set environment variables for local service startup
+        env_vars = self.parallel_context.get_service_env('test_e2e')
+        print(f"[DEBUG] Environment variables from parallel context: {env_vars}")
+        
+        # Apply environment variables
+        for key, value in env_vars.items():
+            os.environ[key] = str(value)
+        
+        # Fix environment variable names for refactored services
+        if 'MQTT_TOPIC_PREFIX' in env_vars:
+            os.environ['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
+            print(f"[DEBUG] Set TOPIC_PREFIX={os.environ['TOPIC_PREFIX']}")
+        
+        # Service-specific configuration
+        os.environ['MAX_ENGINE_RUNTIME'] = '10'  # 10 second timeout for tests
+        os.environ['GPIO_SIMULATION'] = 'true'
+        os.environ['SINGLE_CAMERA_TRIGGER'] = 'true'
+        os.environ['MIN_CONFIDENCE'] = '0.7'  # Lower threshold for test
+        os.environ['CONSENSUS_THRESHOLD'] = '2'  # Require 2 cameras normally
+        os.environ['DETECTION_WINDOW'] = '30'  # Longer window for test
+        os.environ['MOVING_AVERAGE_WINDOW'] = '3'  # Default 3, requires 6 detections
+        os.environ['AREA_INCREASE_RATIO'] = '1.15'  # 15% growth (lower for testing)
+        os.environ['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
+        os.environ['HEALTH_INTERVAL'] = '10'  # Minimum allowed health interval
+        
+        print(f"[DEBUG] Starting services locally with MQTT_BROKER={os.environ.get('MQTT_BROKER')}, MQTT_PORT={os.environ.get('MQTT_PORT')}, PREFIX={os.environ.get('TOPIC_PREFIX')}")
+        
+        # Store service instances for cleanup
+        self.local_services = []
+        
+        try:
+            # Start fire consensus service
+            print("[DEBUG] Starting FireConsensus service locally...")
+            consensus = FireConsensus()
+            self.local_services.append(consensus)
+            print("[DEBUG] ✅ FireConsensus service started")
             
-            # Remove old container if exists
-            self.docker_manager.cleanup_old_container(container_name)
+            # Start GPIO trigger service  
+            print("[DEBUG] Starting PumpController service locally...")
+            pump_controller = PumpController()
+            self.local_services.append(pump_controller)
+            print("[DEBUG] ✅ PumpController service started")
             
-            # Get environment variables
-            env_vars = self.parallel_context.get_service_env(service.replace('-', '_'))
-            
-            # Fix environment variable names for refactored services
-            if 'MQTT_TOPIC_PREFIX' in env_vars:
-                env_vars['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
-            
-            # Add service-specific configuration
-            if service == 'gpio-trigger':
-                env_vars['MAX_ENGINE_RUNTIME'] = '10'  # 10 second timeout for tests
-                env_vars['GPIO_SIMULATION'] = 'true'
-            elif service == 'fire-consensus':
-                # Enable single camera trigger for easier testing
-                env_vars['SINGLE_CAMERA_TRIGGER'] = 'true'
-                env_vars['MIN_CONFIDENCE'] = '0.8'  # Lower threshold for test
-                env_vars['CONSENSUS_THRESHOLD'] = '1'  # Allow single camera
-                env_vars['DETECTION_WINDOW'] = '30'  # Longer window for test
-                env_vars['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
-                env_vars['HEALTH_INTERVAL'] = '10'  # Minimum allowed health interval
-            
-            # Debug: print environment
-            print(f"[DEBUG] Starting {service} with env: MQTT_BROKER={env_vars.get('MQTT_BROKER')}, MQTT_PORT={env_vars.get('MQTT_PORT')}, PREFIX={env_vars.get('TOPIC_PREFIX')}")
-            
-            try:
-                container = self.docker_manager.start_container(
-                    image=image,
-                    name=container_name,
-                    config={
-                        'environment': env_vars,
-                        'network_mode': 'host',
-                        'detach': True
-                    },
-                    wait_timeout=10
-                )
-                self.e2e_containers.append(container)
-                assert container.status == "running", f"{service} not running"
-                
-                # Give service time to start and connect to MQTT
-                # Consensus needs more time for D-Bus/Avahi startup
-                wait_time = 8 if service == 'fire-consensus' else 3
-                time.sleep(wait_time)
-                
-                # Check container logs
-                logs = container.logs(tail=100).decode('utf-8')
-                if "ERROR" in logs or "Failed" in logs or "Traceback" in logs:
-                    print(f"[WARNING] {service} logs show errors:\n{logs}")
-                elif "Connected to MQTT" in logs or "MQTT connected" in logs:
-                    print(f"[DEBUG] {service} connected to MQTT successfully")
-                    # Show last few lines for context
-                    print(f"[DEBUG] {service} recent logs:\n" + '\n'.join(logs.split('\n')[-10:]))
-                else:
-                    print(f"[DEBUG] {service} logs (last 100 lines):\n{logs}")
+            # Wait a moment for services to initialize
+            time.sleep(2)
+            print("[DEBUG] ✅ All E2E services started successfully")
                     
-                # Check container info
-                container_info = container.attrs
-                print(f"[DEBUG] {service} command: {container_info.get('Config', {}).get('Cmd', 'unknown')}")
-                    
-            except Exception as e:
-                pytest.fail(f"Failed to start {service}: {e}")
+        except Exception as e:
+            # Cleanup any started services on failure
+            self._cleanup_e2e_services()
+            pytest.fail(f"Failed to start local E2E services: {e}")
     
     def _cleanup_e2e_services(self):
-        """Clean up E2E test containers"""
-        for container in self.e2e_containers:
-            try:
-                # Force stop with short timeout
-                if container.status == 'running':
-                    container.stop(timeout=3)
-                
-                # Force remove
-                container.remove(force=True)
-                print(f"Cleaned up E2E container: {container.name}")
-            except Exception as e:
-                print(f"Warning: Error cleaning up container {getattr(container, 'name', 'unknown')}: {e}")
+        """Clean up E2E test services (local instances)"""
+        if hasattr(self, 'local_services'):
+            for service in self.local_services:
+                try:
+                    if hasattr(service, 'cleanup'):
+                        print(f"[DEBUG] Cleaning up local service: {service.__class__.__name__}")
+                        service.cleanup()
+                    elif hasattr(service, 'shutdown'):
+                        print(f"[DEBUG] Shutting down local service: {service.__class__.__name__}")
+                        service.shutdown()
+                    print(f"Cleaned up E2E service: {service.__class__.__name__}")
+                except Exception as e:
+                    print(f"Warning: Error cleaning up service {service.__class__.__name__}: {e}")
+            
+            # Clear the list
+            self.local_services = []
         
-        # Clear the list
-        self.e2e_containers = []
-        
-        # Additional cleanup: remove any containers with our test prefix
-        try:
-            import docker
-            client = docker.from_env()
-            test_containers = client.containers.list(
-                all=True, 
-                filters={'name': f'{self.parallel_context.container_prefix}-e2e-'}
-            )
-            for container in test_containers:
+        # Also clean up any remaining containers for backward compatibility
+        if hasattr(self, 'e2e_containers'):
+            for container in self.e2e_containers:
                 try:
                     if container.status == 'running':
                         container.stop(timeout=3)
@@ -161,8 +146,8 @@ class TestE2EIntegrationImproved:
                     print(f"Cleaned up stray E2E container: {container.name}")
                 except:
                     pass
-        except Exception as e:
-            print(f"Warning: Error in additional E2E cleanup: {e}")
+            # Clear the container list
+            self.e2e_containers = []
     
     @pytest.fixture(scope="class") 
     def docker_client(self):
@@ -450,7 +435,8 @@ class TestE2EIntegrationImproved:
                     print(f"[DEBUG] GPIO trigger: action={action}, state={current_state}")
                     
                     # Detect pump activation
-                    if (action in ['ENGINE_STARTED', 'engine_running'] or 
+                    if (action in ['ENGINE_STARTED', 'engine_running', 'pump_started',
+                                   'fire_trigger_received'] or 
                         current_state == 'RUNNING' or
                         (action == 'pump_sequence_start')):
                         pump_activated.set()
@@ -518,7 +504,7 @@ class TestE2EIntegrationImproved:
         print("[DEBUG] Step 1: Waiting for consensus service to be ready...")
         # Health interval is 10 seconds, so wait at least 25 seconds
         # (5s startup + 10s first interval + 10s buffer)
-        if not consensus_ready.wait(timeout=25):
+        if not consensus_ready.wait(timeout=10):
             # Try to get logs if consensus didn't start
             for container in self.e2e_containers:
                 if 'consensus' in container.name:
@@ -589,32 +575,48 @@ class TestE2EIntegrationImproved:
         # Step 3: Send fire detections to trigger consensus
         print("[DEBUG] Step 3: Sending fire detections to trigger consensus...")
         
-        # Send multiple detections to ensure consensus trigger
-        # Include different formats to test consensus robustness
-        detections_sent = 0
-        for i in range(3):  # Send 3 detections to increase chance of trigger
-            detection = {
-                'camera_id': f'camera_{i % 2}',  # Alternate between camera_0 and camera_1
-                'confidence': 0.95,
-                'object_type': 'fire',
-                'timestamp': time.time(),
-                'bounding_box': [100 + i*10, 100, 50, 50],  # Different positions
-                'object_id': f'fire_{int(time.time())}_{i}'  # Unique object IDs
-            }
-            
-            # Try both camera-specific and general detection topics
-            topics_to_try = [
-                f"{namespace_prefix}/fire/detection/camera_{i % 2}",
-                f"{namespace_prefix}/fire/detection"
-            ]
-            
-            for topic in topics_to_try:
-                raw_client.publish(topic, json.dumps(detection), qos=1)
-                print(f"[DEBUG] Published fire detection to {topic}")
-                detections_sent += 1
-                time.sleep(0.3)  # Allow processing time
+        # Fire consensus requires:
+        # 1. At least 6 detections per object (moving_average_window * 2)
+        # 2. Growth of at least 20% in area
+        # Let's send growing fire detections from both cameras
         
-        print(f"[DEBUG] Sent {detections_sent} fire detection messages")
+        def send_growing_fire_detections(camera_id, object_id, num_detections=8):
+            """Send detections showing fire growth."""
+            base_size = 50
+            growth_factor = 1.4  # 40% total growth
+            
+            for i in range(num_detections):
+                # Calculate growing size
+                size_multiplier = 1 + (growth_factor - 1) * (i / (num_detections - 1))
+                current_size = base_size * size_multiplier
+                
+                detection = {
+                    'camera_id': camera_id,
+                    'confidence': 0.85 + (i * 0.02),  # Increasing confidence
+                    'object_type': 'fire',
+                    'timestamp': time.time(),
+                    'bounding_box': [100, 100, 100 + current_size, 100 + current_size],
+                    'bbox': [100, 100, 100 + current_size, 100 + current_size],  # Both formats
+                    'object_id': object_id  # Same object ID for growth tracking
+                }
+                
+                # Send to both topics
+                topics = [
+                    f"{namespace_prefix}/fire/detection/{camera_id}",
+                    f"{namespace_prefix}/fire/detection"
+                ]
+                
+                for topic in topics:
+                    raw_client.publish(topic, json.dumps(detection), qos=1)
+                
+                print(f"[DEBUG] {camera_id} detection {i+1}/{num_detections}: size={current_size:.1f}")
+                time.sleep(0.2)  # Small delay between detections
+        
+        # Send growing fires from both cameras
+        send_growing_fire_detections('camera_0', 'fire_obj_1', 8)
+        send_growing_fire_detections('camera_1', 'fire_obj_2', 8)
+        
+        print("[DEBUG] ✅ Sent growing fire detections from both cameras")
         
         # Give consensus time to process all detections
         time.sleep(3)

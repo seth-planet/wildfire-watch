@@ -130,9 +130,9 @@ class TestINT8Quantization:
         with open(config_path, 'r') as f:
             loaded_config = yaml.safe_load(f)
         
-        assert loaded_config.quantization['enable_qat'] is True
-        assert loaded_config.quantization['calibration_method'] == 'percentile'
-        assert loaded_config.quantization['per_channel'] is True
+        assert loaded_config['quantization']['enable_qat'] is True
+        assert loaded_config['quantization']['calibration_method'] == 'percentile'
+        assert loaded_config['quantization']['per_channel'] is True
     
     def test_int8_conversion_command(self):
         """Test that INT8 conversion command is properly formatted"""
