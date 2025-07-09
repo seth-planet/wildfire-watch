@@ -1,23 +1,90 @@
 # Python
-
-**pycache**/ \*.pyc
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # Docker
-
-\*.log
+*.log
+hailort.log*
+*.hef
+*.tar
 
 # Environment variables
-
 .env
+.env.local
+.env.production
 
 # macOS
-
-.DS\_Store
+.DS_Store
 
 # Storage
-
-/data/\* /media/\*
+/data/*
+/media/*
+/tmp/*
 
 # IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
-.vscode/ .idea/
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Temporary files
+temp_*
+debug_*
+test_*.py
+*_temp.py
+*_debug.py
+simple_*.py
+
+# Documentation (temporary)
+*_PLAN.md
+*_SUMMARY.md
+*_REPORT.md
+*_STATUS.md
+*_GUIDE.md
+*_CHECKLIST.md
+
+# Model files
+*.onnx
+*.tflite
+*.pt
+*.pth
+*.h5
+*.pb
+converted_models/output/
+hailo_qat_output/
+
+# Certificates (keep structure, ignore contents)
+certs/*.crt
+certs/*.key
+certs/*.pem
+!certs/.gitkeep

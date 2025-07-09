@@ -127,6 +127,14 @@ docker-compose logs -f
                     └─────────────┘     └─────────────┘
 ```
 
+### Service Architecture (Refactored)
+All services now use standardized base classes for improved reliability:
+
+- **MQTTService**: Automatic reconnection with exponential backoff
+- **HealthReporter**: Standardized health monitoring and metrics
+- **ThreadSafeService**: Safe thread management and shutdown
+- **ConfigBase**: Centralized configuration management
+
 ## Configuration
 
 ### Essential Settings (.env)
@@ -145,6 +153,13 @@ REFILL_MULTIPLIER=40       # Refill duration multiplier
 
 # Hardware
 FRIGATE_DETECTOR=auto      # auto|coral|hailo|gpu|cpu
+
+# Service health monitoring
+HEALTH_REPORT_INTERVAL=60  # Health report frequency (seconds)
+
+# MQTT reconnection (all services)
+MQTT_RECONNECT_MIN_DELAY=1.0   # Min reconnection delay
+MQTT_RECONNECT_MAX_DELAY=60.0  # Max reconnection delay
 ```
 
 See [Configuration Guide](docs/configuration.md) for all options.

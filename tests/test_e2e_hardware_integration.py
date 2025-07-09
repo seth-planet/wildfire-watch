@@ -27,7 +27,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'gpio_trigger')
 
 @pytest.mark.integration
 @pytest.mark.hardware
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestE2EHardwareIntegration:
     """Test complete system with real hardware"""
     
@@ -41,7 +40,7 @@ class TestE2EHardwareIntegration:
         monkeypatch.setenv('GPIO_SIMULATION', 'true')  # Simulate GPIO unless on RPi
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
-        monkeypatch.setenv('CAMERA_WINDOW', '10')  # Detection window in seconds
+        monkeypatch.setenv('DETECTION_WINDOW', '10')  # Detection window in seconds
         monkeypatch.setenv('AREA_INCREASE_RATIO', '1.2')  # 20% growth required
         
         # Auto-detect AI hardware
@@ -121,11 +120,11 @@ class TestE2EHardwareIntegration:
                 manufacturer="Test",
                 model="TestModel"
             )
-            test_camera['rtsp_urls'] = {
+            test_camera.rtsp_urls = {
                 'main': 'rtsp://192.168.1.100:554/stream1'
             }
-            detector.cameras[test_camera['mac']] = test_camera
-            detector._publish_camera_discovery(test_camera)
+            detector.cameras[test_camera.mac] = test_camera
+            detector._publish_camera(test_camera)
             discovered_count = 1
         
         # Wait for MQTT messages
@@ -143,10 +142,11 @@ class TestE2EHardwareIntegration:
         if camera_topics:
             for msg in camera_topics:
                 if 'discovery' in msg['topic']:
-                    assert 'camera' in msg['payload']
-                    cam = msg['payload']['camera']
+                    # The payload directly contains camera data
+                    cam = msg['payload']
                     assert 'ip' in cam
                     assert 'mac' in cam
+                    assert 'name' in cam
     
     # AI hardware is available - don't skip
     @pytest.mark.coral_tpu
@@ -175,7 +175,7 @@ class TestE2EHardwareIntegration:
         monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'true')
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
-        monkeypatch.setenv('CAMERA_WINDOW', '10')
+        monkeypatch.setenv('DETECTION_WINDOW', '10')
         monkeypatch.setenv('COOLDOWN_PERIOD', '5')
         
         from fire_consensus.consensus import FireConsensus
@@ -220,14 +220,16 @@ class TestE2EHardwareIntegration:
         
         # Create growing detections with proper format
         for i in range(8):
-            width = 0.03 + i * 0.005  # Growing normalized width
-            height = 0.03 + i * 0.004  # Growing normalized height
+            # Use bounding box format [x1, y1, x2, y2] not [x, y, width, height]
+            x1, y1 = 0.1, 0.1
+            x2 = x1 + 0.03 + i * 0.005  # Growing normalized width
+            y2 = y1 + 0.03 + i * 0.004  # Growing normalized height
             detection = {
                 'camera_id': 'camera_001',
                 'object': 'fire',
                 'object_id': 'fire_001',
                 'confidence': 0.8 + i * 0.01,
-                'bounding_box': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
+                'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                 'timestamp': base_time + i * 0.5
             }
             publisher.publish('fire/detection', json.dumps(detection))
@@ -243,7 +245,8 @@ class TestE2EHardwareIntegration:
         # Verify trigger content
         trigger = trigger_messages[0]['payload']
         assert trigger['consensus_cameras'] == ['camera_001']
-        assert trigger['camera_count'] == 1
+        assert trigger['action'] == 'trigger'
+        assert trigger['confidence'] == 'high'
         
         publisher.loop_stop()
         publisher.disconnect()
@@ -278,8 +281,11 @@ class TestE2EHardwareIntegration:
         time.sleep(2)
         
         # Verify pump activated (in simulation mode)
-        from gpio_trigger.trigger import GPIO, CONFIG
-        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) is True, "Main valve should open"
+        # Check the controller's state instead of raw GPIO
+        state_snapshot = controller._get_state_snapshot()
+        assert state_snapshot['main_valve'] is True, "Main valve should open"
+        # Or check the pump state
+        assert controller._state.name in ['PRIMING', 'STARTING', 'RUNNING'], f"Pump should be active, but is in state: {controller._state.name}"
         
         # Wait for pump sequence
         time.sleep(5)
@@ -308,7 +314,7 @@ class TestE2EHardwareIntegration:
             os.environ['SINGLE_CAMERA_TRIGGER'] = 'true'
             os.environ['CONSENSUS_THRESHOLD'] = '1'
             os.environ['MIN_CONFIDENCE'] = '0.7'
-            os.environ['CAMERA_WINDOW'] = '10'
+            os.environ['DETECTION_WINDOW'] = '10'
             os.environ['COOLDOWN_PERIOD'] = '5'
             
             # Start all services
@@ -380,14 +386,16 @@ class TestE2EHardwareIntegration:
             
             # Send growing fire detections - using same pattern as working test
             for i in range(8):
-                width = 0.03 + i * 0.005  # Growing normalized width
-                height = 0.03 + i * 0.004  # Growing normalized height
+                # Use bounding box format [x1, y1, x2, y2] not [x, y, width, height]
+                x1, y1 = 0.1, 0.1
+                x2 = x1 + 0.03 + i * 0.005  # Growing normalized width
+                y2 = y1 + 0.03 + i * 0.004  # Growing normalized height
                 detection = {
                     'camera_id': camera_id,
                     'object': 'fire',
                     'object_id': 'fire_001',
                     'confidence': 0.8 + i * 0.01,
-                    'bounding_box': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
+                    'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                     'timestamp': base_time + i * 0.5
                 }
                 publisher.publish('fire/detection', json.dumps(detection))
@@ -412,8 +420,11 @@ class TestE2EHardwareIntegration:
             assert any('fire/trigger' in t for t in topics_seen), f"No fire trigger sent. Fire topics: {fire_topics}"
             
             # Should see GPIO activation
-            from gpio_trigger.trigger import GPIO, CONFIG
-            assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) is True, "Pump not activated"
+            # Check the controller's state
+            state_snapshot = controller._get_state_snapshot()
+            assert state_snapshot['main_valve'] is True, "Pump not activated"
+            # Or check the pump state
+            assert controller._state.name in ['PRIMING', 'STARTING', 'RUNNING'], f"Pump should be active, but is in state: {controller._state.name}"
             
             # Print message flow for debugging
             print("\nMessage flow through pipeline:")
@@ -437,9 +448,16 @@ class TestE2EHardwareIntegration:
                     pass
     
     def _test_coral_inference_on_stream(self):
-        """Test Coral TPU inference on camera stream"""
+        """Test Coral TPU inference on camera stream
+        
+        IMPORTANT: This method requires Python 3.8 for Coral TPU!
+        If running with Python 3.12, this will be skipped.
+        Use: python3.8 -m pytest tests/test_e2e_hardware_integration.py
+        """
         if sys.version_info[:2] != (3, 8):
-            pytest.skip("Coral requires Python 3.8")
+            pytest.skip("Coral TPU requires Python 3.8. Current version: "
+                       f"{sys.version_info.major}.{sys.version_info.minor}. "
+                       "Please run with python3.8 -m pytest")
         
         from pycoral.utils.edgetpu import make_interpreter
         from pycoral.adapters import common
@@ -599,7 +617,6 @@ class TestE2EHardwareIntegration:
 
 
 @pytest.mark.hardware
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestHardwareCompatibility:
     """Test hardware compatibility and configuration"""
     

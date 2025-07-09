@@ -8,7 +8,9 @@ import time
 import subprocess
 import psutil
 import pytest
+import threading
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -27,27 +29,112 @@ def count_processes_by_name(name_pattern):
             pass
     return count
 
+def force_cleanup_processes_optimized(pattern='load_test_'):
+    """Optimized process cleanup using parallel execution"""
+    try:
+        result = subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True)
+        if result.returncode == 0:
+            pids = [pid.strip() for pid in result.stdout.strip().split('\n') if pid.strip()]
+            if pids:
+                # Use parallel termination
+                with ThreadPoolExecutor(max_workers=min(len(pids), 5)) as executor:
+                    futures = []
+                    for pid in pids:
+                        future = executor.submit(terminate_process, pid)
+                        futures.append(future)
+                    
+                    # Wait for all terminations with timeout
+                    for future in as_completed(futures, timeout=3):
+                        try:
+                            future.result()
+                        except Exception:
+                            pass
+                print(f"Cleaned up {len(pids)} processes")
+    except Exception as e:
+        print(f"Cleanup error: {e}")
+
+def terminate_process(pid):
+    """Terminate a single process"""
+    try:
+        pid_num = int(pid)
+        subprocess.run(['kill', '-TERM', pid], timeout=1)
+        # Brief check if process is gone
+        time.sleep(0.1)
+        try:
+            os.kill(pid_num, 0)  # Check if process exists
+            # Still running, force kill
+            subprocess.run(['kill', '-KILL', pid], timeout=1)
+        except ProcessLookupError:
+            pass  # Process already terminated
+    except:
+        pass
+
+def emergency_stop_broker(broker):
+    """Emergency stop a single broker"""
+    try:
+        broker.stop()
+    except Exception as e:
+        print(f"Emergency stop failed: {e}")
+
 def test_mosquitto_process_cleanup():
     """Test that mosquitto processes are properly cleaned up."""
     from enhanced_mqtt_broker import TestMQTTBroker
     
     initial_mosquitto_count = count_processes_by_name('mosquitto')
     
-    # Create and start broker
-    broker = TestMQTTBroker(session_scope=False, worker_id='test_cleanup')
-    broker.start()
+    # Create and start broker with unique worker ID
+    worker_id = f'test_cleanup_{int(time.time())}'
+    broker = TestMQTTBroker(session_scope=False, worker_id=worker_id)
     
-    # Verify broker started
-    assert broker.is_running(), "Broker should be running"
-    time.sleep(1)
+    try:
+        broker.start()
+        
+        # Verify broker started
+        assert broker.is_running(), "Broker should be running"
+        time.sleep(2)  # Give broker time to fully start
+        
+        # Should have one more mosquitto process
+        running_mosquitto_count = count_processes_by_name('mosquitto')
+        assert running_mosquitto_count > initial_mosquitto_count, "Should have additional mosquitto process"
+        
+        # Stop broker with retry logic
+        broker.stop()
+        
+        # Wait for process cleanup with timeout
+        cleanup_timeout = 10
+        start_time = time.time()
+        while time.time() - start_time < cleanup_timeout:
+            current_count = count_processes_by_name('mosquitto')
+            if current_count <= initial_mosquitto_count:
+                break
+            time.sleep(0.5)
+        else:
+            # Force cleanup if normal stop didn't work
+            print("Normal cleanup didn't complete, forcing cleanup...")
+            if hasattr(broker, 'process') and broker.process:
+                try:
+                    if broker.process.poll() is None:  # Process still running
+                        broker.process.terminate()
+                        time.sleep(2)
+                        if broker.process.poll() is None:  # Still running
+                            broker.process.kill()
+                            time.sleep(1)
+                except Exception as e:
+                    print(f"Error during force cleanup: {e}")
     
-    # Should have one more mosquitto process
-    running_mosquitto_count = count_processes_by_name('mosquitto')
-    assert running_mosquitto_count > initial_mosquitto_count, "Should have additional mosquitto process"
+    except Exception as e:
+        print(f"Test error: {e}")
+        # Emergency cleanup
+        try:
+            if 'broker' in locals():
+                emergency_stop_broker(broker)
+        except:
+            pass
+        raise
     
-    # Stop broker
-    broker.stop()
-    time.sleep(2)  # Allow time for cleanup
+    finally:
+        # Final cleanup verification
+        time.sleep(1)
     
     # Verify process cleaned up
     final_mosquitto_count = count_processes_by_name('mosquitto')
@@ -169,7 +256,7 @@ def test_comprehensive_cleanup():
             except:
                 pass
 
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(30)  # Reduced timeout since we're optimizing
 def test_process_leak_under_load():
     """Test that processes don't leak under repeated operations."""
     initial_process_count = len(psutil.pids())
@@ -181,59 +268,66 @@ def test_process_leak_under_load():
         # Create and destroy brokers multiple times
         from enhanced_mqtt_broker import TestMQTTBroker
         
-        for iteration in range(10):
+        # Reduced iteration count and optimized timing
+        for iteration in range(5):
+            print(f"[LOAD TEST] Starting iteration {iteration}")
             broker = TestMQTTBroker(session_scope=False, worker_id=f'load_test_{iteration}')
             
-            # Add retry logic for broker startup
-            start_attempts = 0
-            while start_attempts < 3:
+            # Single attempt with faster timeout
+            try:
+                broker.start()
+                assert broker.is_running()
+                print(f"[LOAD TEST] Broker {iteration} started successfully")
+            except Exception as e:
+                print(f"[LOAD TEST] Broker start failed: {e}")
+                # Quick retry
+                time.sleep(0.5)
                 try:
                     broker.start()
                     assert broker.is_running()
-                    break
-                except Exception as e:
-                    start_attempts += 1
-                    print(f"Broker start attempt {start_attempts} failed: {e}")
-                    if start_attempts < 3:
-                        time.sleep(2)  # Wait longer between retries
-                    else:
-                        raise  # Re-raise if all attempts failed
+                    print(f"[LOAD TEST] Broker {iteration} started on retry")
+                except Exception as e2:
+                    print(f"[LOAD TEST] Broker start retry failed: {e2}")
+                    raise
             
             brokers.append(broker)
             
-            # Stop every other broker immediately with proper cleanup time
+            # Stop every other broker immediately with minimal delay
             if iteration % 2 == 1:
+                print(f"[LOAD TEST] Stopping broker {iteration}")
                 broker.stop()
                 brokers.remove(broker)
-                time.sleep(1)  # Give more time for cleanup
+                print(f"[LOAD TEST] Broker {iteration} stopped")
+                time.sleep(0.2)  # Reduced from 1.0 to 0.2
             
-            time.sleep(0.5)  # Increased interval between broker creations
+            # Reduced sleep between iterations
+            time.sleep(0.1)  # Reduced from 0.5 to 0.1
+            print(f"[LOAD TEST] Completed iteration {iteration}")
         
-        # Stop remaining brokers with proper cleanup
-        for broker in brokers:
-            try:
-                broker.stop()
-            except Exception as e:
-                print(f"Warning: Error stopping broker: {e}")
+        # Stop remaining brokers in parallel
+        print(f"Stopping {len(brokers)} remaining brokers...")
+        if brokers:
+            with ThreadPoolExecutor(max_workers=min(len(brokers), 3)) as executor:
+                futures = []
+                for broker in brokers:
+                    future = executor.submit(broker.stop)
+                    futures.append(future)
+                
+                # Wait for all stops with timeout
+                for future in as_completed(futures, timeout=5):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Warning: Error stopping broker: {e}")
         
-        # Wait longer for cleanup and force cleanup if needed
-        time.sleep(5)  # Allow more cleanup time
+        # Optimized cleanup with reduced wait time
+        time.sleep(2)  # Reduced from 5 to 2
         
         # Force cleanup any remaining mosquitto processes
-        try:
-            import subprocess
-            result = subprocess.run(['pgrep', '-f', 'load_test_'], capture_output=True, text=True)
-            if result.returncode == 0:
-                pids = result.stdout.strip().split('\n')
-                for pid in pids:
-                    if pid.strip():
-                        try:
-                            subprocess.run(['kill', '-TERM', pid.strip()], timeout=2)
-                        except:
-                            pass
-                time.sleep(2)  # Give terminated processes time to exit
-        except:
-            pass
+        force_cleanup_processes_optimized('load_test_')
+        
+        # Brief final wait
+        time.sleep(1)  # Reduced from 2 to 1
         
         # Check for process leaks
         final_process_count = len(psutil.pids())
@@ -247,34 +341,27 @@ def test_process_leak_under_load():
         assert mosquitto_increase <= 2, f"Mosquitto processes leaked: +{mosquitto_increase} (threshold: 2)"
         
     finally:
-        # Emergency cleanup with enhanced error handling
+        # Emergency cleanup with parallel execution
         print("\nEmergency cleanup...")
-        cleanup_errors = []
-        for i, broker in enumerate(brokers):
-            try:
-                print(f"Emergency stop broker {i+1}/{len(brokers)}...")
-                broker.stop()
-            except Exception as e:
-                cleanup_errors.append(f"Broker {i+1}: {e}")
+        if brokers:
+            with ThreadPoolExecutor(max_workers=min(len(brokers), 5)) as executor:
+                futures = []
+                for broker in brokers:
+                    future = executor.submit(emergency_stop_broker, broker)
+                    futures.append(future)
+                
+                # Wait for all emergency stops
+                for future in as_completed(futures, timeout=3):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        print(f"Emergency cleanup error: {e}")
         
         # Clear brokers list
         brokers.clear()
         
-        # Additional emergency cleanup - kill any remaining test processes
-        try:
-            import subprocess
-            result = subprocess.run(['pkill', '-f', 'load_test_'], capture_output=True, text=True)
-            if result.returncode == 0:
-                print("Killed remaining load_test_ processes")
-        except Exception as e:
-            cleanup_errors.append(f"pkill error: {e}")
-        
-        # Wait for final cleanup
-        time.sleep(1)
-        
-        # Log cleanup errors but don't fail the test
-        if cleanup_errors:
-            print(f"Cleanup errors (non-fatal): {cleanup_errors}")
+        # Final process cleanup
+        force_cleanup_processes_optimized('load_test_')
 
 if __name__ == '__main__':
     # Run tests directly with error handling

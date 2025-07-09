@@ -64,13 +64,6 @@ class CameraDetectorConfig(ConfigBase):
             description="Unique service identifier"
         ),
         
-        # MQTT topic prefix
-        'topic_prefix': ConfigSchema(
-            str,
-            default="",
-            description="MQTT topic prefix for namespacing"
-        ),
-        
         # Camera discovery
         'discovery_interval': ConfigSchema(
             int,
@@ -338,7 +331,16 @@ class CameraDetector(MQTTService, ThreadSafeService):
         # Setup background tasks using BackgroundTaskRunner
         self._setup_background_tasks()
         
-        self.logger.info(f"Camera Detector initialized: {self.config.service_id}")
+        self.logger.info(f"Camera Detector configured: {self.config.service_id}")
+        
+        # Connect to MQTT after everything is initialized
+        # This prevents race conditions during startup
+        self.connect()
+        
+        # Start health reporting after MQTT connection
+        self.health_reporter.start_health_reporting()
+        
+        self.logger.info(f"Camera Detector fully initialized and connected: {self.config.service_id}")
         
     def _parse_credentials(self) -> List[Tuple[str, str]]:
         """Parse camera credentials from config."""
@@ -405,8 +407,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
             )
             self.mac_tracking_task.start()
             
-        # Start health reporting
-        self.health_reporter.start_health_reporting()
+        # Don't start health reporting here - it will be started after MQTT connection
         
     def _discovery_cycle(self):
         """Main discovery cycle."""
@@ -440,17 +441,35 @@ class CameraDetector(MQTTService, ThreadSafeService):
         
         # Check each camera in parallel
         futures = []
-        with self._thread_executor as executor:
-            for camera in cameras:
-                future = executor.submit(self._check_camera_health, camera)
-                futures.append(future)
+        
+        # Add shutdown check before using executor
+        if self._shutdown_event.is_set():
+            self.logger.debug("Health check cancelled - service shutting down")
+            return
+            
+        try:
+            with self._thread_executor as executor:
+                for camera in cameras:
+                    # Double-check shutdown before submitting each future
+                    if self._shutdown_event.is_set():
+                        self.logger.debug("Health check cancelled during submission - service shutting down")
+                        return
+                    future = executor.submit(self._check_camera_health, camera)
+                    futures.append(future)
+        except RuntimeError as e:
+            # Handle "cannot schedule new futures after shutdown" error
+            if "shutdown" in str(e).lower():
+                self.logger.debug("Health check cancelled - executor already shutdown")
+                return
+            else:
+                raise
                 
-            # Wait for all checks to complete
-            for future in concurrent.futures.as_completed(futures, timeout=30):
-                try:
-                    future.result()
-                except Exception as e:
-                    self.logger.error(f"Health check error: {e}")
+        # Wait for all checks to complete
+        for future in concurrent.futures.as_completed(futures, timeout=30):
+            try:
+                future.result()
+            except Exception as e:
+                self.logger.error(f"Health check error: {e}")
                     
     def _mac_tracking_cycle(self):
         """Update MAC address mappings."""

@@ -6,13 +6,13 @@ Provides proper CameraState instances with required config parameter.
 """
 import pytest
 from unittest.mock import Mock
-from fire_consensus.consensus import CameraState, Config
+from fire_consensus.consensus import CameraState, FireConsensusConfig
 
 
 @pytest.fixture
 def mock_config():
     """Create a mock Config object with default values for testing."""
-    config = Mock(spec=Config)
+    config = Mock(spec=FireConsensusConfig)
     config.CONSENSUS_THRESHOLD = 2
     config.TIME_WINDOW = 30.0
     config.MIN_CONFIDENCE = 0.7
@@ -31,9 +31,13 @@ def mock_config():
 def camera_state_factory(mock_config):
     """Factory fixture to create CameraState instances."""
     def _create_camera_state(camera_id="camera-001", config=None):
+        # CameraState doesn't take a config parameter
+        camera_state = CameraState(camera_id=camera_id)
+        # Attach config as an attribute for tests that need it
         if config is None:
             config = mock_config
-        return CameraState(camera_id=camera_id, config=config)
+        camera_state.config = config
+        return camera_state
     return _create_camera_state
 
 
@@ -52,9 +56,9 @@ def create_test_camera_state(camera_id="test-camera", **config_overrides):
         **config_overrides: Config attributes to override
         
     Returns:
-        CameraState instance
+        CameraState instance with config attached
     """
-    config = Mock(spec=Config)
+    config = Mock(spec=FireConsensusConfig)
     
     # Set defaults
     defaults = {
@@ -75,4 +79,7 @@ def create_test_camera_state(camera_id="test-camera", **config_overrides):
     for key, value in defaults.items():
         setattr(config, key, config_overrides.get(key, value))
     
-    return CameraState(camera_id=camera_id, config=config)
+    # Create CameraState and attach config
+    camera_state = CameraState(camera_id=camera_id)
+    camera_state.config = config
+    return camera_state

@@ -121,8 +121,9 @@ class MQTTService:
             retain=True
         )
         
-        # Start connection
-        self._connect_with_retry()
+        # Don't connect yet - let subclass decide when to connect
+        # This prevents race conditions during initialization
+        # self._connect_with_retry()
         
     def _setup_tls(self) -> None:
         """Configure TLS for MQTT connection."""
@@ -155,6 +156,12 @@ class MQTTService:
         if tls_insecure:
             self._mqtt_client.tls_insecure_set(True)
     
+    def connect(self) -> None:
+        """Connect to the MQTT broker and start the network loop."""
+        if self._mqtt_client and not self._shutdown:
+            self._safe_log('info', "Starting MQTT connection process...")
+            self._connect_with_retry()
+    
     def _connect_with_retry(self) -> None:
         """Connect to MQTT broker with exponential backoff."""
         self._reconnect_delay = 1.0  # Reset delay
@@ -163,7 +170,7 @@ class MQTTService:
             try:
                 mqtt_broker = getattr(self.config, 'mqtt_broker', self.config.get('MQTT_BROKER', 'localhost') if hasattr(self.config, 'get') else 'localhost')
                 mqtt_port = getattr(self.config, 'mqtt_port', self.config.get('MQTT_PORT', 1883) if hasattr(self.config, 'get') else 1883)
-                self.logger.info(f"Connecting to MQTT broker at {mqtt_broker}:{mqtt_port}")
+                self._safe_log('info', f"Connecting to MQTT broker at {mqtt_broker}:{mqtt_port}")
                 self._mqtt_client.connect(
                     mqtt_broker,
                     mqtt_port,
@@ -172,8 +179,8 @@ class MQTTService:
                 self._mqtt_client.loop_start()
                 break
             except Exception as e:
-                self.logger.error(f"MQTT connection failed: {e}")
-                self.logger.info(f"Retrying in {self._reconnect_delay}s...")
+                self._safe_log('error', f"MQTT connection failed: {e}")
+                self._safe_log('info', f"Retrying in {self._reconnect_delay}s...")
                 time.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(
                     self._reconnect_delay * 2,
@@ -183,7 +190,7 @@ class MQTTService:
     def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Handle MQTT connection events."""
         if rc == 0:
-            self.logger.info("Connected to MQTT broker")
+            self._safe_log('info', "Connected to MQTT broker")
             with self._mqtt_lock:
                 self._mqtt_connected = True
                 self._reconnect_delay = 1.0  # Reset delay on success
@@ -196,7 +203,7 @@ class MQTTService:
             for topic in self._subscriptions:
                 formatted_topic = self._format_topic(topic)
                 client.subscribe(formatted_topic)
-                self.logger.debug(f"Subscribed to {formatted_topic}")
+                self._safe_log('debug', f"Subscribed to {formatted_topic}")
             
             # Process offline queue if enabled
             if self._offline_queue_enabled:
@@ -206,19 +213,42 @@ class MQTTService:
             if self._on_connect_callback:
                 self._on_connect_callback(client, userdata, flags, rc)
         else:
-            self.logger.error(f"Failed to connect to MQTT broker: {mqtt.error_string(rc)}")
+            self._safe_log('error', f"Failed to connect to MQTT broker: {mqtt.error_string(rc)}")
             with self._mqtt_lock:
                 self._mqtt_connected = False
     
-    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None):
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks."""
+        try:
+            logger = getattr(self, 'logger', None)
+            if not logger:
+                return
+                
+            # Check if logger has handlers and they're not closed
+            if not hasattr(logger, 'handlers') or not logger.handlers:
+                return
+                
+            # Check each handler to ensure it's not closed
+            for handler in logger.handlers:
+                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+                    if handler.stream.closed:
+                        return
+                        
+            # Log the message
+            getattr(logger, level.lower())(message, exc_info=exc_info)
+        except (ValueError, AttributeError, OSError):
+            # Silently ignore logging errors during shutdown
+            pass
+
+    def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """Handle MQTT disconnection events."""
         with self._mqtt_lock:
             self._mqtt_connected = False
         
         if rc != 0:
-            self.logger.warning(f"Unexpected MQTT disconnection: {mqtt.error_string(rc)}")
+            self._safe_log('warning', f"Unexpected MQTT disconnection: {mqtt.error_string(rc)}")
             if not self._shutdown:
-                self.logger.info("Attempting to reconnect...")
+                self._safe_log('info', "Attempting to reconnect...")
                 threading.Thread(target=self._connect_with_retry, daemon=True).start()
     
     def _on_mqtt_message(self, client, userdata, msg):
@@ -240,7 +270,7 @@ class MQTTService:
                 self._on_message_callback(topic, payload)
                 
         except Exception as e:
-            self.logger.error(f"Error processing message on {msg.topic}: {e}")
+            self._safe_log('error', f"Error processing message on {msg.topic}: {e}")
     
     def _format_topic(self, topic: str) -> str:
         """Format topic with prefix if configured.
@@ -252,6 +282,9 @@ class MQTTService:
             Formatted topic with prefix
         """
         if self._topic_prefix:
+            # Ensure proper separator between prefix and topic
+            if not self._topic_prefix.endswith('/'):
+                return f"{self._topic_prefix}/{topic}"
             return f"{self._topic_prefix}{topic}"
         return topic
     
@@ -275,12 +308,12 @@ class MQTTService:
                 if queue_if_offline and self._offline_queue_enabled:
                     if len(self._offline_queue) < self._max_offline_queue_size:
                         self._offline_queue.append((topic, payload, retain, qos))
-                        self.logger.debug(f"Queued message for {topic} (queue size: {len(self._offline_queue)})")
+                        self._safe_log('debug', f"Queued message for {topic} (queue size: {len(self._offline_queue)})")
                         return True
                     else:
-                        self.logger.warning(f"Offline queue full, dropping message for {topic}")
+                        self._safe_log('warning', f"Offline queue full, dropping message for {topic}")
                 else:
-                    self.logger.warning(f"Cannot publish to {topic} - not connected")
+                    self._safe_log('warning', f"Cannot publish to {topic} - not connected")
                 return False
             
             full_topic = self._format_topic(topic)
@@ -302,14 +335,15 @@ class MQTTService:
                 )
                 
                 if result.rc == mqtt.MQTT_ERR_SUCCESS:
-                    self.logger.debug(f"Published to {full_topic}")
+                    self._safe_log('debug', f"Published to {full_topic}")
+                    self._safe_log('info', f"[MQTT DEBUG] Successfully published to full topic: '{full_topic}' (prefix: '{self._topic_prefix}')")
                     return True
                 else:
-                    self.logger.error(f"Failed to publish to {full_topic}: {mqtt.error_string(result.rc)}")
+                    self._safe_log('error', f"Failed to publish to {full_topic}: {mqtt.error_string(result.rc)}")
                     return False
                     
             except Exception as e:
-                self.logger.error(f"Exception publishing to {full_topic}: {e}")
+                self._safe_log('error', f"Exception publishing to {full_topic}: {e}")
                 return False
     
     def enable_offline_queue(self, max_size: int = 100) -> None:
@@ -320,14 +354,14 @@ class MQTTService:
         """
         self._offline_queue_enabled = True
         self._max_offline_queue_size = max_size
-        self.logger.info(f"Offline message queuing enabled (max size: {max_size})")
+        self._safe_log('info', f"Offline message queuing enabled (max size: {max_size})")
     
     def _process_offline_queue(self) -> None:
         """Process queued messages after reconnection."""
         if not self._offline_queue:
             return
         
-        self.logger.info(f"Processing {len(self._offline_queue)} queued messages")
+        self._safe_log('info', f"Processing {len(self._offline_queue)} queued messages")
         
         # Copy and clear queue
         with self._mqtt_lock:
@@ -340,20 +374,31 @@ class MQTTService:
     
     def shutdown(self) -> None:
         """Gracefully shutdown MQTT connection."""
-        self.logger.info(f"Shutting down {self.service_name} MQTT service")
+        self._safe_log('info', f"Shutting down {self.service_name} MQTT service")
         self._shutdown = True
         
         if self._mqtt_client:
-            # Publish offline status
-            lwt_topic = self._format_topic(f"system/{self.service_name}/lwt")
-            self._mqtt_client.publish(lwt_topic, "offline", qos=1, retain=True)
-            
-            # Stop loop and disconnect
-            self._mqtt_client.loop_stop()
-            self._mqtt_client.disconnect()
+            try:
+                # Publish offline status
+                lwt_topic = self._format_topic(f"system/{self.service_name}/lwt")
+                self._mqtt_client.publish(lwt_topic, "offline", qos=1, retain=True)
+                
+                # Give a brief moment for any pending callbacks to complete
+                import time
+                time.sleep(0.1)
+                
+                # Stop loop and disconnect
+                self._mqtt_client.loop_stop()
+                self._mqtt_client.disconnect()
+                
+                # Give another brief moment for disconnection to complete
+                time.sleep(0.1)
+                
+            except Exception as e:
+                self._safe_log('error', f"Error during MQTT shutdown: {e}")
         
         self._mqtt_connected = False
-        self.logger.info(f"{self.service_name} MQTT service shutdown complete")
+        self._safe_log('info', f"{self.service_name} MQTT service shutdown complete")
     
     @property
     def is_connected(self) -> bool:

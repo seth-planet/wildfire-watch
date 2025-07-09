@@ -59,9 +59,11 @@ class DockerIntegrationTest:
                         print(f"✓ Built {service}")
                     else:
                         print(f"Failed to build {service}: {result.stderr}")
-                        # Try direct docker build as fallback
+                        # Try direct docker build as fallback with correct context
+                        dockerfile_relative = os.path.join(service, 'Dockerfile')
                         self.docker_client.images.build(
-                            path=dockerfile_path,
+                            path=project_root,  # Use project root as context
+                            dockerfile=dockerfile_relative,
                             tag=f"wildfire-watch/{service}:test",
                             rm=True
                         )
@@ -104,12 +106,12 @@ class DockerIntegrationTest:
         # Create mosquitto config that listens on all interfaces
         mosquitto_config = "listener 1883 0.0.0.0\nallow_anonymous true\n"
         
-        # Create and start container with custom config
+        # Create and start container with custom config using dynamic port
         container = self.docker_client.containers.run(
             "eclipse-mosquitto:latest",
             name=container_name,
             network=self.network.name,
-            ports={'1883/tcp': 11883},
+            ports={'1883/tcp': None},  # Use dynamic port allocation
             detach=True,
             remove=False,
             command=[
@@ -121,13 +123,24 @@ class DockerIntegrationTest:
         
         self.containers['mqtt'] = container
         
+        # Get the dynamically allocated port
+        container.reload()  # Refresh container info to get port mapping
+        port_info = container.attrs['NetworkSettings']['Ports']['1883/tcp']
+        if port_info and len(port_info) > 0:
+            self.mqtt_port = int(port_info[0]['HostPort'])
+        else:
+            print("ERROR: Could not get MQTT container port")
+            return False
+        
+        print(f"MQTT broker started on port {self.mqtt_port}")
+        
         # Wait for MQTT to be ready
         time.sleep(3)
         
         # Test connection
         try:
             client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test")
-            client.connect("localhost", 11883, 60)
+            client.connect("localhost", self.mqtt_port, 60)
             client.disconnect()
             print("✓ MQTT broker ready")
             return True
@@ -181,18 +194,23 @@ RUN apt-get update && \
         && rm -rf /var/lib/apt/lists/*
 
 # Configure mDNS resolution
-COPY nsswitch.conf /etc/nsswitch.conf
+COPY fire_consensus/nsswitch.conf /etc/nsswitch.conf
 
 # For testing, run as root to allow D-Bus and Avahi
 WORKDIR /app
 
+# Copy utils module from root context
+COPY utils /utils
+# Add root to Python path so utils can be imported
+ENV PYTHONPATH=/
+
 # Install Python dependencies
-COPY requirements.txt .
+COPY fire_consensus/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY consensus.py .
-COPY test_entrypoint.sh /entrypoint.sh
+COPY fire_consensus/consensus.py .
+COPY fire_consensus/test_entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
@@ -204,11 +222,12 @@ CMD ["python3.12", "-u", "consensus.py"]
             with open(test_dockerfile_path, 'w') as f:
                 f.write(test_dockerfile)
             
-            # Build image with test Dockerfile
+            # Build image with test Dockerfile using project root context
+            dockerfile_relative = os.path.join('fire_consensus', 'Dockerfile.test')
             image, _ = self.docker_client.images.build(
-                path=consensus_path,
-                dockerfile='Dockerfile.test',
-                tag="wildfire-consensus:test",
+                path=project_root,  # Use project root as build context
+                dockerfile=dockerfile_relative,
+                tag="wildfire-watch/fire_consensus:test",
                 rm=True
             )
             
@@ -227,7 +246,7 @@ CMD ["python3.12", "-u", "consensus.py"]
             
             # Start container
             container = self.docker_client.containers.run(
-                "wildfire-consensus:test",
+                "wildfire-watch/fire_consensus:test",
                 name=consensus_container_name,
                 network=self.network.name,
                 environment={
@@ -290,14 +309,14 @@ CMD ["python3.12", "-u", "consensus.py"]
                 
         monitor = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "monitor")
         monitor.on_message = on_message
-        monitor.connect("localhost", 11883)
+        monitor.connect("localhost", self.mqtt_port)
         monitor.subscribe("#", qos=0)  # Subscribe to all topics for debugging
         monitor.loop_start()
         
         # 6. Send camera telemetry first
         print("Sending camera telemetry...")
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "publisher")
-        publisher.connect("localhost", 11883)
+        publisher.connect("localhost", self.mqtt_port)
         
         # Send telemetry for two cameras
         for camera_id in ['docker_test_cam1', 'docker_test_cam2']:
@@ -322,7 +341,7 @@ CMD ["python3.12", "-u", "consensus.py"]
                     'object_type': 'fire',  # Fixed key name
                     'object_id': f'{camera_id}_fire_1',
                     'confidence': 0.85,
-                    'bounding_box': [0.1, 0.1, 0.2, 0.2],  # Small initial fire
+                    'bbox': [0.1, 0.1, 0.2, 0.2],  # Small initial fire
                     'timestamp': time.time()
                 }
                 publisher.publish(f'fire/detection/{camera_id}', json.dumps(detection), qos=1)
@@ -338,7 +357,7 @@ CMD ["python3.12", "-u", "consensus.py"]
                     'object_type': 'fire',
                     'object_id': f'{camera_id}_fire_1',
                     'confidence': 0.85,
-                    'bounding_box': [0.1, 0.1, 0.1 + size, 0.1 + size],  # Growing bbox
+                    'bbox': [0.1, 0.1, 0.1 + size, 0.1 + size],  # Growing bbox
                     'timestamp': time.time()
                 }
                 publisher.publish(f'fire/detection/{camera_id}', json.dumps(detection), qos=1)
@@ -380,7 +399,6 @@ CMD ["python3.12", "-u", "consensus.py"]
 @pytest.mark.slow
 @pytest.mark.docker
 @pytest.mark.integration
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_docker_integration(parallel_test_context, docker_container_manager):
     """Test Docker container integration"""
     import docker

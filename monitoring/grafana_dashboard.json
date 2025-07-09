@@ -1,0 +1,348 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "wildfire-watch-refactored",
+    "title": "Wildfire Watch - Refactored Services",
+    "tags": ["wildfire", "mqtt", "iot"],
+    "timezone": "browser",
+    "schemaVersion": 30,
+    "version": 1,
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "gridPos": {"x": 0, "y": 0, "w": 24, "h": 3},
+        "type": "text",
+        "title": "Service Health Overview",
+        "options": {
+          "content": "## Wildfire Watch - Refactored Services Dashboard\n\nMonitoring health topics for all refactored services. Services publish to both standard (`system/{service}/health`) and legacy topics during migration.",
+          "mode": "markdown"
+        }
+      },
+      {
+        "id": 2,
+        "gridPos": {"x": 0, "y": 3, "w": 8, "h": 8},
+        "type": "stat",
+        "title": "Camera Detector Status",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"value\") FROM \"mqtt_consumer\" WHERE (\"topic\" = 'system/camera_detector/health') AND $timeFilter",
+            "alias": "Health Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "null",
+                "text": "OFFLINE"
+              },
+              {
+                "type": "range",
+                "from": 0,
+                "to": 0.5,
+                "text": "ERROR"
+              },
+              {
+                "type": "range",
+                "from": 0.5,
+                "to": 1,
+                "text": "HEALTHY"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 0.5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "gridPos": {"x": 8, "y": 3, "w": 8, "h": 8},
+        "type": "stat",
+        "title": "Fire Consensus Status",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"value\") FROM \"mqtt_consumer\" WHERE (\"topic\" = 'system/fire_consensus/health') AND $timeFilter",
+            "alias": "Health Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "null",
+                "text": "OFFLINE"
+              },
+              {
+                "type": "range",
+                "from": 0,
+                "to": 0.5,
+                "text": "ERROR"
+              },
+              {
+                "type": "range",
+                "from": 0.5,
+                "to": 1,
+                "text": "HEALTHY"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "red", "value": 0},
+                {"color": "green", "value": 0.5}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "gridPos": {"x": 16, "y": 3, "w": 8, "h": 8},
+        "type": "stat",
+        "title": "GPIO Trigger Status",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"value\") FROM \"mqtt_consumer\" WHERE (\"topic\" = 'system/gpio_trigger/health' OR \"topic\" = 'system/trigger_telemetry') AND $timeFilter",
+            "alias": "Health Status"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "null",
+                "text": "OFFLINE"
+              },
+              {
+                "type": "value",
+                "value": "IDLE",
+                "text": "IDLE"
+              },
+              {
+                "type": "value",
+                "value": "RUNNING",
+                "text": "RUNNING"
+              },
+              {
+                "type": "value",
+                "value": "ERROR",
+                "text": "ERROR"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 0}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "gridPos": {"x": 0, "y": 11, "w": 12, "h": 8},
+        "type": "graph",
+        "title": "MQTT Message Rate",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT count(\"value\") FROM \"mqtt_consumer\" WHERE (\"topic\" =~ /system\\/.+\\/health/) AND $timeFilter GROUP BY time(10s), \"topic\" fill(null)",
+            "alias": "$tag_topic"
+          }
+        ],
+        "yaxes": [
+          {
+            "label": "Messages/10s",
+            "format": "short",
+            "show": true
+          },
+          {
+            "show": false
+          }
+        ],
+        "xaxis": {
+          "show": true
+        }
+      },
+      {
+        "id": 6,
+        "gridPos": {"x": 12, "y": 11, "w": 12, "h": 8},
+        "type": "graph",
+        "title": "Service Reconnections",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT count(\"value\") FROM \"mqtt_consumer\" WHERE (\"topic\" =~ /system\\/.+\\/lwt/ AND \"value\" = 'online') AND $timeFilter GROUP BY time(1m), \"topic\" fill(0)",
+            "alias": "$tag_topic reconnections"
+          }
+        ],
+        "yaxes": [
+          {
+            "label": "Reconnections/min",
+            "format": "short",
+            "show": true
+          },
+          {
+            "show": false
+          }
+        ],
+        "xaxis": {
+          "show": true
+        }
+      },
+      {
+        "id": 7,
+        "gridPos": {"x": 0, "y": 19, "w": 24, "h": 8},
+        "type": "table",
+        "title": "Recent Health Messages",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"state\") as \"State\", last(\"cameras_discovered\") as \"Cameras\", last(\"consensus_threshold\") as \"Threshold\", last(\"gpio_available\") as \"GPIO\", last(\"engine_on\") as \"Engine\" FROM \"mqtt_consumer\" WHERE (\"topic\" =~ /system\\/.+\\/health/) AND $timeFilter GROUP BY \"topic\"",
+            "format": "table"
+          }
+        ],
+        "options": {
+          "showHeader": true
+        }
+      },
+      {
+        "id": 8,
+        "gridPos": {"x": 0, "y": 27, "w": 8, "h": 6},
+        "type": "stat",
+        "title": "Fire Detection Active",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"active\") FROM \"mqtt_consumer\" WHERE (\"topic\" = 'fire/status') AND $timeFilter",
+            "alias": "Fire Detected"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "null",
+                "text": "NO FIRE"
+              },
+              {
+                "type": "value",
+                "value": "0",
+                "text": "NO FIRE"
+              },
+              {
+                "type": "value",
+                "value": "1",
+                "text": "FIRE DETECTED"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "green", "value": 0},
+                {"color": "red", "value": 1}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "gridPos": {"x": 8, "y": 27, "w": 8, "h": 6},
+        "type": "stat",
+        "title": "Pump State",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"state\") FROM \"mqtt_consumer\" WHERE (\"topic\" = 'system/gpio_trigger/health' OR \"topic\" = 'system/trigger_telemetry') AND $timeFilter",
+            "alias": "Pump State"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {
+                "type": "value",
+                "value": "IDLE",
+                "text": "IDLE",
+                "color": "green"
+              },
+              {
+                "type": "value",
+                "value": "RUNNING",
+                "text": "RUNNING",
+                "color": "blue"
+              },
+              {
+                "type": "value",
+                "value": "REFILLING",
+                "text": "REFILLING",
+                "color": "yellow"
+              },
+              {
+                "type": "value",
+                "value": "ERROR",
+                "text": "ERROR",
+                "color": "red"
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 10,
+        "gridPos": {"x": 16, "y": 27, "w": 8, "h": 6},
+        "type": "gauge",
+        "title": "Total Runtime",
+        "targets": [
+          {
+            "refId": "A",
+            "measurement": "mqtt_consumer",
+            "query": "SELECT last(\"total_runtime\") FROM \"mqtt_consumer\" WHERE (\"topic\" = 'system/gpio_trigger/health' OR \"topic\" = 'system/trigger_telemetry') AND $timeFilter",
+            "alias": "Runtime"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "max": 3600,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": 0},
+                {"color": "yellow", "value": 1200},
+                {"color": "red", "value": 1800}
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

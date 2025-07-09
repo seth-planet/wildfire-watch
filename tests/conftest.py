@@ -11,21 +11,38 @@ import multiprocessing
 # Fix super-gradients logging issues that cause hanging during test teardown
 try:
     import logging
-    # Prevent super-gradients from interfering with test teardown
-    logging.getLogger("super_gradients").setLevel(logging.CRITICAL)
-    logging.getLogger("super_gradients").propagate = False
-except:
-    pass
+    # Import safe logging to prevent I/O on closed file errors
+    from safe_logging import disable_problem_loggers, cleanup_test_logging
+    disable_problem_loggers()
+except ImportError:
+    # Fallback if safe_logging not available
+    try:
+        import logging
+        # Prevent super-gradients from interfering with test teardown
+        logging.getLogger("super_gradients").setLevel(logging.CRITICAL)
+        logging.getLogger("super_gradients").propagate = False
+    except:
+        pass
 
 # Import enhanced process cleanup
 try:
+    # Try enhanced version first
     from enhanced_process_cleanup import get_process_cleaner, cleanup_on_test_failure
 except ImportError:
-    # Fallback if cleanup module not available
-    def get_process_cleaner():
-        return None
-    def cleanup_on_test_failure():
-        pass
+    try:
+        # Fallback to basic version
+        from process_cleanup import ProcessCleaner
+        def get_process_cleaner():
+            return ProcessCleaner()
+        def cleanup_on_test_failure():
+            cleaner = ProcessCleaner()
+            cleaner.cleanup_all()
+    except ImportError:
+        # Fallback if cleanup module not available
+        def get_process_cleaner():
+            return None
+        def cleanup_on_test_failure():
+            pass
 
 def has_coral_tpu():
     """Check if Coral TPU is available"""
@@ -219,6 +236,29 @@ def test_mqtt_tls_broker(tmp_path):
 # Session cleanup hooks for parallel test isolation
 # ─────────────────────────────────────────────────────────────
 
+def pytest_sessionstart(session):
+    """Clean up any leftover containers before starting tests"""
+    import subprocess
+    
+    print("Pre-test cleanup: removing any leftover test containers...")
+    
+    try:
+        # Clean up any containers with our test labels
+        result = subprocess.run(['docker', 'ps', '-aq', '--filter', 'label=com.wildfire.test=true'], 
+                              capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            container_ids = result.stdout.strip().split('\n')
+            for container_id in container_ids:
+                if container_id.strip():
+                    try:
+                        subprocess.run(['docker', 'rm', '-f', container_id.strip()], timeout=5)
+                        print(f"Removed leftover test container {container_id}")
+                    except:
+                        pass
+    except Exception as e:
+        print(f"Warning: Error in pre-test cleanup: {e}")
+
+
 def pytest_sessionfinish(session, exitstatus):
     """Clean up all test resources at session end"""
     import subprocess
@@ -226,14 +266,19 @@ def pytest_sessionfinish(session, exitstatus):
     import sys
     import os
     
-    # Prevent super-gradients from writing to closed file handles during teardown
+    # Clean up all test logging to prevent I/O on closed file errors
     try:
-        # Redirect super-gradients output to null to prevent hanging
-        import logging
-        logging.getLogger("super_gradients").handlers.clear()
-        logging.getLogger("super_gradients").addHandler(logging.NullHandler())
-    except:
-        pass
+        from safe_logging import cleanup_test_logging
+        cleanup_test_logging()
+    except ImportError:
+        # Fallback: Prevent super-gradients from writing to closed file handles during teardown
+        try:
+            # Redirect super-gradients output to null to prevent hanging
+            import logging
+            logging.getLogger("super_gradients").handlers.clear()
+            logging.getLogger("super_gradients").addHandler(logging.NullHandler())
+        except:
+            pass
     
     # Import here to avoid circular dependencies
     sys.path.insert(0, os.path.dirname(__file__))

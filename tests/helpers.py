@@ -485,32 +485,77 @@ class DockerContainerManager:
         self.created_networks = []
         self.created_images = []
     
-    def cleanup_old_container(self, container_name: str, timeout: int = 5) -> None:
+    def cleanup_old_container(self, container_name: str, timeout: int = 5, retry_count: int = 3) -> None:
         """
-        Remove old container if it exists.
+        Remove old container if it exists with improved error handling and retries.
         
         Args:
             container_name: Name of the container to remove
             timeout: Timeout for stopping the container
+            retry_count: Number of retries for removal operations
         """
-        try:
-            old_container = self.client.containers.get(container_name)
-            print(f"  Removing old container: {container_name}")
-            old_container.stop(timeout=timeout)
-            old_container.remove()
-            time.sleep(2)
-        except docker.errors.NotFound:
-            pass
-        except docker.errors.APIError as e:
-            # Handle race condition where container is already being removed
-            if "removal of container" in str(e) and "already in progress" in str(e):
-                print(f"  Container {container_name} already being removed by another process")
-                # Wait a bit for the other process to finish
-                time.sleep(3)
-            else:
-                print(f"  Warning: Error removing old container: {e}")
-        except Exception as e:
-            print(f"  Warning: Error removing old container: {e}")
+        for attempt in range(retry_count):
+            try:
+                old_container = self.client.containers.get(container_name)
+                print(f"  Removing old container: {container_name} (attempt {attempt + 1})")
+                
+                # Stop container if running
+                if old_container.status == 'running':
+                    old_container.stop(timeout=timeout)
+                    
+                # Remove container
+                old_container.remove(force=True)
+                
+                # Wait and verify removal
+                time.sleep(1)
+                
+                # Verify container is actually removed
+                try:
+                    self.client.containers.get(container_name)
+                    # Container still exists, continue trying
+                    if attempt < retry_count - 1:
+                        print(f"    Container still exists after removal, retrying...")
+                        time.sleep(2)
+                        continue
+                except docker.errors.NotFound:
+                    # Successfully removed
+                    print(f"    Successfully removed container: {container_name}")
+                    return
+                    
+            except docker.errors.NotFound:
+                # Container doesn't exist, we're done
+                return
+            except docker.errors.APIError as e:
+                # Handle specific API errors
+                if "removal of container" in str(e) and "already in progress" in str(e):
+                    print(f"    Container {container_name} already being removed by another process")
+                    # Wait for the other process to finish
+                    for wait_attempt in range(10):  # Wait up to 10 seconds
+                        time.sleep(1)
+                        try:
+                            self.client.containers.get(container_name)
+                        except docker.errors.NotFound:
+                            print(f"    Container removal completed by other process")
+                            return
+                    # If we get here, removal is taking too long
+                    if attempt < retry_count - 1:
+                        print(f"    Removal taking too long, retrying...")
+                        continue
+                elif "No such container" in str(e):
+                    # Container doesn't exist
+                    return
+                else:
+                    print(f"    API error removing container: {e}")
+                    if attempt < retry_count - 1:
+                        time.sleep(2)
+                        continue
+            except Exception as e:
+                print(f"    Error removing container: {e}")
+                if attempt < retry_count - 1:
+                    time.sleep(2)
+                    continue
+                    
+        print(f"  Warning: Could not remove container {container_name} after {retry_count} attempts")
     
     def build_image_if_needed(self, image_tag: str, dockerfile_path: str, 
                              build_context: str = None) -> None:
@@ -566,6 +611,16 @@ class DockerContainerManager:
             # Merge name into config
             config['name'] = name
             config['image'] = image
+            
+            # Add label for cleanup identification
+            config.setdefault('labels', {})
+            config['labels']['com.wildfire.test'] = 'true'
+            
+            # Add resource limits if not already specified
+            if 'mem_limit' not in config:
+                config['mem_limit'] = '512m'
+            if 'cpu_quota' not in config:
+                config['cpu_quota'] = 50000  # 50% of one CPU
             
             container = self.client.containers.run(**config)
             self.created_containers.append(container)
@@ -695,59 +750,179 @@ class DockerContainerManager:
         self.created_networks.append(network)
         return network
     
-    def cleanup(self):
-        """Clean up all created resources."""
+    def cleanup(self, force: bool = False):
+        """Clean up all created resources with improved error handling."""
         import logging
         logger = logging.getLogger(__name__)
         
-        # Stop and remove containers
-        for container in self.created_containers:
+        # Stop and remove containers with better error handling
+        for container in self.created_containers[:]:  # Create copy to avoid modification during iteration
+            container_name = "unknown"
             try:
                 if isinstance(container, str):
+                    container_name = container
                     try:
                         container = self.client.containers.get(container)
                     except docker.errors.NotFound:
+                        # Container already removed, remove from list
+                        try:
+                            self.created_containers.remove(container_name)
+                        except ValueError:
+                            pass
                         continue
+                else:
+                    container_name = getattr(container, 'name', 'unknown')
+                
+                # Reload container status
+                try:
+                    container.reload()
+                except docker.errors.NotFound:
+                    # Container no longer exists
+                    try:
+                        self.created_containers.remove(container)
+                    except ValueError:
+                        pass
+                    continue
                         
                 # Force stop with shorter timeout
                 if container.status == 'running':
-                    container.stop(timeout=5)
-                    logger.debug(f"Stopped container {container.name}")
+                    try:
+                        container.stop(timeout=3)
+                        logger.debug(f"Stopped container {container_name}")
+                    except Exception as e:
+                        logger.debug(f"Error stopping container {container_name}: {e}")
+                        if force:
+                            try:
+                                container.kill()
+                                logger.debug(f"Force killed container {container_name}")
+                            except Exception:
+                                pass
                     
-                # Remove container
-                container.remove(force=True)
-                logger.debug(f"Removed container {container.name}")
+                # Remove container with retry logic
+                removal_success = False
+                for attempt in range(3):
+                    try:
+                        container.remove(force=True)
+                        logger.debug(f"Removed container {container_name}")
+                        removal_success = True
+                        break
+                    except docker.errors.APIError as e:
+                        if "removal of container" in str(e) and "already in progress" in str(e):
+                            logger.debug(f"Container {container_name} removal already in progress")
+                            # Wait for completion
+                            for wait_attempt in range(5):
+                                time.sleep(1)
+                                try:
+                                    self.client.containers.get(container_name)
+                                except docker.errors.NotFound:
+                                    logger.debug(f"Container {container_name} removal completed")
+                                    removal_success = True
+                                    break
+                            if removal_success:
+                                break
+                        elif "No such container" in str(e):
+                            removal_success = True
+                            break
+                        else:
+                            logger.debug(f"Attempt {attempt + 1}: Error removing container {container_name}: {e}")
+                            if attempt < 2:
+                                time.sleep(1)
+                    except docker.errors.NotFound:
+                        removal_success = True
+                        break
+                    except Exception as e:
+                        logger.debug(f"Attempt {attempt + 1}: Error removing container {container_name}: {e}")
+                        if attempt < 2:
+                            time.sleep(1)
+                
+                if not removal_success:
+                    logger.warning(f"Could not remove container {container_name} after 3 attempts")
+                
+                # Remove from tracking list
+                try:
+                    self.created_containers.remove(container)
+                except ValueError:
+                    pass
                 
             except docker.errors.NotFound:
-                pass  # Container already removed
-            except docker.errors.APIError as e:
-                # Handle race condition where container is already being removed
-                if "removal of container" in str(e) and "already in progress" in str(e):
-                    logger.debug(f"Container {getattr(container, 'name', 'unknown')} already being removed by another process")
-                else:
-                    logger.warning(f"Error cleaning up container: {e}")
+                # Container already removed, remove from list
+                try:
+                    self.created_containers.remove(container)
+                except ValueError:
+                    pass
             except Exception as e:
-                logger.warning(f"Error cleaning up container: {e}")
+                logger.warning(f"Error cleaning up container {container_name}: {e}")
         
         # Clear the list
         self.created_containers.clear()
         
-        # Remove networks
-        for network in self.created_networks:
+        # Remove networks with better error handling
+        for network in self.created_networks[:]:  # Create copy
+            network_name = "unknown"
             try:
                 if isinstance(network, str):
+                    network_name = network
                     try:
                         network = self.client.networks.get(network)
                     except docker.errors.NotFound:
+                        try:
+                            self.created_networks.remove(network_name)
+                        except ValueError:
+                            pass
                         continue
-                        
-                network.remove()
-                logger.debug(f"Removed network {network.name}")
+                else:
+                    network_name = getattr(network, 'name', 'unknown')
+                
+                # Disconnect containers from network first
+                try:
+                    network.reload()
+                    for container in network.containers:
+                        try:
+                            network.disconnect(container, force=True)
+                            logger.debug(f"Disconnected container {container.name} from network {network_name}")
+                        except Exception as e:
+                            logger.debug(f"Error disconnecting container from network: {e}")
+                except Exception as e:
+                    logger.debug(f"Error preparing network {network_name} for removal: {e}")
+                
+                # Remove network with retry
+                for attempt in range(3):
+                    try:
+                        network.remove()
+                        logger.debug(f"Removed network {network_name}")
+                        break
+                    except docker.errors.APIError as e:
+                        if "has active endpoints" in str(e):
+                            logger.debug(f"Network {network_name} has active endpoints, retrying...")
+                            if attempt < 2:
+                                time.sleep(2)
+                                continue
+                        elif "not found" in str(e).lower():
+                            break  # Network already removed
+                        else:
+                            logger.debug(f"Error removing network {network_name}: {e}")
+                            if attempt < 2:
+                                time.sleep(1)
+                    except docker.errors.NotFound:
+                        break  # Network already removed
+                    except Exception as e:
+                        logger.debug(f"Error removing network {network_name}: {e}")
+                        if attempt < 2:
+                            time.sleep(1)
+                
+                # Remove from tracking list
+                try:
+                    self.created_networks.remove(network)
+                except ValueError:
+                    pass
                 
             except docker.errors.NotFound:
-                pass  # Network already removed
+                try:
+                    self.created_networks.remove(network)
+                except ValueError:
+                    pass
             except Exception as e:
-                logger.warning(f"Error cleaning up network: {e}")
+                logger.warning(f"Error cleaning up network {network_name}: {e}")
         
         # Clear the list
         self.created_networks.clear()

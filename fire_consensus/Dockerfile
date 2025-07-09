@@ -19,7 +19,7 @@ RUN useradd -m -s /bin/bash consensus && \
 
 WORKDIR /app
 
-# Copy utils module
+# Copy utils module (context is project root)
 COPY utils /utils
 # Add root to Python path so utils can be imported
 ENV PYTHONPATH=/
@@ -33,8 +33,8 @@ COPY fire_consensus/consensus.py .
 COPY fire_consensus/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# Switch to non-root user
-USER consensus
+# Don't switch to non-root user - needed for Avahi daemon
+# USER consensus
 
 # Health check for container monitoring
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \

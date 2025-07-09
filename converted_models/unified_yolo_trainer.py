@@ -21,7 +21,7 @@ import subprocess
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from tmp.fix_class_index_cuda import create_safe_dataloader
+from converted_models.class_index_fixer import YOLONASDataLoaderFixer
 
 # Setup logging
 def setup_logging(output_dir: Path, log_level: str = "INFO") -> logging.Logger:

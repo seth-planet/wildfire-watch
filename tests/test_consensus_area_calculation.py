@@ -24,10 +24,12 @@ class TestConsensusAreaCalculation(unittest.TestCase):
         # Create a test config
         self.config = FireConsensusConfig()
         
-        # Create consensus instance with mocked MQTT
-        with patch('fire_consensus.consensus.FireConsensus._setup_mqtt'):
+        # Create consensus instance with mocked MQTT connection
+        with patch('fire_consensus.consensus.FireConsensus.connect'), \
+             patch('fire_consensus.consensus.FireConsensus.setup_mqtt'):
             self.consensus = FireConsensus()
             self.consensus.config = self.config
+            self.consensus._mqtt_connected = True  # Mock connected state
     
     def test_area_calculation_with_4k_camera(self):
         """Test that area calculation works correctly for 4K cameras.

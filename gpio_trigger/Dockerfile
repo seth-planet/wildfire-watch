@@ -35,7 +35,7 @@ RUN if [ "$BUILD_ENV" = "test" ] && [ -f requirements_test.txt ]; then \
     else \
         pip install --no-cache-dir -r requirements.txt || \
         (echo "Warning: Some packages failed to install, installing core dependencies only" && \
-         pip install --no-cache-dir paho-mqtt>=2.0.0 python-dotenv>=1.0.0 fake-rpi>=0.7.1); \
+         pip install --no-cache-dir paho-mqtt>=2.0.0 python-dotenv>=1.0.0 PyYAML>=6.0.0 psutil>=5.9.0 fake-rpi>=0.7.1); \
     fi
 
 # Copy the trigger script

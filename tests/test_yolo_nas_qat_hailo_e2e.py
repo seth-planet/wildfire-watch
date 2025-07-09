@@ -139,7 +139,6 @@ def docker_available():
 
 
 @pytest.fixture
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_output_dir():
     """Create temporary output directory for test artifacts."""
     output_dir = Path(tempfile.mkdtemp(prefix="yolo_nas_qat_hailo_test_"))

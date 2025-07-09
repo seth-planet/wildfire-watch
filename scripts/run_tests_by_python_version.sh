@@ -100,7 +100,9 @@ run_python_tests() {
     
     # Add extra arguments
     if [[ "$PARALLEL" == "true" ]]; then
-        cmd="$cmd -n auto"
+        # Use WORKER_COUNT environment variable if set, otherwise default to auto
+        WORKER_COUNT="${WORKER_COUNT:-auto}"
+        cmd="$cmd -n $WORKER_COUNT"
     fi
 
     if [[ -n "$EXTRA_ARGS" ]]; then

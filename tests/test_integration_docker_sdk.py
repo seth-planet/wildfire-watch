@@ -111,12 +111,12 @@ log_dest stdout
         
         # Build the image
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        consensus_path = os.path.join(project_root, 'fire_consensus')
         
         try:
-            # Build image
+            # Build image from project root with fire_consensus Dockerfile
             image, build_logs = self.docker_client.images.build(
-                path=consensus_path,
+                path=project_root,
+                dockerfile="fire_consensus/Dockerfile",
                 tag="wildfire-test/fire_consensus:test",
                 rm=True,
                 nocache=True
@@ -334,10 +334,11 @@ log_dest stdout
 
 @pytest.mark.docker
 @pytest.mark.timeout(300)
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
-def test_docker_sdk_integration():
+def test_docker_sdk_integration(parallel_test_context, docker_container_manager):
     """Test Docker container integration using SDK"""
     test = DockerSDKIntegrationTest()
+    test.parallel_context = parallel_test_context
+    test.container_manager = docker_container_manager
     
     success = test.test_fire_detection_flow()
     assert success, "Docker SDK integration test should trigger fire consensus"
