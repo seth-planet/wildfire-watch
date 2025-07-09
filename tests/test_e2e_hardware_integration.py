@@ -220,14 +220,16 @@ class TestE2EHardwareIntegration:
         
         # Create growing detections with proper format
         for i in range(8):
-            width = 0.03 + i * 0.005  # Growing normalized width
-            height = 0.03 + i * 0.004  # Growing normalized height
+            # Use bounding box format [x1, y1, x2, y2] not [x, y, width, height]
+            x1, y1 = 0.1, 0.1
+            x2 = x1 + 0.03 + i * 0.005  # Growing normalized width
+            y2 = y1 + 0.03 + i * 0.004  # Growing normalized height
             detection = {
                 'camera_id': 'camera_001',
                 'object': 'fire',
                 'object_id': 'fire_001',
                 'confidence': 0.8 + i * 0.01,
-                'bbox': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
+                'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                 'timestamp': base_time + i * 0.5
             }
             publisher.publish('fire/detection', json.dumps(detection))
@@ -243,7 +245,8 @@ class TestE2EHardwareIntegration:
         # Verify trigger content
         trigger = trigger_messages[0]['payload']
         assert trigger['consensus_cameras'] == ['camera_001']
-        assert trigger['camera_count'] == 1
+        assert trigger['action'] == 'trigger'
+        assert trigger['confidence'] == 'high'
         
         publisher.loop_stop()
         publisher.disconnect()
@@ -278,8 +281,11 @@ class TestE2EHardwareIntegration:
         time.sleep(2)
         
         # Verify pump activated (in simulation mode)
-        from gpio_trigger.trigger import GPIO, CONFIG
-        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) is True, "Main valve should open"
+        # Check the controller's state instead of raw GPIO
+        state_snapshot = controller._get_state_snapshot()
+        assert state_snapshot['main_valve'] is True, "Main valve should open"
+        # Or check the pump state
+        assert controller._state.name in ['PRIMING', 'STARTING', 'RUNNING'], f"Pump should be active, but is in state: {controller._state.name}"
         
         # Wait for pump sequence
         time.sleep(5)
@@ -380,14 +386,16 @@ class TestE2EHardwareIntegration:
             
             # Send growing fire detections - using same pattern as working test
             for i in range(8):
-                width = 0.03 + i * 0.005  # Growing normalized width
-                height = 0.03 + i * 0.004  # Growing normalized height
+                # Use bounding box format [x1, y1, x2, y2] not [x, y, width, height]
+                x1, y1 = 0.1, 0.1
+                x2 = x1 + 0.03 + i * 0.005  # Growing normalized width
+                y2 = y1 + 0.03 + i * 0.004  # Growing normalized height
                 detection = {
                     'camera_id': camera_id,
                     'object': 'fire',
                     'object_id': 'fire_001',
                     'confidence': 0.8 + i * 0.01,
-                    'bbox': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
+                    'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                     'timestamp': base_time + i * 0.5
                 }
                 publisher.publish('fire/detection', json.dumps(detection))
@@ -412,8 +420,11 @@ class TestE2EHardwareIntegration:
             assert any('fire/trigger' in t for t in topics_seen), f"No fire trigger sent. Fire topics: {fire_topics}"
             
             # Should see GPIO activation
-            from gpio_trigger.trigger import GPIO, CONFIG
-            assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) is True, "Pump not activated"
+            # Check the controller's state
+            state_snapshot = controller._get_state_snapshot()
+            assert state_snapshot['main_valve'] is True, "Pump not activated"
+            # Or check the pump state
+            assert controller._state.name in ['PRIMING', 'STARTING', 'RUNNING'], f"Pump should be active, but is in state: {controller._state.name}"
             
             # Print message flow for debugging
             print("\nMessage flow through pipeline:")

@@ -11,11 +11,18 @@ import multiprocessing
 # Fix super-gradients logging issues that cause hanging during test teardown
 try:
     import logging
-    # Prevent super-gradients from interfering with test teardown
-    logging.getLogger("super_gradients").setLevel(logging.CRITICAL)
-    logging.getLogger("super_gradients").propagate = False
-except:
-    pass
+    # Import safe logging to prevent I/O on closed file errors
+    from safe_logging import disable_problem_loggers, cleanup_test_logging
+    disable_problem_loggers()
+except ImportError:
+    # Fallback if safe_logging not available
+    try:
+        import logging
+        # Prevent super-gradients from interfering with test teardown
+        logging.getLogger("super_gradients").setLevel(logging.CRITICAL)
+        logging.getLogger("super_gradients").propagate = False
+    except:
+        pass
 
 # Import enhanced process cleanup
 try:
@@ -259,14 +266,19 @@ def pytest_sessionfinish(session, exitstatus):
     import sys
     import os
     
-    # Prevent super-gradients from writing to closed file handles during teardown
+    # Clean up all test logging to prevent I/O on closed file errors
     try:
-        # Redirect super-gradients output to null to prevent hanging
-        import logging
-        logging.getLogger("super_gradients").handlers.clear()
-        logging.getLogger("super_gradients").addHandler(logging.NullHandler())
-    except:
-        pass
+        from safe_logging import cleanup_test_logging
+        cleanup_test_logging()
+    except ImportError:
+        # Fallback: Prevent super-gradients from writing to closed file handles during teardown
+        try:
+            # Redirect super-gradients output to null to prevent hanging
+            import logging
+            logging.getLogger("super_gradients").handlers.clear()
+            logging.getLogger("super_gradients").addHandler(logging.NullHandler())
+        except:
+            pass
     
     # Import here to avoid circular dependencies
     sys.path.insert(0, os.path.dirname(__file__))

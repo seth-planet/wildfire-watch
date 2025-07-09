@@ -297,8 +297,8 @@ class TestCameraDiscovery:
         if len(received_messages) > 0:
             # Verify the messages are properly formatted
             for msg in received_messages:
-                assert 'camera' in msg['payload']
-                camera_data = msg['payload']['camera']
+                # In refactored version, payload is the camera data directly
+                camera_data = msg['payload']
                 assert 'ip' in camera_data
                 assert 'mac' in camera_data
                 assert 'name' in camera_data

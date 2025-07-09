@@ -63,121 +63,129 @@ requires_security_nvr = pytest.mark.security_nvr
 requires_frigate_api = pytest.mark.frigate_integration
 requires_mqtt = pytest.mark.mqtt
 
-class TestSecurityNVRIntegration:
-    """Integration tests for Security NVR service"""
+
+@pytest.fixture
+def frigate_container(test_mqtt_broker, docker_container_manager):
+    """Start a Frigate container for integration testing - shared fixture"""
+    import tempfile
+    import yaml
     
-    @pytest.fixture
-    def frigate_container(self, test_mqtt_broker, docker_container_manager):
-        """Start a Frigate container for integration testing"""
-        import tempfile
-        import yaml
-        
-        # Create temporary config directory
-        config_dir = tempfile.mkdtemp(prefix=f"frigate_test_{docker_container_manager.worker_id}_")
-        
-        # ✅ Create Frigate config with proper topic isolation
-        worker_id = docker_container_manager.worker_id
-        topic_prefix = f"test/{worker_id}"
-        
-        frigate_config = {
-            'mqtt': {
-                'host': 'host.docker.internal',  # Connect to host from container
-                'port': test_mqtt_broker.port,
-                'user': '',
-                'password': '',
-                'topic_prefix': f'frigate_{worker_id}'  # Isolate Frigate MQTT topics
-            },
-            'detectors': {
-                'cpu': {
-                    'type': 'cpu'
+    # Create temporary config directory
+    config_dir = tempfile.mkdtemp(prefix=f"frigate_test_{docker_container_manager.worker_id}_")
+    
+    # ✅ Create Frigate config with proper topic isolation
+    worker_id = docker_container_manager.worker_id
+    topic_prefix = f"test/{worker_id}"
+    
+    frigate_config = {
+        'mqtt': {
+            'host': 'host.docker.internal',  # Connect to host from container
+            'port': test_mqtt_broker.port,
+            'user': '',
+            'password': '',
+            'topic_prefix': f'frigate_{worker_id}'  # Isolate Frigate MQTT topics
+        },
+        'detectors': {
+            'cpu': {
+                'type': 'cpu'
+            }
+        },
+        'objects': {
+            'track': ['person', 'fire'],
+            'filters': {
+                'fire': {
+                    'min_score': 0.7,
+                    'threshold': 0.8
                 }
-            },
-            'objects': {
-                'track': ['person', 'fire'],
-                'filters': {
-                    'fire': {
-                        'min_score': 0.7,
-                        'threshold': 0.8
-                    }
-                }
-            },
-            'cameras': {
-                'test_camera': {
-                    'ffmpeg': {
-                        'inputs': [
-                            {'path': 'rtsp://demo:demo@ipvmdemo.dyndns.org:554/onvif-media/media.amp?profile=profile_1_h264',
-                             'roles': ['detect']}
-                        ]
-                    },
-                    'detect': {
-                        'width': 640,
-                        'height': 640,
-                        'fps': 5
-                    }
+            }
+        },
+        'api': {
+            'auth': {
+                'enabled': True
+            }
+        },
+        'cameras': {
+            'test_cam': {
+                'ffmpeg': {
+                    'inputs': [
+                        {
+                            'path': 'rtsp://127.0.0.1:554/test',
+                            'roles': ['detect']
+                        }
+                    ]
+                },
+                'detect': {
+                    'width': 640,
+                    'height': 480,
+                    'fps': 5
+                },
+                'objects': {
+                    'track': ['fire']
                 }
             }
         }
-        
-        # Write config file
-        config_path = os.path.join(config_dir, 'config.yml')
-        with open(config_path, 'w') as f:
-            yaml.dump(frigate_config, f)
-        
-        # Use proper container management
-        container_name = docker_container_manager.get_container_name('frigate')
-        
-        # ✅ Container configuration following best practices
-        worker_id = docker_container_manager.worker_id
-        topic_prefix = f"test/{worker_id}"
-        
-        config = {
-            'detach': True,
-            'ports': {'5000/tcp': None},  # Dynamic port allocation
-            'volumes': {config_dir: {'bind': '/config', 'mode': 'rw'}},
-            'environment': {
-                'FRIGATE_API_KEY': '7f155ad9e8c340c88ef6a33f528f2e75',
-                'MQTT_TOPIC_PREFIX': topic_prefix,  # Critical for test isolation
-                'LOG_LEVEL': 'DEBUG'  # Enhanced logging for tests
-            },
-            'remove': True
-        }
-        
+    }
+    
+    config_path = os.path.join(config_dir, 'config.yml')
+    with open(config_path, 'w') as f:
+        yaml.dump(frigate_config, f)
+    
+    # Start Frigate container with unique name
+    container_name = docker_container_manager.get_container_name('frigate')
+    
+    # ✅ Get dynamic ports
+    frigate_port = docker_container_manager.get_free_port()
+    rtsp_port = docker_container_manager.get_free_port()
+    
+    # Start container
+    container = docker_container_manager.run_container(
+        image='ghcr.io/blakeblackshear/frigate:stable',
+        name=container_name,
+        ports={
+            '5000/tcp': frigate_port,
+            '1935/tcp': docker_container_manager.get_free_port(),  # RTMP
+            '8554/tcp': rtsp_port,  # RTSP
+            '8555/tcp': docker_container_manager.get_free_port()   # WebRTC
+        },
+        volumes={
+            config_path: {'bind': '/config/config.yml', 'mode': 'ro'},
+            '/dev/shm': {'bind': '/dev/shm', 'mode': 'rw'}
+        },
+        environment={
+            'FRIGATE_USER': 'admin',
+            'FRIGATE_PASSWORD': '7f155ad9e8c340c88ef6a33f528f2e75',
+            'TZ': 'UTC'
+        },
+        shm_size='128m',
+        privileged=True,
+        network_mode='bridge',
+        extra_hosts={'host.docker.internal': 'host-gateway'},
+        remove=True
+    )
+    
+    # Store the container and ports for cleanup and access
+    container.frigate_port = frigate_port
+    container.rtsp_port = rtsp_port
+    
+    # Wait for Frigate to be ready
+    import time
+    start_time = time.time()
+    while time.time() - start_time < 30:
         try:
-            # Start container using container manager
-            container = docker_container_manager.start_container(
-                image='ghcr.io/blakeblackshear/frigate:stable',
-                name=container_name,
-                config=config,
-                wait_timeout=30
-            )
-            
-            # Get the actual port from the container
-            container.reload()
-            port_mapping = container.ports.get('5000/tcp')
-            if not port_mapping:
-                raise RuntimeError("No port mapping found for Frigate container")
-            frigate_port = int(port_mapping[0]['HostPort'])
-            
-            # Wait for Frigate to be ready
-            for _ in range(30):  # Wait up to 30 seconds
-                try:
-                    response = requests.get(f'http://localhost:{frigate_port}/api/version', timeout=2)
-                    if response.status_code == 200:
-                        break
-                except:
-                    pass
-                time.sleep(1)
-            else:
-                raise RuntimeError("Frigate failed to start within 30 seconds")
-            
-            # Store the port for tests to use
-            container.frigate_port = frigate_port
-            yield container
-            
-        finally:
-            # Cleanup will be handled by the container manager
-            import shutil
-            shutil.rmtree(config_dir, ignore_errors=True)
+            response = requests.get(f"http://localhost:{frigate_port}/api/version", timeout=2)
+            if response.status_code == 200:
+                break
+        except:
+            pass
+        time.sleep(1)
+    
+    yield container
+    
+    # Cleanup
+    shutil.rmtree(config_dir, ignore_errors=True)
+
+class TestSecurityNVRIntegration:
+    """Integration tests for Security NVR service"""
 
     @pytest.fixture(autouse=True)
     def setup(self, test_mqtt_broker, frigate_container, docker_container_manager):
@@ -733,8 +741,12 @@ class TestWebInterface:
     """Test Frigate web interface accessibility"""
     
     @pytest.fixture(autouse=True)
-    def setup(self):
+    def setup(self, test_mqtt_broker, frigate_container, docker_container_manager):
         """Setup test environment"""
+        self.mqtt_broker = test_mqtt_broker
+        self.frigate_container = frigate_container
+        self.docker_manager = docker_container_manager
+        self.frigate_api_url = f"http://localhost:{frigate_container.frigate_port}"
         self.frigate_auth = ("admin", "7f155ad9e8c340c88ef6a33f528f2e75")
     
     @requires_frigate_api
