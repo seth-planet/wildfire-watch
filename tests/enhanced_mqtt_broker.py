@@ -263,10 +263,15 @@ protocol mqtt
                     # First try graceful termination
                     logger.debug(f"Terminating mosquitto process {pid}")
                     self.process.terminate()
-                    try:
-                        self.process.wait(timeout=3)
-                        logger.debug(f"Mosquitto process {pid} terminated gracefully")
-                    except subprocess.TimeoutExpired:
+                    
+                    # Use a shorter timeout and non-blocking approach
+                    start_time = time.time()
+                    while time.time() - start_time < 1.0:  # Reduced timeout to 1 second
+                        if self.process.poll() is not None:
+                            logger.debug(f"Mosquitto process {pid} terminated gracefully")
+                            break
+                        time.sleep(0.05)  # Shorter sleep for faster detection
+                    else:
                         # Force kill if graceful termination fails
                         logger.warning(f"Force killing mosquitto process {pid}")
                         try:
@@ -278,20 +283,21 @@ protocol mqtt
                         except (ProcessLookupError, OSError):
                             # Process already dead
                             pass
-                        try:
-                            # Wait a bit for kill to take effect
-                            self.process.wait(timeout=2)
-                            logger.debug(f"Mosquitto process {pid} killed successfully")
-                        except subprocess.TimeoutExpired:
-                            logger.error(f"Failed to kill mosquitto process {pid}")
+                        
+                        # Wait for kill to take effect - much shorter timeout
+                        start_time = time.time()
+                        while time.time() - start_time < 0.5:  # Only wait 0.5 seconds for kill
+                            if self.process.poll() is not None:
+                                logger.debug(f"Mosquitto process {pid} killed successfully")
+                                break
+                            time.sleep(0.05)
+                        else:
+                            logger.error(f"Failed to kill mosquitto process {pid}, giving up")
                 else:
                     logger.debug(f"Mosquitto process {pid} already terminated with code {self.process.returncode}")
                     
-                # Always wait for process cleanup
-                try:
-                    self.process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    pass
+                # Don't wait again, just clean up
+                pass
                     
                 self.process = None
             except Exception as e:

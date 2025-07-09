@@ -100,8 +100,8 @@ run_python_tests() {
     
     # Add extra arguments
     if [[ "$PARALLEL" == "true" ]]; then
-        # Use WORKER_COUNT environment variable if set, otherwise default to 8
-        WORKER_COUNT="${WORKER_COUNT:-8}"
+        # Use WORKER_COUNT environment variable if set, otherwise default to auto
+        WORKER_COUNT="${WORKER_COUNT:-auto}"
         cmd="$cmd -n $WORKER_COUNT"
     fi
 

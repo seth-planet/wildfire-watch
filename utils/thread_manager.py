@@ -43,14 +43,17 @@ class SafeTimerManager:
             delay: Delay in seconds before calling function
             error_handler: Optional error handler (name, exception) -> None
         """
-        if self._shutdown:
-            self.logger.debug(f"Ignoring timer schedule '{name}' - manager shutting down")
-            return
-            
-        # Cancel existing timer with same name (before acquiring lock)
-        self.cancel(name)
-        
         with self._lock:
+            # Check shutdown status inside lock to prevent race condition
+            if self._shutdown:
+                self.logger.debug(f"Ignoring timer schedule '{name}' - manager shutting down")
+                return
+            
+            # Cancel existing timer with same name (now inside lock)
+            timer = self._timers.pop(name, None)
+            if timer and timer.is_alive():
+                timer.cancel()
+                self.logger.debug(f"Cancelled existing timer '{name}'")
             
             def wrapped_func():
                 """Wrapper that handles cleanup and errors."""
@@ -137,7 +140,24 @@ class SafeTimerManager:
     def shutdown(self) -> None:
         """Shutdown manager and cancel all timers."""
         self._shutdown = True
+        
+        # Get list of active timers before cancelling
+        active_timers = []
+        with self._lock:
+            active_timers = [(name, timer) for name, timer in self._timers.items() if timer.is_alive()]
+        
+        # Cancel all timers
         self.cancel_all()
+        
+        # Wait for timers to finish (with timeout to prevent hanging)
+        for name, timer in active_timers:
+            try:
+                timer.join(timeout=2.0)  # 2 second timeout per timer
+                if timer.is_alive():
+                    self.logger.warning(f"Timer '{name}' did not finish within timeout")
+            except Exception as e:
+                self.logger.error(f"Error joining timer '{name}': {e}")
+        
         self.logger.debug("Timer manager shutdown complete")
 
 

@@ -63,7 +63,6 @@ requires_security_nvr = pytest.mark.security_nvr
 requires_frigate_api = pytest.mark.frigate_integration
 requires_mqtt = pytest.mark.mqtt
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestSecurityNVRIntegration:
     """Integration tests for Security NVR service"""
     
@@ -692,7 +691,6 @@ class TestSecurityNVRIntegration:
             mqtt_client.disconnect()
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestServiceDependencies:
     """Test service dependencies and startup order"""
     
@@ -731,7 +729,6 @@ class TestServiceDependencies:
         assert result.returncode == 0
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestWebInterface:
     """Test Frigate web interface accessibility"""
     

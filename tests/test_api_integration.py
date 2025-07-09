@@ -21,7 +21,6 @@ pytestmark = [pytest.mark.api_usage, pytest.mark.python310]
 sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestSuperGradientsIntegration(unittest.TestCase):
     """Test real super-gradients API usage"""
     
@@ -498,7 +497,6 @@ class TestSuperGradientsIntegration(unittest.TestCase):
         self.assertIn('Weapon', detected_classes)
 
 
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestErrorHandlingIntegration(unittest.TestCase):
     """Test error handling with real components"""
     
@@ -530,6 +528,14 @@ class TestErrorHandlingIntegration(unittest.TestCase):
 if __name__ == '__main__':
     # Run with Python 3.10 as required for super-gradients
     import sys
+
+
+@pytest.fixture(scope="session")
+def use_cached_models(monkeypatch):
+    """Use cached models to speed up tests"""
+    monkeypatch.setenv("USE_CACHED_MODELS", "true")
+    monkeypatch.setenv("MODEL_CACHE_DIR", "cache")
+
     if sys.version_info[:2] != (3, 10):
         print(f"WARNING: This test requires Python 3.10, but running {sys.version}")
         print("Please run with: python3.10 -m pytest tests/test_api_integration.py")

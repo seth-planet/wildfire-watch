@@ -131,16 +131,30 @@ class ConfigBase(ABC):
                 )
             return schema.default
             
-        # Type conversion
+        # Type conversion with input sanitization
         try:
             if schema.type == bool:
                 value = raw_value.lower() in ('true', '1', 'yes', 'on')
             elif schema.type == list:
-                value = json.loads(raw_value) if raw_value else []
+                # SECURITY FIX: Sanitize JSON input to prevent injection attacks
+                if raw_value:
+                    sanitized_input = self._sanitize_json_input(raw_value, env_key)
+                    value = json.loads(sanitized_input)
+                else:
+                    value = []
             elif schema.type == dict:
-                value = json.loads(raw_value) if raw_value else {}
+                # SECURITY FIX: Sanitize JSON input to prevent injection attacks
+                if raw_value:
+                    sanitized_input = self._sanitize_json_input(raw_value, env_key)
+                    value = json.loads(sanitized_input)
+                else:
+                    value = {}
             else:
-                value = schema.type(raw_value)
+                # SECURITY FIX: Sanitize string input to prevent injection
+                if schema.type == str:
+                    value = self._sanitize_string_input(raw_value, env_key)
+                else:
+                    value = schema.type(raw_value)
         except (ValueError, json.JSONDecodeError) as e:
             raise ConfigValidationError(
                 f"Cannot convert '{env_key}' value '{raw_value}' to {schema.type.__name__}: {e}"
@@ -161,6 +175,110 @@ class ConfigBase(ABC):
             )
             
         return value
+    
+    def _sanitize_json_input(self, raw_value: str, env_key: str) -> str:
+        """Sanitize JSON input to prevent injection attacks.
+        
+        Args:
+            raw_value: Raw JSON string from environment
+            env_key: Environment variable name for logging
+            
+        Returns:
+            Sanitized JSON string
+            
+        Raises:
+            ConfigValidationError: If input contains suspicious patterns
+        """
+        # Check for suspicious patterns that could indicate injection attempts
+        suspicious_patterns = [
+            '__import__',  # Python import injection
+            'eval(',       # Code evaluation
+            'exec(',       # Code execution
+            'open(',       # File operations
+            'subprocess',  # System commands
+            'os.',         # OS operations
+            'sys.',        # System operations
+            '\\x',         # Hex escape sequences
+            '\\u',         # Unicode escape sequences
+            '\\"__',       # Dunder method access
+        ]
+        
+        for pattern in suspicious_patterns:
+            if pattern in raw_value:
+                raise ConfigValidationError(
+                    f"Configuration '{env_key}' contains suspicious pattern '{pattern}' - potential injection attack"
+                )
+        
+        # Limit JSON input size to prevent DoS attacks
+        max_json_size = 10240  # 10KB limit
+        if len(raw_value) > max_json_size:
+            raise ConfigValidationError(
+                f"Configuration '{env_key}' JSON input too large ({len(raw_value)} bytes > {max_json_size} bytes)"
+            )
+        
+        # Additional check: ensure it's actually valid JSON structure (no code)
+        try:
+            # Parse and re-serialize to remove any potential code injection
+            parsed = json.loads(raw_value)
+            # Only allow basic data types: dict, list, str, int, float, bool, None
+            self._validate_json_types(parsed, env_key)
+            return json.dumps(parsed)  # Return clean JSON
+        except json.JSONDecodeError:
+            raise ConfigValidationError(f"Configuration '{env_key}' is not valid JSON")
+    
+    def _validate_json_types(self, obj: any, env_key: str, path: str = ""):
+        """Recursively validate JSON object contains only safe data types."""
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if not isinstance(key, str):
+                    raise ConfigValidationError(f"Configuration '{env_key}' contains non-string key at {path}")
+                self._validate_json_types(value, env_key, f"{path}.{key}")
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj):
+                self._validate_json_types(item, env_key, f"{path}[{i}]")
+        elif not isinstance(obj, (str, int, float, bool, type(None))):
+            raise ConfigValidationError(
+                f"Configuration '{env_key}' contains unsafe type {type(obj).__name__} at {path}"
+            )
+    
+    def _sanitize_string_input(self, raw_value: str, env_key: str) -> str:
+        """Sanitize string input to prevent injection attacks.
+        
+        Args:
+            raw_value: Raw string from environment
+            env_key: Environment variable name for logging
+            
+        Returns:
+            Sanitized string
+            
+        Raises:
+            ConfigValidationError: If input contains suspicious patterns
+        """
+        # Check for command injection patterns
+        injection_patterns = [
+            ';',          # Command separator
+            '|',          # Pipe
+            '&',          # Background/AND
+            '$(',         # Command substitution
+            '`',          # Command substitution
+            '$()',        # Command substitution
+            '\n',         # Newline injection
+            '\r',         # Carriage return injection
+        ]
+        
+        for pattern in injection_patterns:
+            if pattern in raw_value:
+                logger.warning(f"Configuration '{env_key}' contains potentially dangerous character '{pattern}' - sanitizing")
+                # Remove the dangerous character instead of failing
+                raw_value = raw_value.replace(pattern, '')
+        
+        # Limit string size to prevent DoS
+        max_string_size = 4096  # 4KB limit for strings
+        if len(raw_value) > max_string_size:
+            logger.warning(f"Configuration '{env_key}' string too long ({len(raw_value)} chars), truncating to {max_string_size}")
+            raw_value = raw_value[:max_string_size]
+        
+        return raw_value
         
     def validate(self):
         """Validate all configuration values.

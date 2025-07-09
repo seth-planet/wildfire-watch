@@ -57,6 +57,9 @@ class HealthReporter(ABC):
         with self._lock:
             if self._health_timer:
                 self._health_timer.cancel()
+                # Wait for timer thread to finish to prevent logging after cleanup
+                if self._health_timer.is_alive():
+                    self._health_timer.join(timeout=2.0)
                 self._health_timer = None
     
     def _publish_health(self) -> None:
@@ -65,11 +68,14 @@ class HealthReporter(ABC):
             return
         
         try:
-            self.mqtt_service.logger.info(f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
+            # Add safety check for logging before attempting to log
+            if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
+                self.mqtt_service.logger.info(f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
             
             # Check MQTT connection first
             if not self.mqtt_service.is_connected:
-                self.mqtt_service.logger.warning(f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
+                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
+                    self.mqtt_service.logger.warning(f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
                 # Still reschedule to try again later
             else:
                 # Gather health data
@@ -82,26 +88,32 @@ class HealthReporter(ABC):
                 
                 # Publish health status
                 topic = f"system/{self.mqtt_service.service_name}/health"
-                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Publishing health to {topic} with data keys: {list(health_data.keys())}")
+                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
+                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Publishing health to {topic} with data keys: {list(health_data.keys())}")
                 result = self.mqtt_service.publish_message(
                     topic,
                     health_data,
                     retain=True
                 )
-                if result:
-                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Health published successfully to {topic}")
-                else:
-                    self.mqtt_service.logger.error(f"[HEALTH DEBUG] Failed to publish health to {topic}")
+                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
+                    if result:
+                        self.mqtt_service.logger.info(f"[HEALTH DEBUG] Health published successfully to {topic}")
+                    else:
+                        self.mqtt_service.logger.error(f"[HEALTH DEBUG] Failed to publish health to {topic}")
             
         except Exception as e:
-            self.mqtt_service.logger.error(f"[HEALTH DEBUG] Error publishing health: {e}", exc_info=True)
+            # Safe logging for exceptions
+            if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
+                self.mqtt_service.logger.error(f"[HEALTH DEBUG] Error publishing health: {e}", exc_info=True)
         
         # Reschedule next health report
         if not self._shutdown:
             with self._lock:
-                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Scheduling next health report in {self.interval}s")
+                if hasattr(self.mqtt_service, 'logger') and hasattr(self.mqtt_service.logger, 'handlers') and self.mqtt_service.logger.handlers:
+                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Scheduling next health report in {self.interval}s")
                 self._health_timer = threading.Timer(self.interval, self._publish_health)
-                self._health_timer.daemon = True
+                # Set daemon=False so thread can be properly joined
+                self._health_timer.daemon = False
                 self._health_timer.start()
     
     def _get_base_health_data(self) -> Dict[str, Any]:

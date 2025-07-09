@@ -70,6 +70,15 @@ def hardware_lock(hardware_name: str, timeout: int = 30):
             except:
                 pass
 
+def requires_hardware_lock(hardware_name: str, timeout: int = 1800):
+    """Decorator for hardware-exclusive test methods."""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            with hardware_lock(hardware_name, timeout):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
+
 # Hardware detection flags
 HAS_CORAL = False
 HAS_HAILO = False
@@ -157,35 +166,35 @@ class TestCoralIntegration(unittest.TestCase):
             ], check=True)
     
     @unittest.skipUnless(HAS_CORAL, "Coral TPU not available")
+    @requires_hardware_lock("coral_tpu", timeout=1800)
     def test_coral_inference(self):
         """Test inference on Coral TPU"""
-        with hardware_lock("coral_tpu", timeout=1800):  # 30 minute timeout
-            # First check available devices
-            devices_script = '''
+        # First check available devices
+        devices_script = '''
 from pycoral.utils.edgetpu import list_edge_tpus
 import json
 tpus = list_edge_tpus()
 print(json.dumps([{"type": t["type"], "path": t["path"]} for t in tpus]))
 '''
-            devices_result = subprocess.run(['python3.8', '-c', devices_script], 
-                                          capture_output=True, text=True)
-            
-            if devices_result.returncode == 0:
-                try:
-                    devices = json.loads(devices_result.stdout.strip())
-                    print(f"Found {len(devices)} Coral TPU device(s)")
-                except:
-                    devices = []
-            else:
+        devices_result = subprocess.run(['python3.8', '-c', devices_script], 
+                                      capture_output=True, text=True)
+        
+        if devices_result.returncode == 0:
+            try:
+                devices = json.loads(devices_result.stdout.strip())
+                print(f"Found {len(devices)} Coral TPU device(s)")
+            except:
                 devices = []
-            
-            # Try each device until one works
-            success = False
-            last_error = None
-            
-            for device_idx in range(max(1, len(devices))):
-                # Create a Python script to run with Python 3.8, trying specific device
-                test_script = f'''
+        else:
+            devices = []
+        
+        # Try each device until one works
+        success = False
+        last_error = None
+        
+        for device_idx in range(max(1, len(devices))):
+            # Create a Python script to run with Python 3.8, trying specific device
+            test_script = f'''
 import time
 import numpy as np
 import tflite_runtime.interpreter as tflite
@@ -225,20 +234,20 @@ print(f"Output shape: {{output_data.shape}}")
 print(f"Device: {device_idx}")
 print("SUCCESS")
 '''
+        
+            # Run the script with Python 3.8
+            result = subprocess.run(['python3.8', '-c', test_script], 
+                                  capture_output=True, text=True)
             
-                # Run the script with Python 3.8
-                result = subprocess.run(['python3.8', '-c', test_script], 
-                                      capture_output=True, text=True)
-                
-                if result.returncode == 0 and "SUCCESS" in result.stdout:
-                    success = True
-                    last_error = None
-                    print(f"Successfully used Coral TPU device {device_idx}")
-                    break
-                else:
-                    last_error = result.stderr
-                    print(f"Failed to use device {device_idx}: {result.stderr[:100]}...")
-                    continue
+            if result.returncode == 0 and "SUCCESS" in result.stdout:
+                success = True
+                last_error = None
+                print(f"Successfully used Coral TPU device {device_idx}")
+                break
+            else:
+                last_error = result.stderr
+                print(f"Failed to use device {device_idx}: {result.stderr[:100]}...")
+                continue
         
         if not success:
             result = type('Result', (), {'returncode': 1, 'stderr': last_error or 'All devices failed', 'stdout': ''})
@@ -539,13 +548,13 @@ class TestFrigateIntegration(unittest.TestCase):
         
         # Modify based on available hardware
         if HAS_CORAL:
-            config.detectors['coral'] = {
+            config['detectors']['coral'] = {
                 'type': 'edgetpu',
                 'device': 'pci' if os.path.exists('/dev/apex_0') else 'usb'
             }
         
         if HAS_GPU:
-            config.detectors['tensorrt'] = {
+            config['detectors']['tensorrt'] = {
                 'type': 'tensorrt',
                 'device': 0
             }

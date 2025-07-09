@@ -798,17 +798,17 @@ class TestE2EHardwareDocker:
         if detector == 'coral':
             try:
                 coral_devices = self._get_coral_devices()
-                config.devices = coral_devices
-                config.privileged = True
+                config['devices'] = coral_devices
+                config['privileged'] = True
             except Exception as e:
                 print(f"  Warning: Could not map Coral devices: {e}")
                 detector = 'cpu'
         elif detector == 'tensorrt':
-            config.runtime = 'nvidia'
-            config.environment['NVIDIA_VISIBLE_DEVICES'] = 'all'
+            config['runtime'] = 'nvidia'
+            config['environment']['NVIDIA_VISIBLE_DEVICES'] = 'all'
         elif detector == 'hailo':
-            config.devices = ['/dev/hailo0:/dev/hailo0']
-            config.privileged = True
+            config['devices'] = ['/dev/hailo0:/dev/hailo0']
+            config['privileged'] = True
         
         # Define health check function
         def frigate_health_check(container):

@@ -19,7 +19,7 @@ RUN useradd -m -s /bin/bash consensus && \
 
 WORKDIR /app
 
-# Copy utils module
+# Copy utils module (context is project root)
 COPY utils /utils
 # Add root to Python path so utils can be imported
 ENV PYTHONPATH=/

@@ -427,7 +427,7 @@ class TestDetectionProcessing:
         assert 'test_cam' not in consensus_service.cameras
         
         # Test area too large
-        detection_data['bbox'] = [0, 0, 0.8, 0.8]  # area = 0.64, too large
+        detection_data['bbox'] = [0, 0, 0.9, 0.9]  # area = 0.81, too large (> 0.8 max)
         mqtt_publisher.publish(
             "fire/detection",
             json.dumps(detection_data),
@@ -1233,7 +1233,7 @@ class TestAdditionalFeatures:
             "fire/detection",
             "frigate/events",
             "system/camera_telemetry",
-            f"{"fire/detection"}/+"
+            "fire/detection/+"
         ]
         
         # Check subscriptions are configured (actual MQTT subscriptions are internal)

@@ -421,13 +421,15 @@ class FireConsensus(MQTTService, ThreadSafeService):
             if confidence < self.config.min_confidence:
                 return
                 
-            # Calculate area
-            bbox = payload.get('bbox', [])
+            # Calculate area - support both 'bbox' and 'bounding_box' for compatibility
+            bbox = payload.get('bbox') or payload.get('bounding_box') or []
             if bbox is None or len(bbox) != 4:
                 return  # Invalid bbox
             
             area = self._calculate_area(bbox)
+            self.logger.debug(f"Calculated area: {area}, min: {self.config.min_area_ratio}, max: {self.config.max_area_ratio}")
             if not (self.config.min_area_ratio <= area <= self.config.max_area_ratio):
+                self.logger.debug(f"Rejecting detection due to invalid area: {area}")
                 return
                 
             # Create detection
@@ -519,7 +521,8 @@ class FireConsensus(MQTTService, ThreadSafeService):
         """Check if consensus conditions are met."""
         with self.lock:
             # Check cooldown
-            if time.time() - self.last_trigger_time < self.config.cooldown_period:
+            current_time = time.time()
+            if current_time - self.last_trigger_time < self.config.cooldown_period:
                 return
                 
             # Get growing fires from all cameras
@@ -545,13 +548,17 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 consensus_met = True
                 
             if consensus_met:
+                # CRITICAL SAFETY FIX: Update trigger time ATOMICALLY before firing trigger
+                # to prevent race condition where multiple threads trigger simultaneously
+                self.last_trigger_time = current_time
+                
                 self.logger.warning(f"CONSENSUS REACHED! {len(cameras_with_fires)} cameras "
                                   f"detecting growing fires: {cameras_with_fires}")
                 self._trigger_fire_response(cameras_with_fires, fire_locations)
                 
-                # Record consensus event
+                # Record consensus event using the atomic timestamp
                 self.consensus_events.append({
-                    'timestamp': time.time(),
+                    'timestamp': self.last_trigger_time,
                     'cameras': cameras_with_fires,
                     'fire_count': len(fire_locations)
                 })
@@ -573,10 +580,11 @@ class FireConsensus(MQTTService, ThreadSafeService):
             if len(recent) < self.config.moving_average_window * 2:
                 continue
                 
-            # Calculate moving averages
+            # Calculate moving averages using median for noise robustness
+            # SAFETY FIX: Replace np.mean() with np.median() for better robustness against sensor noise
             areas = [d.area for d in recent]
-            early_avg = np.mean(areas[:self.config.moving_average_window])
-            recent_avg = np.mean(areas[-self.config.moving_average_window:])
+            early_avg = np.median(areas[:self.config.moving_average_window])
+            recent_avg = np.median(areas[-self.config.moving_average_window:])
             
             # Check growth
             if recent_avg >= early_avg * self.config.area_increase_ratio:
@@ -586,7 +594,8 @@ class FireConsensus(MQTTService, ThreadSafeService):
         
     def _trigger_fire_response(self, cameras: List[str], fire_locations: List[Tuple[str, str]]):
         """Send fire suppression trigger command."""
-        self.last_trigger_time = time.time()
+        # Note: last_trigger_time is now set atomically in _check_consensus
+        # to prevent race conditions
         self.trigger_count += 1
         
         # Build trigger payload
@@ -662,6 +671,11 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 # Normalized coordinates (0-1) - already correct
                 width = bbox[2] - bbox[0]
                 height = bbox[3] - bbox[1]
+                
+                # Check for negative dimensions
+                if width <= 0 or height <= 0:
+                    return 0
+                    
                 area = width * height
             else:
                 # Pixel coordinates - need to normalize

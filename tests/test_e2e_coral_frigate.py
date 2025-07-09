@@ -34,6 +34,8 @@ import tempfile
 import shutil
 import json
 import socket
+import fcntl
+import contextlib
 from threading import Event
 
 # Add parent directory
@@ -41,6 +43,50 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tests.conftest import has_coral_tpu, has_camera_on_network
 from tests.mqtt_test_broker import MQTTTestBroker as TestMQTTBroker
+
+# Hardware lockfile system for non-parallelizable hardware
+@contextlib.contextmanager
+def hardware_lock(hardware_name: str, timeout: int = 30):
+    """Context manager for hardware exclusive access."""
+    lock_file = f"/tmp/wildfire_watch_{hardware_name}_lock"
+    lock_fd = None
+    
+    try:
+        # Create lock file
+        lock_fd = os.open(lock_file, os.O_CREAT | os.O_TRUNC | os.O_RDWR)
+        
+        # Try to acquire lock with timeout
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Write process info to lock file
+                os.write(lock_fd, f"PID:{os.getpid()}\nTime:{time.time()}\n".encode())
+                yield
+                return
+            except BlockingIOError:
+                time.sleep(0.1)
+        
+        # Timeout reached
+        raise TimeoutError(f"Could not acquire {hardware_name} lock within {timeout} seconds")
+        
+    finally:
+        if lock_fd is not None:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                os.close(lock_fd)
+                os.unlink(lock_file)
+            except:
+                pass
+
+def requires_hardware_lock(hardware_name: str, timeout: int = 1800):
+    """Decorator for hardware-exclusive test methods."""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            with hardware_lock(hardware_name, timeout):
+                return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 class TestE2ECoralFrigate:
@@ -60,17 +106,17 @@ class TestE2ECoralFrigate:
         """Ensure no Frigate containers are running before/after test."""
         # Cleanup before test
         subprocess.run(['docker', 'stop', 'frigate_test_e2e_fixed'], 
-                      capture_output=True, stderr=subprocess.DEVNULL)
+                      capture_output=True)
         subprocess.run(['docker', 'rm', 'frigate_test_e2e_fixed'], 
-                      capture_output=True, stderr=subprocess.DEVNULL)
+                      capture_output=True)
         
         yield
         
         # Cleanup after test
         subprocess.run(['docker', 'stop', 'frigate_test_e2e_fixed'], 
-                      capture_output=True, stderr=subprocess.DEVNULL)
+                      capture_output=True)
         subprocess.run(['docker', 'rm', 'frigate_test_e2e_fixed'], 
-                      capture_output=True, stderr=subprocess.DEVNULL)
+                      capture_output=True)
     
     @pytest.fixture
     def temp_config_dir(self):
@@ -83,9 +129,9 @@ class TestE2ECoralFrigate:
     @pytest.mark.slow
     @pytest.mark.infrastructure_dependent
     @pytest.mark.timeout(1800)  # 30 minute timeout for camera discovery
+    @requires_hardware_lock("coral_tpu", timeout=1800)
     def test_coral_frigate_fire_detection_e2e(self, mqtt_broker, temp_config_dir):
         """Test complete fire detection pipeline with Coral TPU"""
-        
         print("\n" + "="*80)
         print("E2E TEST: Coral TPU Fire Detection with Frigate (Fixed)")
         print("="*80)

@@ -40,7 +40,7 @@ class TestE2EHardwareIntegration:
         monkeypatch.setenv('GPIO_SIMULATION', 'true')  # Simulate GPIO unless on RPi
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
-        monkeypatch.setenv('CAMERA_WINDOW', '10')  # Detection window in seconds
+        monkeypatch.setenv('DETECTION_WINDOW', '10')  # Detection window in seconds
         monkeypatch.setenv('AREA_INCREASE_RATIO', '1.2')  # 20% growth required
         
         # Auto-detect AI hardware
@@ -175,7 +175,7 @@ class TestE2EHardwareIntegration:
         monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'true')
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
-        monkeypatch.setenv('CAMERA_WINDOW', '10')
+        monkeypatch.setenv('DETECTION_WINDOW', '10')
         monkeypatch.setenv('COOLDOWN_PERIOD', '5')
         
         from fire_consensus.consensus import FireConsensus
@@ -227,7 +227,7 @@ class TestE2EHardwareIntegration:
                 'object': 'fire',
                 'object_id': 'fire_001',
                 'confidence': 0.8 + i * 0.01,
-                'bounding_box': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
+                'bbox': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
                 'timestamp': base_time + i * 0.5
             }
             publisher.publish('fire/detection', json.dumps(detection))
@@ -308,7 +308,7 @@ class TestE2EHardwareIntegration:
             os.environ['SINGLE_CAMERA_TRIGGER'] = 'true'
             os.environ['CONSENSUS_THRESHOLD'] = '1'
             os.environ['MIN_CONFIDENCE'] = '0.7'
-            os.environ['CAMERA_WINDOW'] = '10'
+            os.environ['DETECTION_WINDOW'] = '10'
             os.environ['COOLDOWN_PERIOD'] = '5'
             
             # Start all services
@@ -387,7 +387,7 @@ class TestE2EHardwareIntegration:
                     'object': 'fire',
                     'object_id': 'fire_001',
                     'confidence': 0.8 + i * 0.01,
-                    'bounding_box': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
+                    'bbox': [0.1, 0.1, width, height],  # [x, y, width, height] normalized
                     'timestamp': base_time + i * 0.5
                 }
                 publisher.publish('fire/detection', json.dumps(detection))

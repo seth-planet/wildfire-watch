@@ -56,10 +56,9 @@ class TestCoreLogic:
             # _calculate_area expects [x1, y1, x2, y2] format, not [x, y, width, height]
             bbox_norm = [0.1, 0.1, 0.15, 0.15]  # 5% width/height (0.15 - 0.1 = 0.05)
             area_norm = consensus._calculate_area(bbox_norm)
-            # Expected: (0.05 * 0.05) / (1920 * 1080) = 0.0025 / 2073600 ≈ 1.2e-9
-            # But since values < 1, they're already normalized coordinates
-            # So: width=0.05, height=0.05, area=0.0025
-            expected_norm = (0.05 * 0.05) / (1920 * 1080)
+            # Since values < 1, they're already normalized coordinates
+            # So: width=0.05, height=0.05, area=0.0025 (already normalized)
+            expected_norm = 0.05 * 0.05  # = 0.0025
             assert abs(area_norm - expected_norm) < 1e-10, f"Expected {expected_norm}, got {area_norm}"
             
             # Test invalid bbox

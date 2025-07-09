@@ -1,6 +1,0 @@
-2025-06-08 09:51:28,840 [INFO] YOLO-NAS Quick Test Pipeline
-2025-06-08 09:51:28,840 [INFO] ==================================================
-2025-06-08 09:51:28,840 [INFO] Starting quick YOLO-NAS training...
-2025-06-08 09:51:28,840 [INFO] Creating small test dataset...
-2025-06-08 09:51:29,609 [INFO] Created test dataset with 100 train and 20 val images
-2025-06-08 09:51:29,609 [ERROR] Pipeline error: "\n    'data_dir'"

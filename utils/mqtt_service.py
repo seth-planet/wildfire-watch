@@ -355,13 +355,24 @@ class MQTTService:
         self._shutdown = True
         
         if self._mqtt_client:
-            # Publish offline status
-            lwt_topic = self._format_topic(f"system/{self.service_name}/lwt")
-            self._mqtt_client.publish(lwt_topic, "offline", qos=1, retain=True)
-            
-            # Stop loop and disconnect
-            self._mqtt_client.loop_stop()
-            self._mqtt_client.disconnect()
+            try:
+                # Publish offline status
+                lwt_topic = self._format_topic(f"system/{self.service_name}/lwt")
+                self._mqtt_client.publish(lwt_topic, "offline", qos=1, retain=True)
+                
+                # Give a brief moment for any pending callbacks to complete
+                import time
+                time.sleep(0.1)
+                
+                # Stop loop and disconnect
+                self._mqtt_client.loop_stop()
+                self._mqtt_client.disconnect()
+                
+                # Give another brief moment for disconnection to complete
+                time.sleep(0.1)
+                
+            except Exception as e:
+                self.logger.error(f"Error during MQTT shutdown: {e}")
         
         self._mqtt_connected = False
         self.logger.info(f"{self.service_name} MQTT service shutdown complete")

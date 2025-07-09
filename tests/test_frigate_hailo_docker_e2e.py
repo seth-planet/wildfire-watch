@@ -330,7 +330,6 @@ class DockerE2ETest:
 @pytest.mark.integration
 @pytest.mark.docker
 @pytest.mark.timeout(300)  # 5 minutes
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_frigate_hailo_docker_e2e():
     """Test Frigate with Hailo detector using Docker containers."""
     

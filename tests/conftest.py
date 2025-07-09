@@ -19,13 +19,23 @@ except:
 
 # Import enhanced process cleanup
 try:
+    # Try enhanced version first
     from enhanced_process_cleanup import get_process_cleaner, cleanup_on_test_failure
 except ImportError:
-    # Fallback if cleanup module not available
-    def get_process_cleaner():
-        return None
-    def cleanup_on_test_failure():
-        pass
+    try:
+        # Fallback to basic version
+        from process_cleanup import ProcessCleaner
+        def get_process_cleaner():
+            return ProcessCleaner()
+        def cleanup_on_test_failure():
+            cleaner = ProcessCleaner()
+            cleaner.cleanup_all()
+    except ImportError:
+        # Fallback if cleanup module not available
+        def get_process_cleaner():
+            return None
+        def cleanup_on_test_failure():
+            pass
 
 def has_coral_tpu():
     """Check if Coral TPU is available"""

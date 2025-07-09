@@ -83,9 +83,9 @@ class QATConfigurationTests(unittest.TestCase):
         from unified_yolo_trainer import UnifiedYOLOTrainer
         
         trainer = UnifiedYOLOTrainer()
-        trainer.config.qat['enabled'] = False
+        trainer.config['qat']['enabled'] = False
         
-        self.assertFalse(trainer.config.qat['enabled'])
+        self.assertFalse(trainer.config['qat']['enabled'])
     
     def test_qat_start_epoch_validation(self):
         """Test QAT start epoch must be less than total epochs"""
@@ -102,8 +102,8 @@ class QATConfigurationTests(unittest.TestCase):
         
         # QAT start_epoch should be less than total epochs
         # This test validates that the configuration is invalid
-        self.assertLess(trainer.config.training['epochs'], 
-                       trainer.config.qat['start_epoch'])
+        self.assertLess(trainer.config['training']['epochs'], 
+                       trainer.config['qat']['start_epoch'])
     
     def test_qat_configuration_in_training_script(self):
         """Test QAT configuration in generated training script"""
@@ -217,7 +217,7 @@ class QATQuantizationTests(unittest.TestCase):
         })
         
         # Verify calibration batches configuration
-        self.assertEqual(trainer.config.qat['calibration_batches'], 100)
+        self.assertEqual(trainer.config['qat']['calibration_batches'], 100)
     
     def test_int8_export_with_qat(self):
         """Test INT8 model export benefits from QAT"""
@@ -327,8 +327,8 @@ class QATIntegrationTests(unittest.TestCase):
         })
         
         # Verify QAT configuration is set
-        self.assertTrue(trainer.config.qat['enabled'])
-        self.assertEqual(trainer.config.qat['start_epoch'], 150)
+        self.assertTrue(trainer.config['qat']['enabled'])
+        self.assertEqual(trainer.config['qat']['start_epoch'], 150)
         
         # In real training, QAT would:
         # 1. Train normally for epochs 0-149

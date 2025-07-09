@@ -63,7 +63,6 @@ TEST_MODELS = {
 
 
 @pytest.fixture(scope="class")
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_environment():
     """Set up test environment with models and directories"""
     test_dir = Path(tempfile.mkdtemp(prefix='e2e_converter_improved_'))
@@ -138,7 +137,6 @@ def _prepare_yolo_nas(models_dir: Path) -> Optional[Path]:
 
 
 @pytest.fixture
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_dirs():
     """Set up test directories for each test"""
     output_dir = Path(tempfile.mkdtemp())
@@ -234,7 +232,6 @@ def _create_validation_dataset(val_dir: Path):
 @pytest.mark.timeout_expected
 @pytest.mark.model_converter
 @pytest.mark.e2e
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 class TestModelConverterE2EImproved:
     """Comprehensive end-to-end tests for model conversion"""
     

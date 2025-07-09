@@ -34,15 +34,17 @@ from utils.health_reporter import HealthReporter
 from utils.thread_manager import ThreadSafeService, SafeTimerManager, BackgroundTaskRunner
 from utils.config_base import ConfigBase, ConfigSchema
 
-# Import safety wrappers
+# Import safety wrappers - MANDATORY for safety-critical operation
 try:
     from gpio_trigger.gpio_safety import SafeGPIO, ThreadSafeStateMachine, HardwareError, GPIOVerificationError
-except ImportError:
-    # Fallback if gpio_safety not available
-    SafeGPIO = None
-    ThreadSafeStateMachine = None
-    HardwareError = Exception
-    GPIOVerificationError = Exception
+    SAFETY_WRAPPERS_AVAILABLE = True
+except ImportError as e:
+    # CRITICAL SAFETY FIX: Do not allow silent fallback for safety-critical systems
+    logging.critical("FATAL: Could not import gpio_safety module. This is required for safe operation.")
+    logging.critical("The system cannot run without GPIO safety wrappers. Shutting down.")
+    logging.critical(f"Import error: {e}")
+    print("CRITICAL SAFETY ERROR: GPIO safety module unavailable. System shutdown for safety.", file=sys.stderr)
+    sys.exit(1)
 
 # Try to import RPi.GPIO, but allow fallback for non-Pi systems
 try:
@@ -446,7 +448,7 @@ class PumpController(MQTTService, ThreadSafeService):
         )
     
     def _set_pin(self, pin_name: str, value: bool) -> bool:
-        """Set GPIO pin state."""
+        """Set GPIO pin state with verification."""
         pin_key = f"{pin_name}_PIN" if not pin_name.endswith('_PIN') else pin_name
         pin = self.cfg.get(pin_key)
         
@@ -455,11 +457,28 @@ class PumpController(MQTTService, ThreadSafeService):
         
         if GPIO_AVAILABLE:
             try:
+                # Set the pin
                 GPIO.output(pin, GPIO.HIGH if value else GPIO.LOW)
                 self.logger.debug(f"Set {pin_name} (pin {pin}) to {'HIGH' if value else 'LOW'}")
+                
+                # CRITICAL SAFETY FIX: Verify pin state after setting
+                time.sleep(0.05)  # Allow hardware to settle
+                read_back_value = GPIO.input(pin)
+                expected_value = GPIO.HIGH if value else GPIO.LOW
+                
+                if read_back_value != expected_value:
+                    error_msg = f"CRITICAL GPIO VERIFICATION FAILED: {pin_name} (pin {pin}) - Expected {expected_value}, got {read_back_value}"
+                    self.logger.critical(error_msg)
+                    # Enter error state for safety-critical pins
+                    if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START', 'IGN_OFF']:
+                        self._enter_error_state(error_msg)
+                    return False
+                
                 return True
             except Exception as e:
-                self.logger.error(f"Failed to set {pin_name}: {e}")
+                error_msg = f"GPIO hardware failure on {pin_name}: {e}"
+                self.logger.critical(error_msg)
+                self._enter_error_state(error_msg)
                 return False
         else:
             self.logger.debug(f"[SIMULATION] Would set {pin_name} to {'HIGH' if value else 'LOW'}")
@@ -557,7 +576,8 @@ class PumpController(MQTTService, ThreadSafeService):
                     except:
                         pass
             
-            self.wait_for_shutdown(2.0)
+            # SAFETY FIX: Reduce monitoring interval from 2.0s to 0.5s for faster dry run detection
+            self.wait_for_shutdown(0.5)
     
     def _monitor_emergency_button(self):
         """Monitor emergency button state."""
@@ -674,13 +694,22 @@ class PumpController(MQTTService, ThreadSafeService):
     def _enter_error_state(self, reason: str):
         """Enter error state."""
         with self._state_lock:
+            # CRITICAL SAFETY FIX: Cancel all active timers immediately to prevent
+            # pump restart after emergency shutdown
+            self.timer_manager.cancel_all()
+            self.logger.critical(f"EMERGENCY: Cancelled all active timers during error state entry")
+            
             self._state = PumpState.ERROR
             self._shutting_down = True
             
-            # Emergency stop
+            # Emergency stop - shut down all pump operations
             for pin in ['IGN_START', 'IGN_ON', 'MAIN_VALVE', 'PRIMING_VALVE', 'RPM_REDUCE']:
                 self._set_pin(pin, False)
             self._set_pin('IGN_OFF', True)
+            
+            # Reset runtime tracking to prevent restart after max runtime exceeded
+            self._engine_start_time = None
+            self._pump_start_time = None
             
             self._publish_event('error_state', {'reason': reason})
             self.logger.error(f"Entered ERROR state: {reason}")
@@ -767,6 +796,34 @@ class PumpController(MQTTService, ThreadSafeService):
                     'line_pressure': bool(self.cfg['LINE_PRESSURE_PIN'])
                 }
             }
+    
+    # ─────────────────────────────────────────────────────────────
+    # Timer Management Compatibility Methods for Tests
+    # ─────────────────────────────────────────────────────────────
+    
+    @property
+    def _timers(self):
+        """Backward compatibility property for tests."""
+        if hasattr(self, 'timer_manager'):
+            return {name: timer for name, timer in self.timer_manager._timers.items()}
+        return {}
+    
+    def _schedule_timer(self, name: str, func: Callable, delay: float):
+        """Backward compatibility method for tests."""
+        if hasattr(self, 'timer_manager'):
+            self.timer_manager.schedule(name, func, delay)
+    
+    def _cancel_timer(self, name: str) -> bool:
+        """Backward compatibility method for tests."""
+        if hasattr(self, 'timer_manager'):
+            return self.timer_manager.cancel(name)
+        return False
+    
+    def _cancel_all_timers(self) -> int:
+        """Backward compatibility method for tests."""
+        if hasattr(self, 'timer_manager'):
+            return self.timer_manager.cancel_all()
+        return 0
     
     def cleanup(self):
         """Clean shutdown of controller."""

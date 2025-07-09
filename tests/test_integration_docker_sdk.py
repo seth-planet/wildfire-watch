@@ -334,7 +334,6 @@ log_dest stdout
 
 @pytest.mark.docker
 @pytest.mark.timeout(300)
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_docker_sdk_integration():
     """Test Docker container integration using SDK"""
     test = DockerSDKIntegrationTest()

@@ -62,10 +62,11 @@ def test_calculate_area_signature():
     from fire_consensus.consensus import FireConsensus, FireConsensusConfig
     from unittest.mock import Mock, patch
     
-    # Mock MQTT connection
-    with patch('fire_consensus.consensus.FireConsensus._setup_mqtt'):
-        # Create consensus (it creates its own config)
-        consensus = FireConsensus()
+    # Mock MQTT setup_mqtt method and background tasks
+    with patch('fire_consensus.consensus.MQTTService.setup_mqtt'):
+        with patch.object(FireConsensus, '_start_background_tasks'):
+            # Create consensus (it creates its own config)
+            consensus = FireConsensus()
     
     # Test with camera_resolution parameter
     bbox = [100, 100, 200, 200]

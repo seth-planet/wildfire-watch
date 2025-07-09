@@ -347,7 +347,6 @@ def visualize_detection(image: np.ndarray, detections: List[FireDetection],
 
 @pytest.mark.api_usage  
 @pytest.mark.python310  # Mark as requiring Python 3.10
-@pytest.mark.skip(reason="Temporarily disabled during refactoring - Phase 1")
 def test_fire_detection_e2e():
     """Run end-to-end fire detection test."""
     
