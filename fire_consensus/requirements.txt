@@ -1,8 +1,9 @@
 # Fire Consensus Service Requirements
 # Python 3.12 compatible
 
-paho-mqtt>=2.0.0
-python-dotenv>=1.0.0
 numpy>=1.26.0
 PyYAML>=6.0.0
 psutil>=5.9.0
+paho-mqtt==2.1.0
+python-dotenv==1.1.1
+
