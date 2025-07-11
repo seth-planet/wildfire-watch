@@ -34,6 +34,7 @@ from utils.mqtt_service import MQTTService
 from utils.health_reporter import HealthReporter
 from utils.thread_manager import ThreadSafeService, SafeTimerManager
 from utils.config_base import ConfigBase, ConfigSchema
+from utils.safe_logging import SafeLoggingMixin
 
 load_dotenv()
 
@@ -269,7 +270,7 @@ class ConsensusHealthReporter(HealthReporter):
 # ─────────────────────────────────────────────────────────────
 # Refactored Fire Consensus Service
 # ─────────────────────────────────────────────────────────────
-class FireConsensus(MQTTService, ThreadSafeService):
+class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
     """Refactored fire consensus service using base classes.
     
     This implementation reduces code duplication by:
@@ -313,44 +314,44 @@ class FireConsensus(MQTTService, ThreadSafeService):
         
         try:
             # Start background tasks
-            self.logger.info("Starting background tasks...")
+            self._safe_log('info', "Starting background tasks...")
             self._start_background_tasks()
-            self.logger.info("Background tasks started successfully")
+            self._safe_log('info', "Background tasks started successfully")
         except Exception as e:
-            self.logger.error(f"Failed to start background tasks: {e}", exc_info=True)
+            self._safe_log('error', f"Failed to start background tasks: {e}", exc_info=True)
             raise
         
-        self.logger.info(f"Fire Consensus configured: {self.config.service_id}")
+        self._safe_log('info', f"Fire Consensus configured: {self.config.service_id}")
         
         # Connect to MQTT before creating health reporter
         # This ensures MQTT is ready for health messages
         try:
-            self.logger.info("Connecting to MQTT...")
+            self._safe_log('info', "Connecting to MQTT...")
             self.connect()
-            self.logger.info("MQTT connection initiated")
+            self._safe_log('info', "MQTT connection initiated")
         except Exception as e:
-            self.logger.error(f"Failed to connect to MQTT: {e}", exc_info=True)
+            self._safe_log('error', f"Failed to connect to MQTT: {e}", exc_info=True)
             raise
         
         # Setup health reporter AFTER MQTT connection is initiated
-        self.logger.info("Creating ConsensusHealthReporter...")
+        self._safe_log('info', "Creating ConsensusHealthReporter...")
         self.health_reporter = ConsensusHealthReporter(self)
-        self.logger.info("ConsensusHealthReporter created successfully")
+        self._safe_log('info', "ConsensusHealthReporter created successfully")
         
         # Start health reporting
         try:
-            self.logger.info("Starting health reporting with interval: %s seconds", self.config.health_interval)
+            self._safe_log('info', f"Starting health reporting with interval: {self.config.health_interval} seconds")
             self.health_reporter.start_health_reporting()
-            self.logger.info("Health reporting started")
+            self._safe_log('info', "Health reporting started")
         except Exception as e:
-            self.logger.error(f"Failed to start health reporting: {e}", exc_info=True)
+            self._safe_log('error', f"Failed to start health reporting: {e}", exc_info=True)
             raise
         
-        self.logger.info(f"Fire Consensus fully initialized: {self.config.service_id}")
+        self._safe_log('info', f"Fire Consensus fully initialized: {self.config.service_id}")
         
         # Publish initial health status after connection
         try:
-            self.logger.info("Publishing initial health status...")
+            self._safe_log('info', "Publishing initial health status...")
             initial_health = {
                 'healthy': True,
                 'status': 'starting',
@@ -358,51 +359,51 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 'timestamp': time.time()
             }
             if self.publish_message("system/fire_consensus/health", initial_health, retain=True):
-                self.logger.info("Initial health status published successfully")
+                self._safe_log('info', "Initial health status published successfully")
             else:
-                self.logger.error("Failed to publish initial health status")
+                self._safe_log('error', "Failed to publish initial health status")
         except Exception as e:
-            self.logger.error(f"Failed to publish initial health: {e}", exc_info=True)
+            self._safe_log('error', f"Failed to publish initial health: {e}", exc_info=True)
         
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback."""
-        self.logger.info("MQTT connected, ready for fire detection messages")
+        self._safe_log('info', "MQTT connected, ready for fire detection messages")
         
     def _on_message(self, topic: str, payload: any):
         """Handle incoming MQTT messages."""
         try:
             # Debug: Log all received messages
-            self.logger.debug(f"Received message on topic '{topic}': {str(payload)[:100]}...")
+            self._safe_log('debug', f"Received message on topic '{topic}': {str(payload)[:100]}...")
             
             # Route messages based on topic
             if topic.startswith("fire/detection"):
-                self.logger.debug(f"Processing fire detection message on topic '{topic}'")
+                self._safe_log('debug', f"Processing fire detection message on topic '{topic}'")
                 self._handle_fire_detection(topic, payload)
             elif topic == "frigate/events":
-                self.logger.debug(f"Processing frigate event message on topic '{topic}'")
+                self._safe_log('debug', f"Processing frigate event message on topic '{topic}'")
                 self._handle_frigate_event(payload)
             elif topic == "system/camera_telemetry":
-                self.logger.debug(f"Processing camera telemetry message on topic '{topic}'")
+                self._safe_log('debug', f"Processing camera telemetry message on topic '{topic}'")
                 self._handle_camera_telemetry(payload)
             else:
-                self.logger.debug(f"Ignoring message on topic '{topic}' (no handler)")
+                self._safe_log('debug', f"Ignoring message on topic '{topic}' (no handler)")
                 
         except Exception as e:
-            self.logger.error(f"Error processing message on {topic}: {e}", exc_info=True)
+            self._safe_log('error', f"Error processing message on {topic}: {e}", exc_info=True)
             
     def _start_background_tasks(self):
         """Start background tasks using timer manager."""
         try:
             # Memory cleanup task
-            self.logger.debug(f"Scheduling memory cleanup with interval {self.config.memory_cleanup_interval}s")
+            self._safe_log('debug', f"Scheduling memory cleanup with interval {self.config.memory_cleanup_interval}s")
             self.timer_manager.schedule(
                 "memory_cleanup",
                 self._cleanup_old_data,
                 self.config.memory_cleanup_interval
             )
-            self.logger.info("Memory cleanup task scheduled successfully")
+            self._safe_log('info', "Memory cleanup task scheduled successfully")
         except Exception as e:
-            self.logger.error(f"Failed to schedule memory cleanup: {e}", exc_info=True)
+            self._safe_log('error', f"Failed to schedule memory cleanup: {e}", exc_info=True)
             # Don't raise - memory cleanup is not critical
         
     def _handle_fire_detection(self, topic: str, payload: Dict):
@@ -427,9 +428,9 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 return  # Invalid bbox
             
             area = self._calculate_area(bbox)
-            self.logger.debug(f"Calculated area: {area}, min: {self.config.min_area_ratio}, max: {self.config.max_area_ratio}")
+            self._safe_log('debug', f"Calculated area: {area}, min: {self.config.min_area_ratio}, max: {self.config.max_area_ratio}")
             if not (self.config.min_area_ratio <= area <= self.config.max_area_ratio):
-                self.logger.debug(f"Rejecting detection due to invalid area: {area}")
+                self._safe_log('debug', f"Rejecting detection due to invalid area: {area}")
                 return
                 
             # Create detection
@@ -440,7 +441,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
             self._add_detection(camera_id, detection)
             
         except Exception as e:
-            self.logger.error(f"Error handling fire detection: {e}")
+            self._safe_log('error', f"Error handling fire detection: {e}")
             
     def _handle_frigate_event(self, payload: Dict):
         """Process Frigate NVR events."""
@@ -475,7 +476,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
             self._add_detection(camera_id, detection)
             
         except Exception as e:
-            self.logger.error(f"Error handling Frigate event: {e}")
+            self._safe_log('error', f"Error handling Frigate event: {e}")
             
     def _handle_camera_telemetry(self, payload: Dict):
         """Update camera online status from telemetry."""
@@ -493,7 +494,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 camera.is_online = True
                 
         except Exception as e:
-            self.logger.error(f"Error handling camera telemetry: {e}")
+            self._safe_log('error', f"Error handling camera telemetry: {e}")
             
     def _add_detection(self, camera_id: str, detection: Detection):
         """Add detection and check for consensus."""
@@ -509,7 +510,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
             camera.last_seen = time.time()
             camera.is_online = True
             
-            self.logger.debug(f"Added detection from {camera_id}: "
+            self._safe_log('debug', f"Added detection from {camera_id}: "
                             f"confidence={detection.confidence:.2f}, "
                             f"area={detection.area:.4f}, "
                             f"object_id={detection.object_id}")
@@ -552,7 +553,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
                 # to prevent race condition where multiple threads trigger simultaneously
                 self.last_trigger_time = current_time
                 
-                self.logger.warning(f"CONSENSUS REACHED! {len(cameras_with_fires)} cameras "
+                self._safe_log('warning', f"CONSENSUS REACHED! {len(cameras_with_fires)} cameras "
                                   f"detecting growing fires: {cameras_with_fires}")
                 self._trigger_fire_response(cameras_with_fires, fire_locations)
                 
@@ -620,7 +621,7 @@ class FireConsensus(MQTTService, ThreadSafeService):
         # Publish with QoS 2 (exactly once)
         self.publish_message("fire/trigger", payload, qos=2)
         
-        self.logger.critical(f"FIRE TRIGGER SENT! Cameras: {cameras}")
+        self._safe_log('critical', f"FIRE TRIGGER SENT! Cameras: {cameras}")
         
     def _cleanup_old_data(self):
         """Periodic cleanup of old detection data."""
@@ -702,28 +703,6 @@ class FireConsensus(MQTTService, ThreadSafeService):
         except (ValueError, TypeError):
             return 0
         
-    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
-        """Safely log a message with comprehensive checks."""
-        try:
-            logger = getattr(self, 'logger', None)
-            if not logger:
-                return
-                
-            # Check if logger has handlers and they're not closed
-            if not hasattr(logger, 'handlers') or not logger.handlers:
-                return
-                
-            # Check each handler to ensure it's not closed
-            for handler in logger.handlers:
-                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-                    if handler.stream.closed:
-                        return
-                        
-            # Log the message
-            getattr(logger, level.lower())(message, exc_info=exc_info)
-        except (ValueError, AttributeError, OSError):
-            # Silently ignore logging errors during shutdown
-            pass
 
     def cleanup(self):
         """Clean shutdown of service."""

@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+
+{% block title %}Debug Panel - Wildfire Watch{% endblock %}
+
+{% block content %}
+<!-- Warning Banner -->
+<div class="bg-red-100 border-2 border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+    <div class="flex items-center">
+        <svg class="w-6 h-6 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+        </svg>
+        <div>
+            <p class="font-bold">WARNING: Debug Mode Active</p>
+            <p class="text-sm">All actions in this panel are logged for security audit. This interface allows system control operations and should only be used by authorized personnel.</p>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Left Column: System Control -->
+    <div class="space-y-6">
+        <!-- Manual Controls -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">Manual Controls</h2>
+            
+            <!-- CSRF Token -->
+            <input type="hidden" id="csrf_token" value="{{ csrf_token }}">
+            
+            <div class="space-y-4">
+                <!-- Fire Trigger -->
+                <div class="border-2 border-yellow-400 rounded p-4 bg-yellow-50">
+                    <h3 class="font-bold text-lg mb-2">Manual Fire Trigger</h3>
+                    <p class="text-sm text-gray-600 mb-3">
+                        This will publish a fire trigger event to MQTT. The system will respond as if a real fire was detected.
+                    </p>
+                    <button 
+                        onclick="sendDebugAction('fire_trigger')"
+                        class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Trigger Fire Event
+                    </button>
+                </div>
+                
+                <!-- Emergency Stop -->
+                <div class="border-2 border-red-400 rounded p-4 bg-red-50">
+                    <h3 class="font-bold text-lg mb-2">Emergency Stop</h3>
+                    <p class="text-sm text-gray-600 mb-3">
+                        Immediately stop all pump operations. This publishes an emergency stop command.
+                    </p>
+                    <button 
+                        onclick="sendDebugAction('emergency_stop')"
+                        class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Emergency Stop
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- System Status -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">Current System Status</h2>
+            <dl class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">Fire Active:</dt>
+                    <dd class="font-bold {{ 'text-red-600' if system_status.fire_active else 'text-green-600' }}">
+                        {{ 'Yes' if system_status.fire_active else 'No' }}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">Consensus Count:</dt>
+                    <dd class="font-bold">{{ system_status.consensus_count }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">MQTT Connected:</dt>
+                    <dd class="font-bold {{ 'text-green-600' if system_status.mqtt_connected else 'text-red-600' }}">
+                        {{ 'Yes' if system_status.mqtt_connected else 'No' }}
+                    </dd>
+                </div>
+            </dl>
+        </div>
+    </div>
+    
+    <!-- Right Column: MQTT Information -->
+    <div class="space-y-6">
+        <!-- MQTT Topics -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">MQTT Topics</h2>
+            <div class="max-h-96 overflow-y-auto">
+                <h3 class="font-medium mb-2">Subscribed Topics:</h3>
+                <ul class="text-sm font-mono bg-gray-50 p-2 rounded space-y-1">
+                    {% for topic in mqtt_topics %}
+                    <li>{{ topic }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Action Log -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">Recent Debug Actions</h2>
+            <div id="action-log" class="space-y-2 max-h-64 overflow-y-auto text-sm">
+                <p class="text-gray-500">No actions yet...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Raw MQTT Message Viewer -->
+<div class="mt-6 bg-white rounded-lg shadow p-6">
+    <h2 class="text-xl font-bold mb-4 text-gray-800">Raw MQTT Messages</h2>
+    <div class="bg-gray-900 text-green-400 p-4 rounded font-mono text-xs overflow-x-auto h-64" id="mqtt-log">
+        <p>Waiting for messages...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Debug action handler
+    async function sendDebugAction(action) {
+        const token = new URLSearchParams(window.location.search).get('token');
+        const csrfToken = document.getElementById('csrf_token').value;
+        
+        if (!confirm(`Are you sure you want to execute: ${action}?`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/debug/action', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                },
+                body: JSON.stringify({
+                    action: action,
+                    token: token
+                })
+            });
+            
+            const result = await response.json();
+            
+            // Log action
+            const log = document.getElementById('action-log');
+            const entry = document.createElement('div');
+            entry.className = response.ok ? 'text-green-600' : 'text-red-600';
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${action}: ${result.message}`;
+            log.insertBefore(entry, log.firstChild);
+            
+            if (log.children.length > 1 && log.children[log.children.length - 1].textContent.includes('No actions yet')) {
+                log.removeChild(log.children[log.children.length - 1]);
+            }
+            
+        } catch (error) {
+            alert(`Error: ${error.message}`);
+        }
+    }
+    
+    // Fetch and display MQTT messages
+    async function updateMQTTLog() {
+        try {
+            const response = await fetch('/api/events?limit=20');
+            const data = await response.json();
+            
+            const log = document.getElementById('mqtt-log');
+            log.innerHTML = '';
+            
+            data.events.forEach(event => {
+                const line = document.createElement('div');
+                line.textContent = `[${event.timestamp}] ${event.topic}: ${JSON.stringify(event.payload)}`;
+                log.appendChild(line);
+            });
+        } catch (error) {
+            console.error('Error fetching MQTT messages:', error);
+        }
+    }
+    
+    // Update MQTT log every 5 seconds
+    setInterval(updateMQTTLog, 5000);
+    updateMQTTLog();
+    
+    // Warning on page unload
+    window.addEventListener('beforeunload', (e) => {
+        e.preventDefault();
+        e.returnValue = 'Debug mode is active. Are you sure you want to leave?';
+    });
+</script>
+{% endblock %}

@@ -10,9 +10,10 @@ import logging
 import time
 from typing import Dict, Callable, Optional, List, Set
 from contextlib import contextmanager
+from .safe_logging import SafeLoggingMixin
 
 
-class SafeTimerManager:
+class SafeTimerManager(SafeLoggingMixin):
     """Thread-safe timer management with automatic cleanup.
     
     Prevents timer leaks and ensures proper cleanup on shutdown.
@@ -33,28 +34,6 @@ class SafeTimerManager:
         self.logger = logger or logging.getLogger(__name__)
         self._shutdown = False
     
-    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
-        """Safely log a message with comprehensive checks."""
-        try:
-            logger = getattr(self, 'logger', None)
-            if not logger:
-                return
-                
-            # Check if logger has handlers and they're not closed
-            if not hasattr(logger, 'handlers') or not logger.handlers:
-                return
-                
-            # Check each handler to ensure it's not closed
-            for handler in logger.handlers:
-                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-                    if handler.stream.closed:
-                        return
-                        
-            # Log the message
-            getattr(logger, level.lower())(message, exc_info=exc_info)
-        except (ValueError, AttributeError, OSError):
-            # Silently ignore logging errors during shutdown
-            pass
         
     def schedule(self, name: str, func: Callable, delay: float,
                 error_handler: Optional[Callable[[str, Exception], None]] = None) -> None:
@@ -88,19 +67,19 @@ class SafeTimerManager:
                 try:
                     func()
                 except Exception as e:
-                    self.logger.error(f"Timer '{name}' failed: {e}")
+                    self._safe_log('error', f"Timer '{name}' failed: {e}")
                     if error_handler:
                         try:
                             error_handler(name, e)
                         except Exception as handler_error:
-                            self.logger.error(f"Error handler for timer '{name}' failed: {handler_error}")
+                            self._safe_log('error', f"Error handler for timer '{name}' failed: {handler_error}")
             
             # Create and start timer
             timer = threading.Timer(delay, wrapped_func)
             timer.daemon = True
             timer.start()
             self._timers[name] = timer
-            self.logger.debug(f"Scheduled timer '{name}' for {delay}s")
+            self._safe_log('debug', f"Scheduled timer '{name}' for {delay}s")
     
     def cancel(self, name: str) -> bool:
         """Cancel a timer if it exists.
@@ -115,7 +94,7 @@ class SafeTimerManager:
             timer = self._timers.pop(name, None)
             if timer and timer.is_alive():
                 timer.cancel()
-                self.logger.debug(f"Cancelled timer '{name}'")
+                self._safe_log('debug', f"Cancelled timer '{name}'")
                 return True
             return False
     
@@ -177,14 +156,14 @@ class SafeTimerManager:
             try:
                 timer.join(timeout=2.0)  # 2 second timeout per timer
                 if timer.is_alive():
-                    self.logger.warning(f"Timer '{name}' did not finish within timeout")
+                    self._safe_log('warning', f"Timer '{name}' did not finish within timeout")
             except Exception as e:
-                self.logger.error(f"Error joining timer '{name}': {e}")
+                self._safe_log('error', f"Error joining timer '{name}': {e}")
         
-        self.logger.debug("Timer manager shutdown complete")
+        self._safe_log('debug', "Timer manager shutdown complete")
 
 
-class ThreadSafeService:
+class ThreadSafeService(SafeLoggingMixin):
     """Base class for services with background threads.
     
     Provides thread management, graceful shutdown, and state coordination.
@@ -212,28 +191,6 @@ class ThreadSafeService:
         self._state_lock = threading.Lock()
         self._state = "initialized"
     
-    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
-        """Safely log a message with comprehensive checks."""
-        try:
-            logger = getattr(self, 'logger', None)
-            if not logger:
-                return
-                
-            # Check if logger has handlers and they're not closed
-            if not hasattr(logger, 'handlers') or not logger.handlers:
-                return
-                
-            # Check each handler to ensure it's not closed
-            for handler in logger.handlers:
-                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-                    if handler.stream.closed:
-                        return
-                        
-            # Log the message
-            getattr(logger, level.lower())(message, exc_info=exc_info)
-        except (ValueError, AttributeError, OSError):
-            # Silently ignore logging errors during shutdown
-            pass
         
     def start_thread(self, name: str, target: Callable, daemon: bool = True) -> None:
         """Start a managed background thread.
@@ -250,11 +207,11 @@ class ThreadSafeService:
             # Create wrapper that logs exceptions
             def thread_wrapper():
                 try:
-                    self.logger.debug(f"Thread '{name}' started")
+                    self._safe_log('debug', f"Thread '{name}' started")
                     target()
-                    self.logger.debug(f"Thread '{name}' completed")
+                    self._safe_log('debug', f"Thread '{name}' completed")
                 except Exception as e:
-                    self.logger.error(f"Thread '{name}' crashed: {e}", exc_info=True)
+                    self._safe_log('error', f"Thread '{name}' crashed: {e}", exc_info=True)
                 finally:
                     with self._thread_lock:
                         self._threads.pop(name, None)
@@ -286,10 +243,10 @@ class ThreadSafeService:
             thread.join(timeout)
             
             if thread.is_alive():
-                self.logger.warning(f"Thread '{name}' did not stop within {timeout}s")
+                self._safe_log('warning', f"Thread '{name}' did not stop within {timeout}s")
                 return False
             else:
-                self.logger.debug(f"Thread '{name}' stopped")
+                self._safe_log('debug', f"Thread '{name}' stopped")
                 return True
         
         return True
@@ -318,7 +275,7 @@ class ThreadSafeService:
             if thread.is_alive():
                 thread.join(remaining)
                 if thread.is_alive():
-                    self.logger.warning(f"Thread '{name}' still running after shutdown")
+                    self._safe_log('warning', f"Thread '{name}' still running after shutdown")
                     failed += 1
         
         # Clear thread dict
@@ -382,7 +339,7 @@ class ThreadSafeService:
         self._safe_log('info', f"{self.service_name} shutdown complete")
 
 
-class BackgroundTaskRunner:
+class BackgroundTaskRunner(SafeLoggingMixin):
     """Manages periodic background tasks with error recovery."""
     
     def __init__(self, name: str, interval: float, task: Callable,
@@ -405,10 +362,11 @@ class BackgroundTaskRunner:
         self._error_count = 0
         self._max_errors = 10
         
+        
     def start(self) -> None:
         """Start the background task."""
         if self._thread and self._thread.is_alive():
-            self.logger.warning(f"Task '{self.name}' is already running")
+            self._safe_log('warning', f"Task '{self.name}' is already running")
             return
         
         self._stop_event.clear()
@@ -417,7 +375,7 @@ class BackgroundTaskRunner:
         self._thread = threading.Thread(target=self._run, name=f"task-{self.name}")
         self._thread.daemon = True
         self._thread.start()
-        self.logger.info(f"Started background task '{self.name}'")
+        self._safe_log('info', f"Started background task '{self.name}'")
     
     def stop(self, timeout: float = 5.0) -> bool:
         """Stop the background task.
@@ -431,22 +389,26 @@ class BackgroundTaskRunner:
         if not self._thread or not self._thread.is_alive():
             return True
         
-        self.logger.info(f"Stopping background task '{self.name}'")
+        self._safe_log('info', f"Stopping background task '{self.name}'")
         self._stop_event.set()
         
         self._thread.join(timeout)
         
         if self._thread.is_alive():
-            self.logger.warning(f"Task '{self.name}' did not stop within {timeout}s")
+            self._safe_log('warning', f"Task '{self.name}' did not stop within {timeout}s")
             return False
         
-        self.logger.info(f"Background task '{self.name}' stopped")
+        self._safe_log('info', f"Background task '{self.name}' stopped")
         return True
     
     def _run(self) -> None:
         """Main task loop with error recovery."""
         while not self._stop_event.is_set():
             try:
+                # Check if we should stop before executing task
+                if self._stop_event.is_set():
+                    break
+                    
                 # Execute task
                 self.task()
                 
@@ -454,12 +416,17 @@ class BackgroundTaskRunner:
                 self._error_count = 0
                 
             except Exception as e:
+                # Check if error is due to shutdown
+                if "closed file" in str(e).lower() or "interpreter shutdown" in str(e).lower():
+                    # These are expected during shutdown, just exit cleanly
+                    break
+                    
                 self._error_count += 1
-                self.logger.error(f"Task '{self.name}' error #{self._error_count}: {e}")
+                self._safe_log('error', f"Task '{self.name}' error #{self._error_count}: {e}")
                 
                 # Stop if too many errors
                 if self._error_count >= self._max_errors:
-                    self.logger.error(f"Task '{self.name}' stopping after {self._error_count} errors")
+                    self._safe_log('error', f"Task '{self.name}' stopping after {self._error_count} errors")
                     break
                 
                 # Brief delay before retry

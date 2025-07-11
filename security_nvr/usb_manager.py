@@ -60,11 +60,12 @@ import pyudev
 # Import centralized command runner
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.command_runner import run_command, CommandError
+from utils.safe_logging import SafeLoggingMixin
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-class USBStorageManager:
+class USBStorageManager(SafeLoggingMixin):
     """Manages USB storage devices for Frigate NVR recordings.
     
     Provides automatic detection, mounting, and monitoring of USB storage
@@ -114,6 +115,7 @@ class USBStorageManager:
             - Does not start monitoring (call setup_auto_mount for that)
         """
         self.mount_path = mount_path
+        self.logger = logger
         self.context = pyudev.Context()
         self.monitor = pyudev.Monitor.from_netlink(self.context)
         self.monitor.filter_by(subsystem='block', device_type='partition')
@@ -156,7 +158,7 @@ class USBStorageManager:
             return info
             
         except Exception as e:
-            logger.error(f"Error getting drive info: {e}")
+            self._safe_log('error', f"Error getting drive info: {e}")
             return None
     
     def _get_partition_size(self, device_path: str) -> Optional[int]:
@@ -169,7 +171,7 @@ class USBStorageManager:
             )
             return int(output)
         except (CommandError, FileNotFoundError, PermissionError, ValueError) as e:
-            logger.error(f"Could not get size for {device_path}: {e}")
+            self._safe_log('error', f"Could not get size for {device_path}: {e}")
             return None
     
     def _is_mounted(self, device_path: str) -> bool:
@@ -236,17 +238,17 @@ class USBStorageManager:
             # Check if already mounted at correct location
             for drive in drives:
                 if drive['mount_point'] == self.mount_path:
-                    logger.info(f"Drive already mounted at {self.mount_path}")
+                    self._safe_log('info', f"Drive already mounted at {self.mount_path}")
                     return drive['device']
                     
-            logger.warning("No unmounted USB drives found")
+            self._safe_log('warning', "No unmounted USB drives found")
             return None
         
         # Sort by size and get largest
         unmounted.sort(key=lambda d: d['size_bytes'] or 0, reverse=True)
         largest = unmounted[0]
         
-        logger.info(f"Selected drive: {largest['device']} ({largest['size_human']})")
+        self._safe_log('info', f"Selected drive: {largest['device']} ({largest['size_human']})")
         
         # Mount the drive
         return self.mount_drive(largest['device'], largest['filesystem'])
@@ -276,7 +278,7 @@ class USBStorageManager:
             return_code, _, stderr = run_command(mount_cmd, timeout=15, check=False)
             
             if return_code == 0:
-                logger.info(f"Successfully mounted {device} to {self.mount_path}")
+                self._safe_log('info', f"Successfully mounted {device} to {self.mount_path}")
                 
                 # Set permissions
                 os.chmod(self.mount_path, 0o755)
@@ -286,10 +288,10 @@ class USBStorageManager:
                 
                 return device
             else:
-                logger.error(f"Failed to mount: {stderr}")
+                self._safe_log('error', f"Failed to mount: {stderr}")
                 
         except Exception as e:
-            logger.error(f"Mount error: {e}")
+            self._safe_log('error', f"Mount error: {e}")
             
         return None
     
@@ -308,7 +310,7 @@ class USBStorageManager:
             os.makedirs(dir_path, exist_ok=True)
             os.chmod(dir_path, 0o755)
             
-        logger.info("Created Frigate directory structure")
+        self._safe_log('info', "Created Frigate directory structure")
     
     def unmount_drive(self) -> bool:
         """Unmount the current drive"""
@@ -320,13 +322,13 @@ class USBStorageManager:
             )
             
             if return_code == 0:
-                logger.info(f"Successfully unmounted {self.mount_path}")
+                self._safe_log('info', f"Successfully unmounted {self.mount_path}")
                 return True
             else:
-                logger.error(f"Failed to unmount: {stderr}")
+                self._safe_log('error', f"Failed to unmount: {stderr}")
                 
         except (CommandError, FileNotFoundError, PermissionError) as e:
-            logger.error(f"Unmount error: {e}")
+            self._safe_log('error', f"Unmount error: {e}")
             
         return False
     
@@ -360,7 +362,7 @@ class USBStorageManager:
                         }
                         
         except (CommandError, FileNotFoundError, PermissionError, ValueError) as e:
-            logger.error(f"Error getting storage stats: {e}")
+            self._safe_log('error', f"Error getting storage stats: {e}")
             
         return None
     
@@ -374,9 +376,9 @@ class USBStorageManager:
             if used_percent >= critical_percent:
                 logger.critical(f"Storage critically low: {used_percent}% used")
             elif used_percent >= warning_percent:
-                logger.warning(f"Storage running low: {used_percent}% used")
+                self._safe_log('warning', f"Storage running low: {used_percent}% used")
             else:
-                logger.info(f"Storage usage: {used_percent}% ({stats['used_human']} / {stats['total_human']})")
+                self._safe_log('info', f"Storage usage: {used_percent}% ({stats['used_human']} / {stats['total_human']})")
                 
             return stats
             
@@ -408,7 +410,7 @@ class USBStorageManager:
             - KeyboardInterrupt (Ctrl+C) stops monitoring gracefully
             - Observer thread is properly stopped on exit
         """
-        logger.info("Starting USB monitor...")
+        self._safe_log('info', "Starting USB monitor...")
         
         observer = pyudev.MonitorObserver(self.monitor, self._handle_usb_event)
         observer.start()
@@ -421,12 +423,12 @@ class USBStorageManager:
                 
         except KeyboardInterrupt:
             observer.stop()
-            logger.info("USB monitor stopped")
+            self._safe_log('info', "USB monitor stopped")
     
     def _handle_usb_event(self, action, device):
         """Handle USB insertion/removal events"""
         if action == 'add' and self._is_usb_device(device):
-            logger.info(f"USB device inserted: {device.device_node}")
+            self._safe_log('info', f"USB device inserted: {device.device_node}")
             time.sleep(2)  # Wait for device to settle
             
             # Check if we need to mount
@@ -434,7 +436,7 @@ class USBStorageManager:
                 self.mount_largest_drive()
                 
         elif action == 'remove':
-            logger.info(f"USB device removed: {device.device_node}")
+            self._safe_log('info', f"USB device removed: {device.device_node}")
 
 def main():
     """Command-line interface for USB storage management.

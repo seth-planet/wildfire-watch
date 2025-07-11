@@ -25,30 +25,67 @@ import docker
 import psutil
 from contextlib import contextmanager
 
+# Add path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.safe_logging import SafeLoggingMixin
+
 logger = logging.getLogger(__name__)
 
-class EnhancedProcessCleaner:
+class EnhancedProcessCleaner(SafeLoggingMixin):
     """Enhanced process cleanup focusing on generic 'python' process leaks."""
     
     def __init__(self):
+        self.logger = logger  # Add logger attribute for SafeLoggingMixin
         self.docker_client = None
         self.cleanup_registry = []
         self.original_sigint_handler = None
         self.original_sigterm_handler = None
+        self._is_pytest_running = self._detect_pytest()
+        
+        # If pytest is running, significantly limit cleanup activities
+        if self._is_pytest_running:
+            self._safe_log("info", "Pytest detected - running in limited cleanup mode")
         
         try:
             self.docker_client = docker.from_env()
         except Exception as e:
-            logger.warning(f"Docker not available: {e}")
+            self._safe_log("warning", f"Docker not available: {e}")
         
         # Register cleanup on exit
         atexit.register(self.cleanup_all)
         self._setup_signal_handlers()
     
+    
+    def _detect_pytest(self) -> bool:
+        """Detect if we're running under pytest."""
+        # Check for PYTEST_CURRENT_TEST environment variable
+        if os.environ.get('PYTEST_CURRENT_TEST'):
+            return True
+        
+        # Check if pytest is in sys.modules
+        if 'pytest' in sys.modules:
+            return True
+        
+        # Check command line arguments
+        if any('pytest' in arg for arg in sys.argv):
+            return True
+        
+        # Check process name
+        try:
+            import psutil
+            current_process = psutil.Process()
+            cmdline = ' '.join(current_process.cmdline())
+            if 'pytest' in cmdline or 'py.test' in cmdline:
+                return True
+        except:
+            pass
+        
+        return False
+    
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful cleanup on interruption."""
         def signal_handler(signum, frame):
-            logger.info(f"Received signal {signum}, performing cleanup...")
+            self._safe_log("info", f"Received signal {signum}, performing cleanup...")
             self.cleanup_all()
             # Restore original handler and re-raise
             if signum == signal.SIGINT and self.original_sigint_handler:
@@ -75,6 +112,11 @@ class EnhancedProcessCleaner:
         This specifically targets processes launched with 'python' instead of 'python3.12'.
         These are the primary cause of zombie processes and resource exhaustion.
         """
+        # Skip aggressive cleanup during pytest runs
+        if self._is_pytest_running:
+            self._safe_log("debug", "Skipping generic python process cleanup during pytest")
+            return 0
+            
         cleaned = 0
         current_pid = os.getpid()
         
@@ -91,7 +133,7 @@ class EnhancedProcessCleaner:
                                 # Get process info before killing
                                 proc_info = subprocess.run(['ps', '-p', pid, '-o', 'pid,ppid,cmd'], 
                                                          capture_output=True, text=True, timeout=5)
-                                logger.info(f"Killing generic python process {pid}: {proc_info.stdout}")
+                                self._safe_log("info", f"Killing generic python process {pid}: {proc_info.stdout}")
                                 
                                 # Graceful termination first
                                 subprocess.run(['kill', '-TERM', pid], timeout=2)
@@ -105,7 +147,7 @@ class EnhancedProcessCleaner:
                             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                                 pass  # Process already dead or inaccessible
             except subprocess.TimeoutExpired:
-                logger.warning("Timeout finding generic python processes with pgrep")
+                self._safe_log("warning", "Timeout finding generic python processes with pgrep")
             
             # Method 2: Use psutil for detailed inspection
             try:
@@ -124,11 +166,18 @@ class EnhancedProcessCleaner:
                                 system_excludes = [
                                     '/usr/bin/python3',
                                     'networkd-dispatcher', 
-                                    'unattended-upgrade'
+                                    'unattended-upgrade',
+                                    'pytest',
+                                    'py.test',
+                                    '-m pytest',
+                                    'xdist',
+                                    'execnet',
+                                    'gw[0-9]',  # pytest-xdist workers
+                                    'gateway_base.py'  # execnet gateway
                                 ]
                                 
                                 if not any(exclude in cmd_str for exclude in system_excludes):
-                                    logger.info(f"Terminating generic python process {info['pid']}: {cmd_str}")
+                                    self._safe_log("info", f"Terminating generic python process {info['pid']}: {cmd_str}")
                                     
                                     proc.terminate()
                                     try:
@@ -143,10 +192,10 @@ class EnhancedProcessCleaner:
                         pass
                         
             except Exception as e:
-                logger.warning(f"Error using psutil for python cleanup: {e}")
+                self._safe_log("warning", f"Error using psutil for python cleanup: {e}")
                 
         except Exception as e:
-            logger.error(f"Error cleaning generic python processes: {e}")
+            self._safe_log("error", f"Error cleaning generic python processes: {e}")
         
         return cleaned
     
@@ -161,7 +210,7 @@ class EnhancedProcessCleaner:
                         pid = proc.info['pid']
                         ppid = proc.info['ppid']
                         
-                        logger.info(f"Found zombie process {pid} (parent: {ppid})")
+                        self._safe_log("info", f"Found zombie process {pid} (parent: {ppid})")
                         
                         # Try to clean up zombie by signaling parent
                         try:
@@ -175,7 +224,7 @@ class EnhancedProcessCleaner:
                                 # Try killing parent if it's a test process
                                 parent_cmdline = ' '.join(parent.cmdline())
                                 if any(test_term in parent_cmdline for test_term in ['pytest', 'test_', '/tests/']):
-                                    logger.info(f"Killing parent test process {ppid} to clean zombie {pid}")
+                                    self._safe_log("info", f"Killing parent test process {ppid} to clean zombie {pid}")
                                     parent.terminate()
                                     parent.wait(timeout=2)
                             
@@ -188,7 +237,7 @@ class EnhancedProcessCleaner:
                     pass
                     
         except Exception as e:
-            logger.warning(f"Error cleaning zombie processes: {e}")
+            self._safe_log("warning", f"Error cleaning zombie processes: {e}")
         
         return cleaned
     
@@ -230,11 +279,11 @@ class EnhancedProcessCleaner:
                         config = container.attrs.get('Config', {})
                         cmd = config.get('Cmd', [])
                         if cmd and len(cmd) > 0 and cmd[0] == 'python':
-                            logger.info(f"Found container using generic python: {container.name}")
+                            self._safe_log("info", f"Found container using generic python: {container.name}")
                             should_clean = True
                     
                     if should_clean:
-                        logger.info(f"Cleaning up test container: {container.name}")
+                        self._safe_log("info", f"Cleaning up test container: {container.name}")
                         
                         if container.status == 'running':
                             container.stop(timeout=5)
@@ -243,25 +292,28 @@ class EnhancedProcessCleaner:
                         cleaned += 1
                         
                 except Exception as e:
-                    logger.warning(f"Error cleaning container {container.name}: {e}")
+                    self._safe_log("warning", f"Error cleaning container {container.name}: {e}")
                     
         except Exception as e:
-            logger.warning(f"Error cleaning Docker containers: {e}")
+            self._safe_log("warning", f"Error cleaning Docker containers: {e}")
         
         return cleaned
     
     def cleanup_subprocess_processes(self) -> int:
         """Clean up subprocess processes that may be leaked."""
+        # During pytest, don't clean up mosquitto processes - they're managed by test fixtures
+        if self._is_pytest_running:
+            subprocess_patterns = []  # Don't kill any subprocess during pytest
+        else:
+            subprocess_patterns = [
+                'mosquitto.*mqtt_test_',
+                # Other patterns can be added here for non-test cleanup
+            ]
+        
         cleaned = 0
         current_pid = os.getpid()
         
         try:
-            # Find processes with subprocess-related patterns
-            subprocess_patterns = [
-                'mosquitto.*mqtt_test_',
-                'python.*-c.*import',
-                'python.*pytest',
-            ]
             
             for pattern in subprocess_patterns:
                 try:
@@ -275,7 +327,14 @@ class EnhancedProcessCleaner:
                                     # Get process info
                                     proc_info = subprocess.run(['ps', '-p', pid, '-o', 'pid,cmd'], 
                                                              capture_output=True, text=True, timeout=2)
-                                    logger.info(f"Cleaning subprocess {pid}: {proc_info.stdout.strip()}")
+                                    cmd_output = proc_info.stdout.strip()
+                                    
+                                    # Additional safety check - don't kill pytest-related processes
+                                    if any(protected in cmd_output for protected in ['pytest', 'execnet', 'xdist', 'gateway_base']):
+                                        self._safe_log("debug", f"Skipping protected process {pid}: {cmd_output}")
+                                        continue
+                                        
+                                    self._safe_log("info", f"Cleaning subprocess {pid}: {cmd_output}")
                                     
                                     subprocess.run(['kill', '-TERM', pid], timeout=1)
                                     time.sleep(0.2)
@@ -288,10 +347,10 @@ class EnhancedProcessCleaner:
                                 except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                                     pass
                 except subprocess.TimeoutExpired:
-                    logger.warning(f"Timeout finding processes with pattern: {pattern}")
+                    self._safe_log("warning", f"Timeout finding processes with pattern: {pattern}")
                     
         except Exception as e:
-            logger.warning(f"Error cleaning subprocess processes: {e}")
+            self._safe_log("warning", f"Error cleaning subprocess processes: {e}")
         
         return cleaned
     
@@ -319,13 +378,13 @@ class EnhancedProcessCleaner:
                     proc.kill()
                     proc.wait(timeout=1)
         except Exception as e:
-            logger.warning(f"Error cleaning subprocess {proc.pid}: {e}")
+            self._safe_log("warning", f"Error cleaning subprocess {proc.pid}: {e}")
     
     def cleanup_all(self) -> Dict[str, int]:
         """Perform comprehensive cleanup with focus on process leaks."""
         results = {}
         
-        logger.info("Starting enhanced process cleanup (targeting generic python processes)...")
+        self._safe_log("info", "Starting enhanced process cleanup (targeting generic python processes)...")
         
         # Priority order - most critical first
         results['generic_python'] = self.cleanup_generic_python_processes()
@@ -341,13 +400,13 @@ class EnhancedProcessCleaner:
                 registry_cleaned += 1
                 self.cleanup_registry.remove(resource)
             except Exception as e:
-                logger.warning(f"Error cleaning registered resource {resource['id']}: {e}")
+                self._safe_log("warning", f"Error cleaning registered resource {resource['id']}: {e}")
         
         results['registered_resources'] = registry_cleaned
         
         total_cleaned = sum(results.values())
-        logger.info(f"Enhanced cleanup complete. Total items cleaned: {total_cleaned}")
-        logger.info(f"Breakdown: {results}")
+        self._safe_log("info", f"Enhanced cleanup complete. Total items cleaned: {total_cleaned}")
+        self._safe_log("info", f"Breakdown: {results}")
         
         return results
 

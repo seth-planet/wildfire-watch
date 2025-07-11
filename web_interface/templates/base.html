@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>{% block title %}Wildfire Watch Status Panel{% endblock %}</title>
+    
+    <!-- Security headers via meta tags -->
+    <meta http-equiv="X-Content-Type-Options" content="nosniff">
+    <meta http-equiv="X-Frame-Options" content="DENY">
+    
+    <!-- Local CSS - no external dependencies -->
+    <link rel="stylesheet" href="/static/style.css">
+    
+    <!-- HTMX for lightweight reactivity -->
+    <script src="/static/htmx.min.js"></script>
+    
+    <!-- Alpine.js for minimal interactivity -->
+    <script src="/static/alpine.min.js" defer></script>
+    
+    <!-- Auto-refresh configuration -->
+    {% if refresh_interval %}
+    <meta http-equiv="refresh" content="{{ refresh_interval }}">
+    {% endif %}
+    
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="bg-gray-100 text-gray-900">
+    <!-- Header -->
+    <header class="bg-blue-900 text-white shadow-lg">
+        <div class="container mx-auto px-4 py-3">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-bold">🔥 Wildfire Watch Status Panel</h1>
+                <div class="text-sm">
+                    <span class="mr-4">Mode: <strong>{{ 'Debug' if debug_mode else 'Read-Only' }}</strong></span>
+                    <span id="last-update">Last Update: <span class="font-mono">--:--:--</span></span>
+                </div>
+            </div>
+        </div>
+    </header>
+    
+    <!-- System Status Bar -->
+    <div class="bg-gray-800 text-white py-2">
+        <div class="container mx-auto px-4">
+            <div class="flex items-center justify-between text-sm">
+                <div class="flex items-center space-x-6">
+                    <span class="flex items-center">
+                        <span class="w-3 h-3 rounded-full mr-2 {{ 'bg-red-500' if system_status.fire_active else 'bg-green-500' }}"></span>
+                        Fire Status: <strong class="ml-1">{{ system_status.fire_status }}</strong>
+                    </span>
+                    <span class="flex items-center">
+                        <span class="w-3 h-3 rounded-full mr-2 {{ 'bg-green-500' if system_status.mqtt_connected else 'bg-red-500' }}"></span>
+                        MQTT: <strong class="ml-1">{{ 'Connected' if system_status.mqtt_connected else 'Disconnected' }}</strong>
+                    </span>
+                    <span>
+                        Services: <strong>{{ system_status.services.healthy }}/{{ system_status.services.total }}</strong>
+                    </span>
+                    <span>
+                        Cameras: <strong>{{ system_status.cameras.active }}/{{ system_status.cameras.total }}</strong>
+                    </span>
+                </div>
+                {% if debug_mode %}
+                <a href="/debug?token={{ request.query_params.get('token', '') }}" class="bg-yellow-600 hover:bg-yellow-700 px-3 py-1 rounded text-xs">
+                    Debug Panel
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main Content -->
+    <main class="container mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+    
+    <!-- Footer -->
+    <footer class="bg-gray-800 text-gray-400 text-center py-4 mt-8">
+        <p class="text-sm">
+            Wildfire Watch System - 
+            <span class="font-mono">{{ 'LAN Access Only' if not debug_mode else 'Debug Mode Active' }}</span>
+            {% if audit_log_enabled %}
+            - All actions logged
+            {% endif %}
+        </p>
+    </footer>
+    
+    <!-- Base JavaScript -->
+    <script>
+        // Update last update time
+        function updateTime() {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0];
+            document.querySelector('#last-update span').textContent = timeStr;
+        }
+        
+        // Update on page load and after HTMX requests
+        updateTime();
+        document.body.addEventListener('htmx:afterSwap', updateTime);
+        
+        // Auto-refresh warning for debug mode
+        {% if debug_mode %}
+        console.warn('Debug mode is active. All actions are being logged.');
+        {% endif %}
+    </script>
+    
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

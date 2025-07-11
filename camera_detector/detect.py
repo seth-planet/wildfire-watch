@@ -47,6 +47,7 @@ from utils.health_reporter import HealthReporter
 from utils.thread_manager import ThreadSafeService, SafeTimerManager, BackgroundTaskRunner
 from utils.config_base import ConfigBase, ConfigSchema
 from utils.command_runner import run_command, CommandError
+from utils.safe_logging import SafeLoggingMixin
 
 load_dotenv()
 
@@ -269,7 +270,7 @@ class CameraHealthReporter(HealthReporter):
 # ─────────────────────────────────────────────────────────────
 # Refactored Camera Detector
 # ─────────────────────────────────────────────────────────────
-class CameraDetector(MQTTService, ThreadSafeService):
+class CameraDetector(MQTTService, ThreadSafeService, SafeLoggingMixin):
     """Refactored camera detector using base classes.
     
     This implementation reduces code duplication by:
@@ -331,7 +332,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
         # Setup background tasks using BackgroundTaskRunner
         self._setup_background_tasks()
         
-        self.logger.info(f"Camera Detector configured: {self.config.service_id}")
+        self._safe_log('info', f"Camera Detector configured: {self.config.service_id}")
         
         # Connect to MQTT after everything is initialized
         # This prevents race conditions during startup
@@ -340,7 +341,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
         # Start health reporting after MQTT connection
         self.health_reporter.start_health_reporting()
         
-        self.logger.info(f"Camera Detector fully initialized and connected: {self.config.service_id}")
+        self._safe_log('info', f"Camera Detector fully initialized and connected: {self.config.service_id}")
         
     def _parse_credentials(self) -> List[Tuple[str, str]]:
         """Parse camera credentials from config."""
@@ -348,7 +349,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
         
         # If specific username/password provided, use only those
         if self.config.default_username and self.config.default_password:
-            self.logger.info(f"Using provided credentials for user: {self.config.default_username}")
+            self._safe_log('info', f"Using provided credentials for user: {self.config.default_username}")
             return [(self.config.default_username, self.config.default_password)]
         
         # Parse credential pairs
@@ -360,7 +361,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
                     if user.strip():
                         creds.append((user.strip(), passwd.strip()))
         except Exception as e:
-            self.logger.error(f"Error parsing credentials: {e}")
+            self._safe_log('error', f"Error parsing credentials: {e}")
             creds = [("admin", ""), ("admin", "admin")]
         
         # Ensure at least one credential
@@ -369,9 +370,10 @@ class CameraDetector(MQTTService, ThreadSafeService):
             
         return creds
         
+        
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback."""
-        self.logger.info("MQTT connected, publishing initial camera states")
+        self._safe_log('info', "MQTT connected, publishing initial camera states")
         # Publish all known cameras
         with self.cameras_lock:
             for camera in self.cameras.values():
@@ -411,9 +413,17 @@ class CameraDetector(MQTTService, ThreadSafeService):
         
     def _discovery_cycle(self):
         """Main discovery cycle."""
+        # Check if we're shutting down
+        if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+            return
+            
         try:
-            self.logger.info(f"Starting discovery cycle #{self.discovery_count + 1}")
+            self._safe_log('info', f"Starting discovery cycle #{self.discovery_count + 1}")
             start_time = time.time()
+            
+            # Check shutdown before running discovery
+            if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+                return
             
             # Determine discovery mode
             if self._should_do_full_discovery():
@@ -427,24 +437,24 @@ class CameraDetector(MQTTService, ThreadSafeService):
             self._update_discovery_state()
             
             duration = time.time() - start_time
-            self.logger.info(f"Discovery cycle completed in {duration:.1f}s")
+            self._safe_log('info', f"Discovery cycle completed in {duration:.1f}s")
             
         except Exception as e:
-            self.logger.error(f"Discovery cycle error: {e}", exc_info=True)
+            self._safe_log('error', f"Discovery cycle error: {e}", exc_info=True)
             
     def _health_check_cycle(self):
         """Check health of known cameras."""
         with self.cameras_lock:
             cameras = list(self.cameras.values())
             
-        self.logger.debug(f"Checking health of {len(cameras)} cameras")
+        self._safe_log('debug', f"Checking health of {len(cameras)} cameras")
         
         # Check each camera in parallel
         futures = []
         
         # Add shutdown check before using executor
         if self._shutdown_event.is_set():
-            self.logger.debug("Health check cancelled - service shutting down")
+            self._safe_log('debug', "Health check cancelled - service shutting down")
             return
             
         try:
@@ -452,14 +462,14 @@ class CameraDetector(MQTTService, ThreadSafeService):
                 for camera in cameras:
                     # Double-check shutdown before submitting each future
                     if self._shutdown_event.is_set():
-                        self.logger.debug("Health check cancelled during submission - service shutting down")
+                        self._safe_log('debug', "Health check cancelled during submission - service shutting down")
                         return
                     future = executor.submit(self._check_camera_health, camera)
                     futures.append(future)
         except RuntimeError as e:
             # Handle "cannot schedule new futures after shutdown" error
             if "shutdown" in str(e).lower():
-                self.logger.debug("Health check cancelled - executor already shutdown")
+                self._safe_log('debug', "Health check cancelled - executor already shutdown")
                 return
             else:
                 raise
@@ -469,11 +479,11 @@ class CameraDetector(MQTTService, ThreadSafeService):
             try:
                 future.result()
             except Exception as e:
-                self.logger.error(f"Health check error: {e}")
+                self._safe_log('error', f"Health check error: {e}")
                     
     def _mac_tracking_cycle(self):
         """Update MAC address mappings."""
-        self.logger.debug("Updating MAC address mappings")
+        self._safe_log('debug', "Updating MAC address mappings")
         # Implementation would go here
         # For now, just a placeholder
         pass
@@ -496,37 +506,62 @@ class CameraDetector(MQTTService, ThreadSafeService):
         
     def _run_full_discovery(self):
         """Run full discovery using all methods."""
-        self.logger.info("Running full discovery")
+        # Check if we're shutting down
+        if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+            self._safe_log('debug', "Skipping full discovery - shutdown in progress")
+            return
+            
+        self._safe_log('info', "Running full discovery")
         self.last_full_discovery = time.time()
         
         discovered_cameras = []
         
+        # Check shutdown before creating executor
+        if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+            return
+        
         # Run discovery methods in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {}
-            
-            if self.config.onvif_enabled:
-                futures['onvif'] = executor.submit(self._discover_onvif_cameras)
-            if self.config.mdns_enabled:
-                futures['mdns'] = executor.submit(self._discover_mdns_cameras)
-            if self.config.network_scan_enabled:
-                futures['network'] = executor.submit(self._discover_network_cameras)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futures = {}
                 
-            # Collect results
-            for method, future in futures.items():
-                try:
-                    cameras = future.result(timeout=self.config.discovery_timeout)
-                    discovered_cameras.extend(cameras)
-                    self.logger.info(f"{method} discovery found {len(cameras)} cameras")
-                except Exception as e:
-                    self.logger.error(f"{method} discovery failed: {e}")
+                # Check shutdown before submitting tasks
+                if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+                    return
+                
+                if self.config.onvif_enabled:
+                    futures['onvif'] = executor.submit(self._discover_onvif_cameras)
+                if self.config.mdns_enabled:
+                    futures['mdns'] = executor.submit(self._discover_mdns_cameras)
+                if self.config.network_scan_enabled:
+                    futures['network'] = executor.submit(self._discover_network_cameras)
+                    
+                # Collect results
+                for method, future in futures.items():
+                    try:
+                        # Check shutdown before waiting for result
+                        if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+                            self._safe_log('debug', f"Cancelling {method} discovery - shutdown in progress")
+                            future.cancel()
+                            continue
+                            
+                        cameras = future.result(timeout=self.config.discovery_timeout)
+                        discovered_cameras.extend(cameras)
+                        self._safe_log('info', f"{method} discovery found {len(cameras)} cameras")
+                    except Exception as e:
+                        self._safe_log('error', f"{method} discovery failed: {e}")
+        except RuntimeError as e:
+            # Handle "cannot schedule new futures after interpreter shutdown"
+            self._safe_log('debug', f"Discovery executor error (likely during shutdown): {e}")
+            return
                     
         # Process discovered cameras
-        self._process_discovered_cameras(discovered_cameras)
+        if not (hasattr(self, '_shutdown_event') and self._shutdown_event.is_set()):
+            self._process_discovered_cameras(discovered_cameras)
         
     def _run_smart_discovery(self):
         """Run smart discovery (reduced resource usage)."""
-        self.logger.info("Running smart discovery")
+        self._safe_log('info', "Running smart discovery")
         
         # Only check known camera IPs
         with self.cameras_lock:
@@ -537,7 +572,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
             try:
                 self._validate_camera_ip(ip)
             except Exception as e:
-                self.logger.debug(f"Camera at {ip} validation failed: {e}")
+                self._safe_log('debug', f"Camera at {ip} validation failed: {e}")
                 
     def _update_discovery_state(self):
         """Update smart discovery state."""
@@ -553,7 +588,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
         
         # Enter steady state after 3 stable cycles
         if self.stable_count >= 3 and not self.is_steady_state:
-            self.logger.info("Entering steady state discovery mode")
+            self._safe_log('info', "Entering steady state discovery mode")
             self.is_steady_state = True
             
     def _discover_onvif_cameras(self) -> List[Camera]:
@@ -609,7 +644,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
                 self._publish_camera_status(camera, "offline")
                 
         except Exception as e:
-            self.logger.error(f"Health check error for {camera.ip}: {e}")
+            self._safe_log('error', f"Health check error for {camera.ip}: {e}")
             camera.error_count += 1
             camera.last_error = str(e)
             
@@ -714,7 +749,11 @@ class CameraDetector(MQTTService, ThreadSafeService):
         
     def cleanup(self):
         """Clean shutdown of service."""
-        self.logger.info("Shutting down Camera Detector")
+        self._safe_log('info', "Shutting down Camera Detector")
+        
+        # Set shutdown event first
+        if hasattr(self, '_shutdown_event'):
+            self._shutdown_event.set()
         
         # Stop background tasks
         if hasattr(self, 'discovery_task'):
@@ -738,7 +777,7 @@ class CameraDetector(MQTTService, ThreadSafeService):
         ThreadSafeService.shutdown(self)
         MQTTService.shutdown(self)
         
-        self.logger.info("Camera Detector shutdown complete")
+        self._safe_log('info', "Camera Detector shutdown complete")
         
 
 # ─────────────────────────────────────────────────────────────

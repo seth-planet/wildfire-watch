@@ -1,16 +1,148 @@
 #!/usr/bin/env python3.12
-"""Safe logging configuration for tests to prevent I/O on closed file errors.
+"""Safe logging utilities for Wildfire Watch services and tests.
 
-This module provides a safe logging setup that prevents I/O operations on closed
-file descriptors during pytest teardown, especially in parallel test execution.
+This module provides utilities for safe logging during shutdown and test scenarios
+where loggers or their handlers might be closed or unavailable. This helps prevent
+"I/O operation on closed file" errors that can occur during parallel test execution
+or service shutdown.
+
+This module combines production service utilities with test-specific utilities
+to provide a single source of truth for all safe logging functionality.
 """
 
 import logging
 import sys
-import io
 import threading
 from typing import Optional, Dict
 
+
+# ============================================================================
+# Core Safe Logging Functionality (Production & Tests)
+# ============================================================================
+
+def safe_log(logger: Optional[logging.Logger], level: str, message: str, 
+             exc_info: bool = False) -> None:
+    """Safely log a message with comprehensive checks.
+    
+    This function performs safe logging by checking if the logger and its handlers
+    are still available and not closed before attempting to log. This prevents
+    exceptions during shutdown or test teardown.
+    
+    Args:
+        logger: Logger instance to use (or None)
+        level: Log level as string (e.g., 'info', 'debug', 'error')
+        message: Message to log
+        exc_info: Whether to include exception information
+    """
+    try:
+        # Check if logger exists and has handlers
+        if not logger or not hasattr(logger, 'handlers') or not logger.handlers:
+            return
+            
+        # Check if logger is disabled
+        if hasattr(logger, 'disabled') and logger.disabled:
+            return
+            
+        # Check if we have at least one usable handler
+        usable_handler_found = False
+        for handler in logger.handlers:
+            if hasattr(handler, 'stream'):
+                # StreamHandler and FileHandler
+                stream = getattr(handler, 'stream', None)
+                if stream and hasattr(stream, 'closed') and not stream.closed:
+                    usable_handler_found = True
+                    break
+            else:
+                # Non-stream handlers (SocketHandler, QueueHandler, etc.) are assumed usable
+                usable_handler_found = True
+                break
+                
+        if not usable_handler_found:
+            return
+                    
+        # Get the log method and check it exists
+        log_method = getattr(logger, level.lower(), None)
+        if log_method and callable(log_method):
+            log_method(message, exc_info=exc_info)
+            
+    except (ValueError, AttributeError, OSError, RuntimeError, KeyError):
+        # Silently ignore all logging errors during shutdown
+        # RuntimeError can occur if dict changes during iteration
+        # KeyError can occur if logger dict is modified during shutdown
+        pass
+
+
+class SafeLoggingMixin:
+    """Mixin class that provides safe logging capability to any class.
+    
+    Classes using this mixin should have a 'logger' attribute that is a
+    logging.Logger instance. The mixin provides a _safe_log method that
+    can be used throughout the class for safe logging.
+    
+    Example:
+        class MyService(SafeLoggingMixin):
+            def __init__(self):
+                self.logger = logging.getLogger(__name__)
+                
+            def some_method(self):
+                self._safe_log('info', 'This is a safe log message')
+    """
+    
+    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
+        """Safely log a message with comprehensive checks.
+        
+        Args:
+            level: Log level as string (e.g., 'info', 'debug', 'error')
+            message: Message to log
+            exc_info: Whether to include exception information
+        """
+        logger = getattr(self, 'logger', None)
+        safe_log(logger, level, message, exc_info)
+
+
+def safe_log_for_class(obj: any, level: str, message: str, exc_info: bool = False) -> None:
+    """Safely log a message for any object that might have a logger attribute.
+    
+    This is a convenience function for classes that don't inherit from SafeLoggingMixin
+    but still need safe logging capabilities.
+    
+    Args:
+        obj: Object that might have a 'logger' attribute
+        level: Log level as string
+        message: Message to log
+        exc_info: Whether to include exception information
+    """
+    logger = getattr(obj, 'logger', None)
+    safe_log(logger, level, message, exc_info)
+
+
+def check_logger_health(logger: Optional[logging.Logger]) -> bool:
+    """Check if a logger is healthy and can be used safely.
+    
+    Args:
+        logger: Logger to check
+        
+    Returns:
+        True if logger is safe to use, False otherwise
+    """
+    if not logger:
+        return False
+        
+    if not hasattr(logger, 'handlers') or not logger.handlers:
+        return False
+        
+    # Check if any handler is closed
+    for handler in logger.handlers:
+        if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
+            if handler.stream.closed:
+                return False
+                
+    return True
+
+
+# ============================================================================
+# Test-Specific Safe Logging Components
+# ============================================================================
 
 class SafeStreamHandler(logging.StreamHandler):
     """Thread-safe stream handler that prevents I/O on closed files."""
@@ -172,6 +304,10 @@ class TestLoggerManager:
             logger.propagate = False
 
 
+# ============================================================================
+# Test Utility Functions
+# ============================================================================
+
 # Global instance
 _manager = TestLoggerManager()
 
@@ -199,5 +335,7 @@ def disable_problem_loggers():
     _manager.disable_problem_loggers()
 
 
-# Auto-disable problem loggers on import
-disable_problem_loggers()
+# Auto-disable problem loggers on import (for tests)
+# This is safe because production services don't import these functions
+if 'pytest' in sys.modules:
+    disable_problem_loggers()

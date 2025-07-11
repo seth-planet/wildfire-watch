@@ -15,6 +15,7 @@ Thread Safety:
 import json
 from typing import List, Dict, Optional
 from .config_base import ConfigBase, ConfigSchema, SharedMQTTConfig, ConfigValidationError
+from .safe_logging import safe_log
 
 
 class CameraDetectorConfig(SharedMQTTConfig):
@@ -280,7 +281,7 @@ class FireConsensusConfig(SharedMQTTConfig):
         # Single camera override warning
         if self.single_camera_trigger:
             import logging
-            logging.getLogger(__name__).warning(
+            safe_log(logging.getLogger(__name__), 'warning',
                 "SINGLE_CAMERA_TRIGGER enabled - consensus threshold ignored!"
             )
             
@@ -559,6 +560,6 @@ def load_all_configs() -> Dict[str, ConfigBase]:
         logger = logging.getLogger(__name__)
         for service, service_warnings in warnings.items():
             for warning in service_warnings:
-                logger.warning(f"{service}: {warning}")
+                safe_log(logger, 'warning', f"{service}: {warning}")
                 
     return configs

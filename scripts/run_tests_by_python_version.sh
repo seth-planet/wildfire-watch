@@ -1,6 +1,7 @@
 #!/bin/bash
 # Intelligent test runner for Wildfire Watch with automatic Python version selection
 # This script runs tests with the correct Python version based on test markers and content
+# Includes comprehensive cleanup of zombie processes and test artifacts
 
 # Note: Don't use 'set -e' here as we need to handle command failures gracefully
 
@@ -31,12 +32,222 @@ PARALLEL=true
 COVERAGE=false
 COVERAGE_REPORT="term"
 COVERAGE_HTML=false
+CLEANUP_ONLY=false
+SKIP_CLEANUP=false
 
 # Function to print colored output
 print_status() {
     local color=$1
     local message=$2
     echo -e "${color}${message}${NC}"
+}
+
+# Function to perform comprehensive pre-test cleanup
+perform_cleanup() {
+    print_status "$BLUE" "🧹 Performing comprehensive test cleanup..."
+    
+    local total_cleaned=0
+    local cleaned_items=""
+    
+    # 1. Kill lingering mosquitto test processes
+    print_status "$YELLOW" "Cleaning up mosquitto test processes..."
+    local mosquitto_count=0
+    
+    # Find mosquitto processes with test patterns
+    local mosquitto_pids=$(pgrep -f 'mosquitto.*mqtt_test_' 2>/dev/null || true)
+    if [[ -n "$mosquitto_pids" ]]; then
+        for pid in $mosquitto_pids; do
+            # Get process info before killing
+            local proc_info=$(ps -p $pid -o pid,etime,cmd --no-headers 2>/dev/null || true)
+            if [[ -n "$proc_info" ]]; then
+                # Extract process age (etime format can be [DD-]HH:MM:SS or MM:SS)
+                local etime=$(echo "$proc_info" | awk '{print $2}')
+                local age_minutes=0
+                
+                # Parse etime to get age in minutes
+                if [[ "$etime" =~ ^([0-9]+)-([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+                    # DD-HH:MM:SS format
+                    age_minutes=$((${BASH_REMATCH[1]} * 1440 + ${BASH_REMATCH[2]} * 60 + ${BASH_REMATCH[3]}))
+                elif [[ "$etime" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+                    # HH:MM:SS format
+                    age_minutes=$((${BASH_REMATCH[1]} * 60 + ${BASH_REMATCH[2]}))
+                elif [[ "$etime" =~ ^([0-9]+):([0-9]+)$ ]]; then
+                    # MM:SS format
+                    age_minutes=${BASH_REMATCH[1]}
+                fi
+                
+                # Only kill if older than 5 minutes
+                if [[ $age_minutes -gt 5 ]]; then
+                    if [[ "$VERBOSE" == "true" ]]; then
+                        print_status "$YELLOW" "  Killing mosquitto process $pid (age: $etime)"
+                    fi
+                    kill -TERM $pid 2>/dev/null || true
+                    sleep 0.2
+                    kill -KILL $pid 2>/dev/null || true
+                    ((mosquitto_count++))
+                fi
+            fi
+        done
+    fi
+    
+    if [[ $mosquitto_count -gt 0 ]]; then
+        cleaned_items="${cleaned_items}  - Mosquitto processes: $mosquitto_count\n"
+        ((total_cleaned += mosquitto_count))
+    fi
+    
+    # 2. Clean up Python test processes (but protect pytest infrastructure)
+    print_status "$YELLOW" "Cleaning up stale Python test processes..."
+    local python_count=0
+    
+    # Protected patterns - never kill these
+    local protected_patterns=(
+        "pytest"
+        "py.test"
+        "xdist"
+        "execnet"
+        "gateway_base"
+        "gw[0-9]+"
+        "run_tests_by_python_version.sh"
+    )
+    
+    # Find python processes that might be test-related
+    for python_cmd in "python" "python3" "python3.12" "python3.10" "python3.8"; do
+        local python_pids=$(pgrep -f "^$python_cmd " 2>/dev/null || true)
+        if [[ -n "$python_pids" ]]; then
+            for pid in $python_pids; do
+                # Skip our own process
+                [[ $pid -eq $$ ]] && continue
+                
+                # Get process info
+                local proc_info=$(ps -p $pid -o pid,ppid,etime,cmd --no-headers 2>/dev/null || true)
+                if [[ -n "$proc_info" ]]; then
+                    local cmd=$(echo "$proc_info" | cut -d' ' -f4-)
+                    local etime=$(echo "$proc_info" | awk '{print $3}')
+                    
+                    # Check if it's a protected process
+                    local is_protected=false
+                    for pattern in "${protected_patterns[@]}"; do
+                        if [[ "$cmd" =~ $pattern ]]; then
+                            is_protected=true
+                            break
+                        fi
+                    done
+                    
+                    if [[ "$is_protected" == "false" ]]; then
+                        # Check if it's a test-related process
+                        if [[ "$cmd" =~ test_ ]] || [[ "$cmd" =~ /tests/ ]] || [[ "$cmd" =~ "import sys;exec" ]]; then
+                            # Parse age
+                            local age_minutes=0
+                            if [[ "$etime" =~ ^([0-9]+)-([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+                                age_minutes=$((${BASH_REMATCH[1]} * 1440 + ${BASH_REMATCH[2]} * 60 + ${BASH_REMATCH[3]}))
+                            elif [[ "$etime" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+                                age_minutes=$((${BASH_REMATCH[1]} * 60 + ${BASH_REMATCH[2]}))
+                            elif [[ "$etime" =~ ^([0-9]+):([0-9]+)$ ]]; then
+                                age_minutes=${BASH_REMATCH[1]}
+                            fi
+                            
+                            # Only kill if older than 10 minutes
+                            if [[ $age_minutes -gt 10 ]]; then
+                                if [[ "$VERBOSE" == "true" ]]; then
+                                    print_status "$YELLOW" "  Killing Python process $pid (age: $etime)"
+                                fi
+                                kill -TERM $pid 2>/dev/null || true
+                                sleep 0.2
+                                kill -KILL $pid 2>/dev/null || true
+                                ((python_count++))
+                            fi
+                        fi
+                    fi
+                fi
+            done
+        fi
+    done
+    
+    if [[ $python_count -gt 0 ]]; then
+        cleaned_items="${cleaned_items}  - Python processes: $python_count\n"
+        ((total_cleaned += python_count))
+    fi
+    
+    # 3. Clean up Docker containers with test labels
+    print_status "$YELLOW" "Cleaning up test Docker containers..."
+    local container_count=0
+    
+    if command -v docker &> /dev/null; then
+        # Find containers with test labels or patterns
+        local test_containers=$(docker ps -aq --filter "label=com.wildfire.test=true" 2>/dev/null || true)
+        if [[ -n "$test_containers" ]]; then
+            for container in $test_containers; do
+                if [[ "$VERBOSE" == "true" ]]; then
+                    local name=$(docker inspect --format '{{.Name}}' $container 2>/dev/null || echo "unknown")
+                    print_status "$YELLOW" "  Removing container: $name"
+                fi
+                docker rm -f $container &>/dev/null || true
+                ((container_count++))
+            done
+        fi
+        
+        # Also clean containers by name patterns
+        local patterns=("test-" "e2e-" "mqtt_test_" "wf-gw" "wf-master")
+        for pattern in "${patterns[@]}"; do
+            local matching=$(docker ps -aq --filter "name=$pattern" 2>/dev/null || true)
+            if [[ -n "$matching" ]]; then
+                for container in $matching; do
+                    if [[ "$VERBOSE" == "true" ]]; then
+                        local name=$(docker inspect --format '{{.Name}}' $container 2>/dev/null || echo "unknown")
+                        print_status "$YELLOW" "  Removing container: $name"
+                    fi
+                    docker rm -f $container &>/dev/null || true
+                    ((container_count++))
+                done
+            fi
+        done
+        
+        # Clean up test networks
+        local test_networks=$(docker network ls --filter "name=wf-" --format "{{.Name}}" 2>/dev/null || true)
+        if [[ -n "$test_networks" ]]; then
+            for network in $test_networks; do
+                if [[ "$network" =~ ^wf-(gw|master) ]]; then
+                    docker network rm $network &>/dev/null || true
+                fi
+            done
+        fi
+    fi
+    
+    if [[ $container_count -gt 0 ]]; then
+        cleaned_items="${cleaned_items}  - Docker containers: $container_count\n"
+        ((total_cleaned += container_count))
+    fi
+    
+    # 4. Clean up temporary test directories
+    print_status "$YELLOW" "Cleaning up temporary test directories..."
+    local dir_count=0
+    
+    # Clean old mqtt_test_ directories
+    if [[ -d /tmp ]]; then
+        find /tmp -maxdepth 1 -type d -name "mqtt_test_*" -mmin +30 -exec rm -rf {} \; 2>/dev/null || true
+        dir_count=$(find /tmp -maxdepth 1 -type d -name "mqtt_test_*" -mmin +30 2>/dev/null | wc -l || echo 0)
+    fi
+    
+    if [[ $dir_count -gt 0 ]]; then
+        cleaned_items="${cleaned_items}  - Temp directories: $dir_count\n"
+        ((total_cleaned += dir_count))
+    fi
+    
+    # 5. Run Python-based enhanced cleanup if available
+    if [[ -f "$PROJECT_ROOT/tests/enhanced_process_cleanup.py" ]]; then
+        print_status "$YELLOW" "Running enhanced Python cleanup..."
+        python3.12 "$PROJECT_ROOT/tests/enhanced_process_cleanup.py" 2>/dev/null || true
+    fi
+    
+    # Report results
+    if [[ $total_cleaned -gt 0 ]]; then
+        print_status "$GREEN" "✅ Cleanup complete! Removed $total_cleaned items:"
+        echo -e "$cleaned_items"
+    else
+        print_status "$GREEN" "✅ No cleanup needed - environment is clean"
+    fi
+    
+    return 0
 }
 
 # Function to check if Python version is available
@@ -170,6 +381,7 @@ show_usage() {
 Usage: $0 [OPTIONS]
 
 Run Wildfire Watch tests with correct Python versions automatically.
+Includes automatic cleanup of zombie processes and test artifacts.
 
 OPTIONS:
     --all              Run all tests with appropriate Python versions
@@ -184,6 +396,8 @@ OPTIONS:
     --coverage         Enable coverage reporting (covers entire project)
     --coverage-html    Generate HTML coverage report in addition to terminal
     --no-parallel      Disable parallel test execution
+    --cleanup-only     Only perform cleanup without running tests
+    --skip-cleanup     Skip automatic cleanup before tests
     --help             Show this help message
 
 EXAMPLES:
@@ -193,7 +407,15 @@ EXAMPLES:
     $0 --test tests/test_detect.py     # Run specific test file
     $0 --test test_yolo_nas --verbose  # Run YOLO-NAS tests with verbose output
     $0 --validate                      # Check Python environment
+    $0 --cleanup-only                  # Clean up zombie processes and containers
     $0 --dry-run --all --coverage      # Show what would be run with coverage
+
+CLEANUP FEATURES:
+    - Automatically kills mosquitto test processes older than 5 minutes
+    - Removes Python test processes older than 10 minutes
+    - Cleans up Docker containers with test labels
+    - Removes temporary test directories older than 30 minutes
+    - Protects active pytest worker processes (gw0, gw1, etc.)
 
 PYTHON VERSION MAPPING:
     Python 3.12: camera_detector, fire_consensus, gpio_trigger, telemetry, MQTT, integration
@@ -242,6 +464,14 @@ while [[ $# -gt 0 ]]; do
             PARALLEL=false
             shift
             ;;
+        --cleanup-only)
+            CLEANUP_ONLY=true
+            shift
+            ;;
+        --skip-cleanup)
+            SKIP_CLEANUP=true
+            shift
+            ;;
         --validate)
             validate_environment
             exit 0
@@ -270,8 +500,20 @@ done
 print_status "$BLUE" "Wildfire Watch Test Runner with Python Version Selection"
 print_status "$BLUE" "======================================================="
 
+# Handle cleanup-only mode
+if [[ "$CLEANUP_ONLY" == "true" ]]; then
+    perform_cleanup
+    exit 0
+fi
+
 # Validate environment first
 validate_environment
+
+# Perform cleanup before tests unless skipped
+if [[ "$SKIP_CLEANUP" != "true" ]]; then
+    perform_cleanup
+    print_status "$BLUE" "======================================================="
+fi
 
 # Track results
 declare -a RESULTS

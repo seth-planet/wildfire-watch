@@ -70,6 +70,7 @@ from typing import Dict, List, Optional, Tuple
 # Import centralized command runner
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.command_runner import run_command, CommandError
+from utils.safe_logging import SafeLoggingMixin
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ logger = logging.getLogger(__name__)
 # Import USB manager functionality
 from usb_manager import USBStorageManager
 
-class StorageManager(USBStorageManager):
+class StorageManager(USBStorageManager, SafeLoggingMixin):
     """Extended storage manager supporting both USB and internal drives.
     
     This class extends USBStorageManager to add support for internal drives
@@ -91,6 +92,7 @@ class StorageManager(USBStorageManager):
             mount_path: Target mount path for storage
         """
         super().__init__(mount_path)
+        self.logger = logger
         
     def find_all_drives(self, include_internal: bool = True) -> List[Dict]:
         """Find all available storage drives (USB and optionally internal).
@@ -142,7 +144,7 @@ class StorageManager(USBStorageManager):
                             drives.append(drive_info)
                             
         except Exception as e:
-            logger.error(f"Error finding internal drives: {e}")
+            self._safe_log('error', f"Error finding internal drives: {e}")
             
         return drives
     
@@ -204,7 +206,7 @@ class StorageManager(USBStorageManager):
             return info
             
         except Exception as e:
-            logger.error(f"Error processing partition {partition.get('name')}: {e}")
+            self._safe_log('error', f"Error processing partition {partition.get('name')}: {e}")
             return None
     
     def _parse_size_string(self, size_str: str) -> int:
@@ -243,7 +245,7 @@ class StorageManager(USBStorageManager):
             return int(float(size_str))
             
         except ValueError:
-            logger.error(f"Could not parse size: {size_str}")
+            self._safe_log('error', f"Could not parse size: {size_str}")
             return 0
     
     def mount_largest_drive(self) -> Optional[str]:
@@ -264,17 +266,17 @@ class StorageManager(USBStorageManager):
             # Check if already mounted at correct location
             for drive in drives:
                 if drive['mount_point'] == self.mount_path:
-                    logger.info(f"Drive already mounted at {self.mount_path}")
+                    self._safe_log('info', f"Drive already mounted at {self.mount_path}")
                     return drive['device']
                     
-            logger.warning("No unmounted drives found >= 500 GB")
+            self._safe_log('warning', "No unmounted drives found >= 500 GB")
             return None
         
         # Sort by size and get largest
         unmounted.sort(key=lambda d: d['size_bytes'] or 0, reverse=True)
         largest = unmounted[0]
         
-        logger.info(f"Selected drive: {largest['device']} ({largest['size_human']}) - {largest.get('type', 'usb').upper()}")
+        self._safe_log('info', f"Selected drive: {largest['device']} ({largest['size_human']}) - {largest.get('type', 'usb').upper()}")
         
         # Mount the drive
         return self.mount_drive(largest['device'], largest['filesystem'])
@@ -293,13 +295,13 @@ class StorageManager(USBStorageManager):
         """
         # Validate device path to prevent command injection
         if not re.match(r'^/dev/[a-zA-Z0-9/_-]+$', device):
-            logger.error(f"Invalid device path format: {device}")
+            self._safe_log('error', f"Invalid device path format: {device}")
             return None
             
         # Validate filesystem type
         valid_filesystems = ['ext4', 'ext3', 'ext2', 'ntfs', 'vfat', 'btrfs', 'xfs']
         if filesystem not in valid_filesystems:
-            logger.error(f"Unsupported filesystem: {filesystem}")
+            self._safe_log('error', f"Unsupported filesystem: {filesystem}")
             return None
             
         # Call parent mount_drive which will handle the actual mounting
@@ -319,7 +321,7 @@ class StorageManager(USBStorageManager):
             # Find device by UUID
             uuid_path = f"/dev/disk/by-uuid/{uuid}"
             if not os.path.exists(uuid_path):
-                logger.error(f"UUID not found: {uuid}")
+                self._safe_log('error', f"UUID not found: {uuid}")
                 return None
                 
             # Resolve to actual device
@@ -331,11 +333,11 @@ class StorageManager(USBStorageManager):
                 _, fs_output, _ = run_command(cmd, timeout=5, check=True)
                 filesystem = fs_output.strip()
                 
-            logger.info(f"Mounting device {device} (UUID: {uuid}) with filesystem {filesystem}")
+            self._safe_log('info', f"Mounting device {device} (UUID: {uuid}) with filesystem {filesystem}")
             return self.mount_drive(device, filesystem)
             
         except Exception as e:
-            logger.error(f"Error mounting by UUID: {e}")
+            self._safe_log('error', f"Error mounting by UUID: {e}")
             return None
     
     def mount_specific_device(self, device: str, filesystem: Optional[str] = None) -> Optional[str]:
@@ -350,7 +352,7 @@ class StorageManager(USBStorageManager):
         """
         try:
             if not os.path.exists(device):
-                logger.error(f"Device not found: {device}")
+                self._safe_log('error', f"Device not found: {device}")
                 return None
                 
             # Get filesystem if not provided
@@ -359,11 +361,11 @@ class StorageManager(USBStorageManager):
                 _, fs_output, _ = run_command(cmd, timeout=5, check=True)
                 filesystem = fs_output.strip()
                 
-            logger.info(f"Mounting device {device} with filesystem {filesystem}")
+            self._safe_log('info', f"Mounting device {device} with filesystem {filesystem}")
             return self.mount_drive(device, filesystem)
             
         except Exception as e:
-            logger.error(f"Error mounting device: {e}")
+            self._safe_log('error', f"Error mounting device: {e}")
             return None
 
 

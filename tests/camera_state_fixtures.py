@@ -5,26 +5,52 @@ Fixtures for CameraState testing.
 Provides proper CameraState instances with required config parameter.
 """
 import pytest
-from unittest.mock import Mock
+import os
 from fire_consensus.consensus import CameraState, FireConsensusConfig
 
 
 @pytest.fixture
-def mock_config():
-    """Create a mock Config object with default values for testing."""
-    config = Mock(spec=FireConsensusConfig)
-    config.CONSENSUS_THRESHOLD = 2
-    config.TIME_WINDOW = 30.0
-    config.MIN_CONFIDENCE = 0.7
-    config.MIN_AREA_RATIO = 0.0001
-    config.MAX_AREA_RATIO = 0.5
-    config.COOLDOWN_PERIOD = 60.0
-    config.SINGLE_CAMERA_TRIGGER = False
-    config.DETECTION_WINDOW = 30.0
-    config.MOVING_AVERAGE_WINDOW = 3
-    config.AREA_INCREASE_RATIO = 1.2
-    config.LOG_LEVEL = "INFO"
-    return config
+def real_config():
+    """Create a real FireConsensusConfig object with test values."""
+    # Set test environment variables
+    test_env = {
+        'CONSENSUS_THRESHOLD': '2',
+        'TIME_WINDOW': '30.0',
+        'MIN_CONFIDENCE': '0.7',
+        'MIN_AREA_RATIO': '0.0001',
+        'MAX_AREA_RATIO': '0.5',
+        'COOLDOWN_PERIOD': '60.0',
+        'SINGLE_CAMERA_TRIGGER': 'false',
+        'DETECTION_WINDOW': '30.0',
+        'MOVING_AVERAGE_WINDOW': '3',
+        'AREA_INCREASE_RATIO': '1.2',
+        'LOG_LEVEL': 'INFO'
+    }
+    
+    # Temporarily set environment variables
+    original_env = {}
+    for key, value in test_env.items():
+        original_env[key] = os.environ.get(key)
+        os.environ[key] = value
+    
+    try:
+        # Create real config instance
+        config = FireConsensusConfig()
+        yield config
+    finally:
+        # Restore original environment
+        for key, original_value in original_env.items():
+            if original_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original_value
+
+
+# Keep the old name for compatibility but use real config
+@pytest.fixture
+def mock_config(real_config):
+    """Legacy name - returns real config for compatibility."""
+    return real_config
 
 
 @pytest.fixture
@@ -58,28 +84,45 @@ def create_test_camera_state(camera_id="test-camera", **config_overrides):
     Returns:
         CameraState instance with config attached
     """
-    config = Mock(spec=FireConsensusConfig)
-    
     # Set defaults
     defaults = {
-        'CONSENSUS_THRESHOLD': 2,
-        'TIME_WINDOW': 30.0,
-        'MIN_CONFIDENCE': 0.7,
-        'MIN_AREA_RATIO': 0.0001,
-        'MAX_AREA_RATIO': 0.5,
-        'COOLDOWN_PERIOD': 60.0,
-        'SINGLE_CAMERA_TRIGGER': False,
-        'DETECTION_WINDOW': 30.0,
-        'MOVING_AVERAGE_WINDOW': 3,
-        'AREA_INCREASE_RATIO': 1.2,
-        'LOG_LEVEL': "INFO"
+        'CONSENSUS_THRESHOLD': '2',
+        'TIME_WINDOW': '30.0',
+        'MIN_CONFIDENCE': '0.7',
+        'MIN_AREA_RATIO': '0.0001',
+        'MAX_AREA_RATIO': '0.5',
+        'COOLDOWN_PERIOD': '60.0',
+        'SINGLE_CAMERA_TRIGGER': 'false',
+        'DETECTION_WINDOW': '30.0',
+        'MOVING_AVERAGE_WINDOW': '3',
+        'AREA_INCREASE_RATIO': '1.2',
+        'LOG_LEVEL': 'INFO'
     }
     
-    # Apply overrides
-    for key, value in defaults.items():
-        setattr(config, key, config_overrides.get(key, value))
+    # Apply overrides and convert to strings for env vars
+    test_env = {}
+    for key, default_value in defaults.items():
+        value = config_overrides.get(key, default_value)
+        test_env[key] = str(value).lower() if isinstance(value, bool) else str(value)
     
-    # Create CameraState and attach config
-    camera_state = CameraState(camera_id=camera_id)
-    camera_state.config = config
-    return camera_state
+    # Temporarily set environment variables
+    original_env = {}
+    for key, value in test_env.items():
+        original_env[key] = os.environ.get(key)
+        os.environ[key] = value
+    
+    try:
+        # Create real config instance
+        config = FireConsensusConfig()
+        
+        # Create CameraState and attach config
+        camera_state = CameraState(camera_id=camera_id)
+        camera_state.config = config
+        return camera_state
+    finally:
+        # Restore original environment
+        for key, original_value in original_env.items():
+            if original_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original_value

@@ -122,9 +122,9 @@ class CameraManager(MQTTService, ThreadSafeService):
                     data = json.load(f)
                     if isinstance(data, dict):
                         self.cameras = data
-                        self.logger.info(f"Loaded {len(self.cameras)} detected cameras")
+                        self._safe_log('info', f"Loaded {len(self.cameras)} detected cameras")
         except Exception as e:
-            self.logger.error(f"Failed to load detected cameras: {e}")
+            self._safe_log('error', f"Failed to load detected cameras: {e}")
             
     def _save_detected_cameras(self):
         """Save detected cameras to persistent storage."""
@@ -136,7 +136,7 @@ class CameraManager(MQTTService, ThreadSafeService):
             with open(self.config.detected_cameras_path, 'w') as f:
                 json.dump(self.cameras, f, indent=2)
         except Exception as e:
-            self.logger.error(f"Failed to save detected cameras: {e}")
+            self._safe_log('error', f"Failed to save detected cameras: {e}")
             
     def _load_custom_cameras(self):
         """Load custom camera configurations."""
@@ -149,17 +149,17 @@ class CameraManager(MQTTService, ThreadSafeService):
                     custom_config = yaml.safe_load(f)
                     if custom_config and 'cameras' in custom_config:
                         self._custom_cameras_loaded = True
-                        self.logger.info(f"Loaded custom cameras configuration")
+                        self._safe_log('info', f"Loaded custom cameras configuration")
         except Exception as e:
-            self.logger.error(f"Failed to load custom cameras: {e}")
+            self._safe_log('error', f"Failed to load custom cameras: {e}")
             
     def _on_connect(self, client, userdata, flags, rc):
         """Handle MQTT connection."""
         if rc == 0:
-            self.logger.info("Connected to MQTT broker")
+            self._safe_log('info', "Connected to MQTT broker")
             # Resubscribe handled by MQTTService base class
         else:
-            self.logger.error(f"Failed to connect to MQTT broker: {rc}")
+            self._safe_log('error', f"Failed to connect to MQTT broker: {rc}")
             
     def _on_message(self, client, userdata, msg):
         """Handle incoming MQTT messages."""
@@ -171,7 +171,7 @@ class CameraManager(MQTTService, ThreadSafeService):
                 # Bulk camera update
                 self._handle_bulk_update(msg)
         except Exception as e:
-            self.logger.error(f"Error handling message on {msg.topic}: {e}")
+            self._safe_log('error', f"Error handling message on {msg.topic}: {e}")
             
     def _handle_camera_discovery(self, msg):
         """Handle individual camera discovery messages."""
@@ -184,13 +184,13 @@ class CameraManager(MQTTService, ThreadSafeService):
                 camera_data = json.loads(msg.payload.decode('utf-8'))
                 self._add_or_update_camera(camera_data)
         except json.JSONDecodeError as e:
-            self.logger.error(f"Invalid JSON in camera discovery: {e}")
+            self._safe_log('error', f"Invalid JSON in camera discovery: {e}")
             
     def _handle_bulk_update(self, msg):
         """Handle bulk camera configuration updates."""
         try:
             if not msg.payload:
-                self.logger.warning("Received empty bulk update")
+                self._safe_log('warning', "Received empty bulk update")
                 return
                 
             cameras = json.loads(msg.payload.decode('utf-8'))
@@ -198,29 +198,29 @@ class CameraManager(MQTTService, ThreadSafeService):
                 with self._state_lock:
                     # Replace all cameras
                     self.cameras = cameras
-                    self.logger.info(f"Bulk update: {len(cameras)} cameras")
+                    self._safe_log('info', f"Bulk update: {len(cameras)} cameras")
                     
                 self._save_detected_cameras()
                 self._schedule_config_update()
         except json.JSONDecodeError as e:
-            self.logger.error(f"Invalid JSON in bulk update: {e}")
+            self._safe_log('error', f"Invalid JSON in bulk update: {e}")
             
     def _add_or_update_camera(self, camera_data: Dict):
         """Add or update a camera configuration."""
         camera_id = camera_data.get('id') or camera_data.get('mac')
         if not camera_id:
-            self.logger.error("Camera data missing ID")
+            self._safe_log('error', "Camera data missing ID")
             return
             
         # Apply filtering if enabled
         if self.config.is_filtering_enabled:
             if camera_id not in self.config.camera_whitelist:
-                self.logger.debug(f"Camera {camera_id} not in whitelist, ignoring")
+                self._safe_log('debug', f"Camera {camera_id} not in whitelist, ignoring")
                 return
                 
         with self._state_lock:
             self.cameras[camera_id] = camera_data
-            self.logger.info(f"Updated camera: {camera_id}")
+            self._safe_log('info', f"Updated camera: {camera_id}")
             
         self._save_detected_cameras()
         self._schedule_config_update()
@@ -230,7 +230,7 @@ class CameraManager(MQTTService, ThreadSafeService):
         with self._state_lock:
             if camera_id in self.cameras:
                 del self.cameras[camera_id]
-                self.logger.info(f"Removed camera: {camera_id}")
+                self._safe_log('info', f"Removed camera: {camera_id}")
                 
         self._save_detected_cameras()
         self._schedule_config_update()
@@ -289,10 +289,10 @@ class CameraManager(MQTTService, ThreadSafeService):
                 self._last_config_update = time.time()
                 self._pending_update = False
                 
-            self.logger.info(f"Generated Frigate config with {len(base_config.get('cameras', {}))} cameras")
+            self._safe_log('info', f"Generated Frigate config with {len(base_config.get('cameras', {}))} cameras")
             
         except Exception as e:
-            self.logger.error(f"Failed to generate config: {e}")
+            self._safe_log('error', f"Failed to generate config: {e}")
             
     def _load_base_config(self) -> Optional[Dict]:
         """Load base Frigate configuration."""
@@ -301,10 +301,10 @@ class CameraManager(MQTTService, ThreadSafeService):
                 with open(self.config.base_config_path, 'r') as f:
                     return yaml.safe_load(f)
             else:
-                self.logger.warning(f"Base config not found: {self.config.base_config_path}")
+                self._safe_log('warning', f"Base config not found: {self.config.base_config_path}")
                 return {}
         except Exception as e:
-            self.logger.error(f"Failed to load base config: {e}")
+            self._safe_log('error', f"Failed to load base config: {e}")
             return None
             
     def _load_custom_config(self) -> Optional[Dict]:
@@ -314,14 +314,14 @@ class CameraManager(MQTTService, ThreadSafeService):
                 with open(self.config.custom_cameras_path, 'r') as f:
                     return yaml.safe_load(f)
         except Exception as e:
-            self.logger.error(f"Failed to load custom config: {e}")
+            self._safe_log('error', f"Failed to load custom config: {e}")
         return None
         
     def _generate_camera_config(self, camera_data: Dict) -> Optional[Dict]:
         """Generate Frigate configuration for a camera."""
         rtsp_urls = camera_data.get('rtsp_urls', {})
         if not rtsp_urls:
-            self.logger.warning(f"Camera {camera_data.get('id')} has no RTSP URLs")
+            self._safe_log('warning', f"Camera {camera_data.get('id')} has no RTSP URLs")
             return None
             
         # Use main stream for detection/recording, sub stream for detection if available
@@ -414,14 +414,14 @@ class CameraManager(MQTTService, ThreadSafeService):
             # Atomic rename
             os.rename(temp_path, self.config.config_path)
             
-            self.logger.info(f"Wrote configuration to {self.config.config_path}")
+            self._safe_log('info', f"Wrote configuration to {self.config.config_path}")
             
         except Exception as e:
-            self.logger.error(f"Failed to write config: {e}")
+            self._safe_log('error', f"Failed to write config: {e}")
             
     def cleanup(self):
         """Clean up resources."""
-        self.logger.info("Shutting down camera manager")
+        self._safe_log('info', "Shutting down camera manager")
         
         # Cancel pending timer
         if self._update_timer:

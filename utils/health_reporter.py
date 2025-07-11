@@ -13,9 +13,10 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Callable
 
 from .mqtt_service import MQTTService
+from .safe_logging import SafeLoggingMixin
 
 
-class HealthReporter(ABC):
+class HealthReporter(ABC, SafeLoggingMixin):
     """Base class for service health reporting.
     
     Provides periodic health status publishing with common metrics
@@ -46,9 +47,9 @@ class HealthReporter(ABC):
     def start_health_reporting(self) -> None:
         """Start periodic health reporting."""
         self._shutdown = False
-        self.mqtt_service.logger.info(f"[HEALTH DEBUG] Starting health reporting for {self.mqtt_service.service_name} with interval {self.interval}s")
-        self.mqtt_service.logger.info(f"[HEALTH DEBUG] MQTT connected: {self.mqtt_service.is_connected}")
-        self.mqtt_service.logger.info(f"[HEALTH DEBUG] Calling _publish_health immediately")
+        self.mqtt_service._safe_log('info', f"[HEALTH DEBUG] Starting health reporting for {self.mqtt_service.service_name} with interval {self.interval}s")
+        self.mqtt_service._safe_log('info', f"[HEALTH DEBUG] MQTT connected: {self.mqtt_service.is_connected}")
+        self.mqtt_service._safe_log('info', f"[HEALTH DEBUG] Calling _publish_health immediately")
         self._publish_health()
         
     def stop_health_reporting(self) -> None:
@@ -62,28 +63,10 @@ class HealthReporter(ABC):
                     self._health_timer.join(timeout=2.0)
                 self._health_timer = None
     
-    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
-        """Safely log a message with comprehensive checks."""
-        try:
-            logger = getattr(self.mqtt_service, 'logger', None)
-            if not logger:
-                return
-                
-            # Check if logger has handlers and they're not closed
-            if not hasattr(logger, 'handlers') or not logger.handlers:
-                return
-                
-            # Check each handler to ensure it's not closed
-            for handler in logger.handlers:
-                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-                    if handler.stream.closed:
-                        return
-                        
-            # Log the message
-            getattr(logger, level.lower())(message, exc_info=exc_info)
-        except (ValueError, AttributeError, OSError):
-            # Silently ignore logging errors during shutdown
-            pass
+    @property
+    def logger(self):
+        """Access logger from mqtt_service for SafeLoggingMixin."""
+        return getattr(self.mqtt_service, 'logger', None)
 
     def _publish_health(self) -> None:
         """Publish health status and reschedule."""

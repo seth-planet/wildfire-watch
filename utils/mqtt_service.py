@@ -18,9 +18,10 @@ from typing import Optional, Callable, Dict, Any, List
 import paho.mqtt.client as mqtt
 
 from .config_base import SharedMQTTConfig
+from .safe_logging import SafeLoggingMixin
 
 
-class MQTTService:
+class MQTTService(SafeLoggingMixin):
     """Base class for all MQTT-connected services in Wildfire Watch.
     
     Provides standardized MQTT functionality including connection management,
@@ -84,7 +85,14 @@ class MQTTService:
         self._subscriptions = subscriptions or []
         
         # Create client with unique ID
-        client_id = f"{self.service_name}_{os.getpid()}"
+        # Check if MQTT_CLIENT_ID is set in environment (for testing)
+        env_client_id = os.environ.get('MQTT_CLIENT_ID')
+        if env_client_id:
+            client_id = env_client_id
+            self._safe_log('debug', f"Using MQTT_CLIENT_ID from environment: {client_id}")
+        else:
+            client_id = f"{self.service_name}_{os.getpid()}"
+        
         self._mqtt_client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id,
@@ -159,8 +167,23 @@ class MQTTService:
     def connect(self) -> None:
         """Connect to the MQTT broker and start the network loop."""
         if self._mqtt_client and not self._shutdown:
-            self._safe_log('info', "Starting MQTT connection process...")
-            self._connect_with_retry()
+            mqtt_broker = getattr(self.config, 'mqtt_broker', self.config.get('MQTT_BROKER', 'localhost') if hasattr(self.config, 'get') else 'localhost')
+            mqtt_port = getattr(self.config, 'mqtt_port', self.config.get('MQTT_PORT', 1883) if hasattr(self.config, 'get') else 1883)
+            self._safe_log('info', f"Starting MQTT connection process for {self.service_name}...")
+            self._safe_log('info', f"Target broker: {mqtt_broker}:{mqtt_port}")
+            
+            # Resolve host.docker.internal if needed
+            if mqtt_broker == 'host.docker.internal':
+                self._safe_log('info', "Detected host.docker.internal, checking resolution...")
+                try:
+                    import socket
+                    resolved_ip = socket.gethostbyname(mqtt_broker)
+                    self._safe_log('info', f"host.docker.internal resolved to: {resolved_ip}")
+                except Exception as e:
+                    self._safe_log('error', f"Failed to resolve host.docker.internal: {e}")
+            
+            # Start connection in background thread to avoid blocking
+            threading.Thread(target=self._connect_with_retry, daemon=True).start()
     
     def _connect_with_retry(self) -> None:
         """Connect to MQTT broker with exponential backoff."""
@@ -180,6 +203,33 @@ class MQTTService:
                 break
             except Exception as e:
                 self._safe_log('error', f"MQTT connection failed: {e}")
+                self._safe_log('error', f"Exception type: {type(e).__name__}")
+                self._safe_log('error', f"Broker: {mqtt_broker}, Port: {mqtt_port}")
+                
+                # Check if it's a network connectivity issue
+                import errno
+                if hasattr(e, 'errno'):
+                    if e.errno == errno.ECONNREFUSED:
+                        self._safe_log('error', "Connection refused - is MQTT broker running?")
+                        self._safe_log('error', f"Attempted connection to {mqtt_broker}:{mqtt_port}")
+                        # Try to ping the host
+                        try:
+                            import socket
+                            test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            test_sock.settimeout(2)
+                            result = test_sock.connect_ex((mqtt_broker, mqtt_port))
+                            test_sock.close()
+                            if result == 0:
+                                self._safe_log('error', "Port is open but MQTT connection refused")
+                            else:
+                                self._safe_log('error', f"Port {mqtt_port} is not reachable (error code: {result})")
+                        except Exception as test_e:
+                            self._safe_log('error', f"Network test failed: {test_e}")
+                    elif e.errno == errno.EHOSTUNREACH:
+                        self._safe_log('error', "Host unreachable - check Docker networking")
+                    elif e.errno == errno.ETIMEDOUT:
+                        self._safe_log('error', "Connection timed out")
+                
                 self._safe_log('info', f"Retrying in {self._reconnect_delay}s...")
                 time.sleep(self._reconnect_delay)
                 self._reconnect_delay = min(
@@ -189,8 +239,10 @@ class MQTTService:
     
     def _on_mqtt_connect(self, client, userdata, flags, rc, properties=None):
         """Handle MQTT connection events."""
+        print(f"[MQTT BASE] _on_mqtt_connect called with rc={rc}", flush=True)
         if rc == 0:
             self._safe_log('info', "Connected to MQTT broker")
+            print(f"[MQTT BASE] Setting _mqtt_connected = True", flush=True)
             with self._mqtt_lock:
                 self._mqtt_connected = True
                 self._reconnect_delay = 1.0  # Reset delay on success
@@ -210,35 +262,25 @@ class MQTTService:
                 self._process_offline_queue()
             
             # Call user callback
+            self._safe_log('debug', f"About to call user callback: {self._on_connect_callback}")
             if self._on_connect_callback:
-                self._on_connect_callback(client, userdata, flags, rc)
+                # Pass properties if the callback accepts it
+                try:
+                    # Try calling with properties parameter
+                    self._on_connect_callback(client, userdata, flags, rc, properties)
+                    self._safe_log('debug', "User callback called successfully with properties")
+                except TypeError as e:
+                    self._safe_log('debug', f"TypeError calling with properties: {e}, trying without")
+                    # Fall back to 4 parameters if callback doesn't accept properties
+                    self._on_connect_callback(client, userdata, flags, rc)
+                    self._safe_log('debug', "User callback called successfully without properties")
+                except Exception as e:
+                    self._safe_log('error', f"Error calling user on_connect callback: {e}")
         else:
             self._safe_log('error', f"Failed to connect to MQTT broker: {mqtt.error_string(rc)}")
             with self._mqtt_lock:
                 self._mqtt_connected = False
     
-    def _safe_log(self, level: str, message: str, exc_info: bool = False) -> None:
-        """Safely log a message with comprehensive checks."""
-        try:
-            logger = getattr(self, 'logger', None)
-            if not logger:
-                return
-                
-            # Check if logger has handlers and they're not closed
-            if not hasattr(logger, 'handlers') or not logger.handlers:
-                return
-                
-            # Check each handler to ensure it's not closed
-            for handler in logger.handlers:
-                if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-                    if handler.stream.closed:
-                        return
-                        
-            # Log the message
-            getattr(logger, level.lower())(message, exc_info=exc_info)
-        except (ValueError, AttributeError, OSError):
-            # Silently ignore logging errors during shutdown
-            pass
 
     def _on_mqtt_disconnect(self, client, userdata, rc, properties=None, reasoncode=None):
         """Handle MQTT disconnection events."""

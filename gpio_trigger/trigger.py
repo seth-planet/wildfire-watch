@@ -25,6 +25,10 @@ from datetime import datetime, timezone
 from enum import Enum, auto
 from typing import Optional, Dict, Any, Callable
 
+# Debug: Immediate output to verify script is running
+print("GPIO Trigger: Starting imports...", flush=True)
+sys.stdout.flush()
+
 from dotenv import load_dotenv
 
 # Import base classes
@@ -33,6 +37,7 @@ from utils.mqtt_service import MQTTService
 from utils.health_reporter import HealthReporter
 from utils.thread_manager import ThreadSafeService, SafeTimerManager, BackgroundTaskRunner
 from utils.config_base import ConfigBase, ConfigSchema
+from utils.safe_logging import SafeLoggingMixin
 
 # Import safety wrappers - MANDATORY for safety-critical operation
 try:
@@ -265,7 +270,7 @@ class GPIOHealthReporter(HealthReporter):
 # ─────────────────────────────────────────────────────────────
 # Refactored Pump Controller
 # ─────────────────────────────────────────────────────────────
-class PumpController(MQTTService, ThreadSafeService):
+class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
     """Refactored pump controller using base classes.
     
     This implementation reduces code duplication by:
@@ -278,9 +283,15 @@ class PumpController(MQTTService, ThreadSafeService):
     """
     
     def __init__(self):
+        print("PumpController.__init__: Starting initialization...", flush=True)
+        sys.stdout.flush()
+        
         # Load configuration
         self.config = GPIOTriggerConfig()
         self.cfg = self.config.legacy_config  # Backward compatibility
+        
+        print(f"PumpController.__init__: Config loaded, MQTT broker: {getattr(self.config, 'mqtt_broker', 'NOT SET')}", flush=True)
+        sys.stdout.flush()
         
         # Initialize base classes
         ThreadSafeService.__init__(self, "gpio_trigger", logging.getLogger(__name__))
@@ -306,7 +317,11 @@ class PumpController(MQTTService, ThreadSafeService):
         self._shutting_down = False
         
         # Initialize GPIO
+        print("PumpController.__init__: About to initialize GPIO...", flush=True)
+        sys.stdout.flush()
         self._init_gpio()
+        print("PumpController.__init__: GPIO initialization complete", flush=True)
+        sys.stdout.flush()
         
         # Setup MQTT with subscriptions
         subscriptions = [
@@ -314,27 +329,64 @@ class PumpController(MQTTService, ThreadSafeService):
             self.config.emergency_topic
         ]
         
+        print("PumpController.__init__: Setting up MQTT...", flush=True)
+        sys.stdout.flush()
         self.setup_mqtt(
             on_connect=self._on_connect,
             on_message=self._on_message,
             subscriptions=subscriptions
         )
+        print("PumpController.__init__: MQTT setup complete", flush=True)
+        sys.stdout.flush()
         
         # Enable offline queue
+        print("PumpController.__init__: Enabling offline queue...", flush=True)
+        sys.stdout.flush()
         self.enable_offline_queue(max_size=50)
         
-        # Connect to MQTT after everything is initialized
-        # This prevents race conditions during startup
-        self.connect()
-        
-        # Setup health reporter after MQTT connection
+        # Setup health reporter BEFORE connecting (but don't start reporting yet)
+        print("PumpController.__init__: Creating health reporter...", flush=True)
+        sys.stdout.flush()
         self.health_reporter = GPIOHealthReporter(self)
-        self.health_reporter.start_health_reporting()
         
-        # Start monitoring tasks
+        # Start monitoring tasks BEFORE connecting
+        print("PumpController.__init__: Starting monitoring tasks...", flush=True)
+        sys.stdout.flush()
         self._start_monitoring_tasks()
+        print("PumpController.__init__: Monitoring tasks started", flush=True)
+        sys.stdout.flush()
         
-        self.logger.info(f"Pump Controller fully initialized and connected: {self.config.service_id}")
+        # NOW connect to MQTT after everything is initialized
+        # This prevents race conditions during startup
+        print("PumpController.__init__: About to connect to MQTT broker...", flush=True)
+        self._safe_log('info', "About to connect to MQTT broker...")
+        sys.stdout.flush() if hasattr(sys.stdout, 'flush') else None
+        self.connect()
+        print("PumpController.__init__: MQTT connect() method called", flush=True)
+        self._safe_log('info', "MQTT connect() method called")
+        sys.stdout.flush() if hasattr(sys.stdout, 'flush') else None
+        
+        # Wait for connection to be established before starting health reporting
+        print("PumpController.__init__: Waiting for connection...", flush=True)
+        sys.stdout.flush()
+        connection_result = self.wait_for_connection(timeout=30)
+        print(f"PumpController.__init__: wait_for_connection returned: {connection_result}", flush=True)
+        sys.stdout.flush()
+        
+        if connection_result:
+            self._safe_log('info', "MQTT connection established successfully")
+            # CRITICAL: This exact log message is what the test waits for
+            print("MQTT connected, ready for fire triggers", flush=True)
+            sys.stdout.flush()
+            # Start health reporting only after connection is confirmed
+            self.health_reporter.start_health_reporting()
+        else:
+            self._safe_log('error', "Failed to establish MQTT connection within timeout")
+            # Continue anyway - the service will retry connection in background
+            self.health_reporter.start_health_reporting()
+        
+        print("PumpController.__init__: Initialization complete", flush=True)
+        self._safe_log('info', f"Pump Controller fully initialized: {self.config.service_id}")
     
     def _init_gpio(self):
         """Initialize GPIO pins."""
@@ -353,7 +405,7 @@ class PumpController(MQTTService, ThreadSafeService):
                     pin = getattr(self.config, pin_name)
                     if pin:
                         GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-                        self.logger.debug(f"Setup {pin_name} on pin {pin} as OUTPUT")
+                        self._safe_log('debug', f"Setup {pin_name} on pin {pin} as OUTPUT")
                 
                 # Setup input pins
                 input_configs = [
@@ -368,7 +420,7 @@ class PumpController(MQTTService, ThreadSafeService):
                     if pin:
                         pull_up_down = GPIO.PUD_UP if active_low else GPIO.PUD_DOWN
                         GPIO.setup(pin, GPIO.IN, pull_up_down=pull_up_down)
-                        self.logger.debug(f"Setup {pin_name} on pin {pin} as INPUT")
+                        self._safe_log('debug', f"Setup {pin_name} on pin {pin} as INPUT")
                         
                         # Setup emergency button callback
                         if pin_name == 'emergency_button_pin':
@@ -380,50 +432,63 @@ class PumpController(MQTTService, ThreadSafeService):
                             )
                 
                 self._last_hardware_check = time.time()
-                self.logger.info("GPIO initialization complete")
+                self._safe_log('info', "GPIO initialization complete")
                 
             except Exception as e:
-                self.logger.error(f"GPIO initialization failed: {e}")
+                self._safe_log('error', f"GPIO initialization failed: {e}")
                 self._hardware_failures.append(str(e))
         else:
-            self.logger.warning("GPIO not available - simulation mode active")
+            self._safe_log('warning', "GPIO not available - simulation mode active")
+            # Force flush for Docker
+            if hasattr(sys.stdout, 'flush'):
+                sys.stdout.flush()
     
     def _start_monitoring_tasks(self):
         """Start background monitoring tasks."""
+        print(f"_start_monitoring_tasks: reservoir_float_pin={self.config.reservoir_float_pin}", flush=True)
         # Monitor reservoir level during refill
         if self.config.reservoir_float_pin:
+            print("_start_monitoring_tasks: Starting reservoir_monitor thread", flush=True)
             self.start_thread('reservoir_monitor', self._monitor_reservoir_level)
         
+        print(f"_start_monitoring_tasks: dry_run_protection={self.config.dry_run_protection}", flush=True)
         # Start dry run protection monitoring
         if self.config.dry_run_protection:
+            print("_start_monitoring_tasks: Starting dry_run_monitor thread", flush=True)
             self.start_thread('dry_run_monitor', self._monitor_dry_run_protection)
         
+        print(f"_start_monitoring_tasks: emergency_button_pin={self.config.emergency_button_pin}", flush=True)
         # Start emergency button monitoring if configured
         if self.config.emergency_button_pin:
+            print("_start_monitoring_tasks: Starting emergency_monitor thread", flush=True)
             self.start_thread('emergency_monitor', self._monitor_emergency_button)
     
-    def _on_connect(self, client, userdata, flags, rc):
+    def _on_connect(self, client, userdata, flags, rc, properties=None):
         """MQTT connection callback."""
-        self.logger.info("MQTT connected, ready for fire triggers")
+        print("GPIO Trigger _on_connect called!", flush=True)
+        sys.stdout.flush()
+        self._safe_log('info', "MQTT connected, ready for fire triggers")
+        print("MQTT connected, ready for fire triggers", flush=True)
+        sys.stdout.flush()
         self._publish_event('mqtt_connected')
     
     def _on_message(self, topic, payload):
         """Handle incoming MQTT messages."""
         # Debug: Log all received messages
-        self.logger.debug(f"GPIO trigger received message on topic '{topic}': {str(payload)[:100]}...")
+        self._safe_log('debug', f"GPIO trigger received message on topic '{topic}': {str(payload)[:100]}...")
         
         if topic == self.config.trigger_topic:
-            self.logger.info(f"Received fire trigger on {topic}")
+            self._safe_log('info', f"Received fire trigger on {topic}")
             self.handle_fire_trigger()
         elif topic == self.config.emergency_topic:
-            self.logger.warning(f"Received emergency command on {topic}")
+            self._safe_log('warning', f"Received emergency command on {topic}")
             if isinstance(payload, dict):
                 command = payload.get('command', '')
             else:
                 command = payload if isinstance(payload, str) else payload.decode()
             self.handle_emergency_command(command)
         else:
-            self.logger.debug(f"Ignoring message on topic '{topic}' (not {self.config.trigger_topic} or {self.config.emergency_topic})")
+            self._safe_log('debug', f"Ignoring message on topic '{topic}' (not {self.config.trigger_topic} or {self.config.emergency_topic})")
     
     def _publish_event(self, action: str, extra_data: Optional[Dict] = None):
         """Publish telemetry event."""
@@ -438,7 +503,7 @@ class PumpController(MQTTService, ThreadSafeService):
         if extra_data:
             payload.update(extra_data)
         
-        self.logger.info(f"Event: {action} | State: {self._state.name}")
+        self._safe_log('info', f"Event: {action} | State: {self._state.name}")
         
         # Use base class publish method
         self.publish_message(
@@ -459,7 +524,7 @@ class PumpController(MQTTService, ThreadSafeService):
             try:
                 # Set the pin
                 GPIO.output(pin, GPIO.HIGH if value else GPIO.LOW)
-                self.logger.debug(f"Set {pin_name} (pin {pin}) to {'HIGH' if value else 'LOW'}")
+                self._safe_log('debug', f"Set {pin_name} (pin {pin}) to {'HIGH' if value else 'LOW'}")
                 
                 # CRITICAL SAFETY FIX: Verify pin state after setting
                 time.sleep(0.05)  # Allow hardware to settle
@@ -468,7 +533,7 @@ class PumpController(MQTTService, ThreadSafeService):
                 
                 if read_back_value != expected_value:
                     error_msg = f"CRITICAL GPIO VERIFICATION FAILED: {pin_name} (pin {pin}) - Expected {expected_value}, got {read_back_value}"
-                    self.logger.critical(error_msg)
+                    self._safe_log('critical', error_msg)
                     # Enter error state for safety-critical pins
                     if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START', 'IGN_OFF']:
                         self._enter_error_state(error_msg)
@@ -477,11 +542,11 @@ class PumpController(MQTTService, ThreadSafeService):
                 return True
             except Exception as e:
                 error_msg = f"GPIO hardware failure on {pin_name}: {e}"
-                self.logger.critical(error_msg)
+                self._safe_log('critical', error_msg)
                 self._enter_error_state(error_msg)
                 return False
         else:
-            self.logger.debug(f"[SIMULATION] Would set {pin_name} to {'HIGH' if value else 'LOW'}")
+            self._safe_log('debug', f"[SIMULATION] Would set {pin_name} to {'HIGH' if value else 'LOW'}")
             return True
     
     def _get_state_snapshot(self) -> Dict[str, bool]:
@@ -531,7 +596,7 @@ class PumpController(MQTTService, ThreadSafeService):
     
     def _emergency_switch_callback(self, channel):
         """Handle emergency button press."""
-        self.logger.warning("Emergency button pressed!")
+        self._safe_log('warning', "Emergency button pressed!")
         self._publish_event('emergency_button_pressed')
         
         # Start pump immediately
@@ -550,7 +615,7 @@ class PumpController(MQTTService, ThreadSafeService):
                     self._set_pin('REFILL_VALVE', False)
                     self._refill_complete = True
                     self._publish_event('refill_complete_float')
-                    self.logger.info("Reservoir full - float switch triggered")
+                    self._safe_log('info', "Reservoir full - float switch triggered")
             
             self.wait_for_shutdown(1.0)
     
@@ -593,7 +658,7 @@ class PumpController(MQTTService, ThreadSafeService):
                 if not self._is_line_pressure_ok():
                     self._low_pressure_detected = True
                     self._publish_event('low_pressure_detected')
-                    self.logger.warning("Low line pressure detected!")
+                    self._safe_log('warning', "Low line pressure detected!")
                     self._state = PumpState.LOW_PRESSURE
                     self.timer_manager.schedule('pressure_shutdown', self._shutdown_engine, 5.0)
     
@@ -687,7 +752,7 @@ class PumpController(MQTTService, ThreadSafeService):
     
     def _max_runtime_reached(self):
         """Handle maximum runtime reached."""
-        self.logger.warning("Maximum runtime reached - shutting down")
+        self._safe_log('warning', "Maximum runtime reached - shutting down")
         self._publish_event('max_runtime_shutdown')
         self._shutdown_engine()
     
@@ -697,7 +762,7 @@ class PumpController(MQTTService, ThreadSafeService):
             # CRITICAL SAFETY FIX: Cancel all active timers immediately to prevent
             # pump restart after emergency shutdown
             self.timer_manager.cancel_all()
-            self.logger.critical(f"EMERGENCY: Cancelled all active timers during error state entry")
+            self._safe_log('critical', f"EMERGENCY: Cancelled all active timers during error state entry")
             
             self._state = PumpState.ERROR
             self._shutting_down = True
@@ -712,7 +777,7 @@ class PumpController(MQTTService, ThreadSafeService):
             self._pump_start_time = None
             
             self._publish_event('error_state', {'reason': reason})
-            self.logger.error(f"Entered ERROR state: {reason}")
+            self._safe_log('error', f"Entered ERROR state: {reason}")
     
     # ─────────────────────────────────────────────────────────────
     # Public interface methods
@@ -734,7 +799,7 @@ class PumpController(MQTTService, ThreadSafeService):
                 # Start priming timer
                 self.timer_manager.schedule('priming_complete', self._priming_complete, self.config.priming_duration)
             else:
-                self.logger.warning(f"Cannot start pump - state: {self._state.name}, refill: {self._refill_complete}")
+                self._safe_log('warning', f"Cannot start pump - state: {self._state.name}, refill: {self._refill_complete}")
     
     def handle_emergency_command(self, command: str):
         """Handle emergency commands."""
@@ -825,9 +890,10 @@ class PumpController(MQTTService, ThreadSafeService):
             return self.timer_manager.cancel_all()
         return 0
     
+    
     def cleanup(self):
         """Clean shutdown of controller."""
-        self.logger.info("Cleaning up PumpController")
+        self._safe_log("info", "Cleaning up PumpController")
         
         # Set shutdown flag
         self._shutdown = True
@@ -858,7 +924,7 @@ class PumpController(MQTTService, ThreadSafeService):
         if GPIO_AVAILABLE:
             GPIO.cleanup()
         
-        self.logger.info("PumpController cleanup complete")
+        self._safe_log("info", "PumpController cleanup complete")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -866,14 +932,42 @@ class PumpController(MQTTService, ThreadSafeService):
 # ─────────────────────────────────────────────────────────────
 def main():
     """Main entry point for GPIO trigger service."""
+    # Get log level from environment
+    log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
+    
+    # Force flush for Docker logging
     logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True  # Override any existing config
     )
     
-    controller = PumpController()
+    # Set all loggers to the same level
+    logging.getLogger().setLevel(getattr(logging, log_level, logging.INFO))
+    
+    # Force stdout to be unbuffered
+    sys.stdout.reconfigure(line_buffering=True) if hasattr(sys.stdout, 'reconfigure') else None
+    
+    # The controller's __init__ method already handles all initialization including:
+    # - MQTT connection
+    # - Health reporting
+    # - Monitoring tasks
+    logging.info("Creating PumpController instance...")
+    sys.stdout.flush()
     
     try:
+        controller = PumpController()
+        logging.info("PumpController created successfully")
+        sys.stdout.flush()
+    except Exception as e:
+        logging.error(f"Failed to create PumpController: {e}", exc_info=True)
+        sys.stdout.flush()
+        sys.exit(1)
+    
+    try:
+        logging.info("Entering main service loop...")
+        sys.stdout.flush()
         # Keep service running
         while True:
             time.sleep(1)

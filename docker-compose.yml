@@ -289,6 +289,50 @@ services:
     healthcheck:
       <<: *healthcheck-mqtt
 
+  # Web Interface Service - Read-only monitoring dashboard
+  web_interface:
+    build:
+      context: .
+      dockerfile: ./web_interface/Dockerfile
+      args:
+        - PLATFORM=${PLATFORM:-linux/amd64}
+    image: wildfire-watch/web_interface:${VERSION:-latest}
+    container_name: web-interface
+    hostname: web-interface
+    restart: unless-stopped
+    depends_on:
+      mqtt_broker:
+        condition: service_healthy
+    environment:
+      <<: *common-variables
+      # HTTP server configuration
+      STATUS_PANEL_HTTP_HOST: ${STATUS_PANEL_HTTP_HOST:-127.0.0.1}
+      STATUS_PANEL_HTTP_PORT: ${STATUS_PANEL_HTTP_PORT:-8080}
+      # Security settings
+      STATUS_PANEL_DEBUG: ${STATUS_PANEL_DEBUG:-false}
+      STATUS_PANEL_DEBUG_TOKEN: ${STATUS_PANEL_DEBUG_TOKEN:-}
+      STATUS_PANEL_ALLOWED_NETWORKS: ${STATUS_PANEL_ALLOWED_NETWORKS:-["127.0.0.1","localhost"]}
+      # UI settings
+      STATUS_PANEL_REFRESH: ${STATUS_PANEL_REFRESH:-15}
+      STATUS_PANEL_BUFFER: ${STATUS_PANEL_BUFFER:-1000}
+      # Performance settings
+      STATUS_PANEL_ACCESS_LOG: ${STATUS_PANEL_ACCESS_LOG:-false}
+    volumes:
+      - certs:/mnt/data/certs:ro
+    networks:
+      - wildfire_net
+    ports:
+      # Only expose on localhost by default for security
+      - "${STATUS_PANEL_PORT:-127.0.0.1:8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    labels:
+      io.balena.features.supervisor-api: '1'
+
   # Optional: Model preparation service (for initial setup)
   model_prep:
     build:

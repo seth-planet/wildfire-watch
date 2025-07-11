@@ -71,11 +71,12 @@ from utils.model_naming import (
     get_model_filename, get_model_path, get_model_url,
     determine_model_size_for_hardware, list_available_models
 )
+from utils.safe_logging import SafeLoggingMixin
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-class HardwareDetector:
+class HardwareDetector(SafeLoggingMixin):
     """Detects available hardware acceleration for AI inference and video decoding.
     
     This class probes the system for various hardware components that can
@@ -113,6 +114,7 @@ class HardwareDetector:
         The detected_hardware dictionary is always populated, though
         values may indicate no hardware found.
         """
+        self.logger = logger
         self.detected_hardware = {
             'cpu': self._detect_cpu(),
             'gpu': self._detect_gpu(),
@@ -142,9 +144,9 @@ class HardwareDetector:
                     elif 'vendor_id' in line:
                         info['vendor'] = line.split(':')[1].strip()
         except (FileNotFoundError, PermissionError):
-            logger.warning("Could not read /proc/cpuinfo")
+            self._safe_log('warning', "Could not read /proc/cpuinfo")
         except CommandError as e:
-            logger.debug(f"Error reading cpuinfo: {e}")
+            self._safe_log('debug', f"Error reading cpuinfo: {e}")
                     
         # Check for Raspberry Pi
         if os.path.exists('/proc/device-tree/model'):
@@ -173,7 +175,7 @@ class HardwareDetector:
             devices = glob.glob('/dev/dri/renderD*')
             render_devices = sorted(devices)  # Sort for consistency
         except Exception as e:
-            logger.debug(f"Error listing render devices: {e}")
+            self._safe_log('debug', f"Error listing render devices: {e}")
         return render_devices
     
     def _detect_gpu(self) -> Dict:

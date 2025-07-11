@@ -55,6 +55,33 @@ class TestE2EIntegrationImproved:
         self._cleanup_e2e_services()
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
+    def _ensure_docker_images_built(self):
+        """Ensure Docker images are built before running tests"""
+        import subprocess
+        
+        images_to_build = [
+            ('wildfire-watch/camera_detector:latest', 'camera_detector/Dockerfile'),
+            ('wildfire-watch/fire_consensus:latest', 'fire_consensus/Dockerfile'),
+            ('wildfire-watch/gpio_trigger:latest', 'gpio_trigger/Dockerfile'),
+        ]
+        
+        for image, dockerfile in images_to_build:
+            # Check if image exists
+            result = subprocess.run(['docker', 'images', '-q', image], 
+                                  capture_output=True, text=True)
+            
+            if not result.stdout.strip():
+                print(f"Building missing Docker image: {image}")
+                build_args = ['docker', 'build', '-t', image, '-f', dockerfile, '.']
+                
+                # Special handling for gpio_trigger which needs platform arg
+                if 'gpio_trigger' in dockerfile:
+                    build_args.extend(['--build-arg', 'PLATFORM=amd64'])
+                
+                result = subprocess.run(build_args)
+                if result.returncode != 0:
+                    pytest.fail(f"Failed to build Docker image: {image}")
+    
     def _start_e2e_services(self, docker_client, mqtt_client):
         """Start the required services for E2E tests running locally in threads"""
         import threading
@@ -74,10 +101,7 @@ class TestE2EIntegrationImproved:
         for key, value in env_vars.items():
             os.environ[key] = str(value)
         
-        # Fix environment variable names for refactored services
-        if 'MQTT_TOPIC_PREFIX' in env_vars:
-            os.environ['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
-            print(f"[DEBUG] Set TOPIC_PREFIX={os.environ['TOPIC_PREFIX']}")
+        # Environment variables are now properly set by ParallelTestContext
         
         # Service-specific configuration
         os.environ['MAX_ENGINE_RUNTIME'] = '10'  # 10 second timeout for tests
@@ -179,6 +203,9 @@ class TestE2EIntegrationImproved:
     
     def test_service_startup_order(self, docker_client):
         """Test that services start in correct order with health checks"""
+        
+        # Ensure Docker images are built
+        self._ensure_docker_images_built()
         
         # Start services with worker-isolated names
         services_to_start = {
@@ -691,8 +718,7 @@ class TestE2EIntegrationImproved:
         
         env_vars = self.parallel_context.get_service_env('camera_detector')
         # Fix environment variable names for refactored services
-        if 'MQTT_TOPIC_PREFIX' in env_vars:
-            env_vars['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
+        # Environment variables are properly set by ParallelTestContext
         # Set faster health reporting for testing and reduce network scanning
         env_vars['HEALTH_REPORT_INTERVAL'] = '5'  # 5 seconds instead of 60
         env_vars['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
@@ -894,8 +920,7 @@ class TestE2EIntegrationImproved:
             env_vars['MQTT_PORT'] = str(mqtt_port)
             
             # Fix environment variable names for refactored services
-            if 'MQTT_TOPIC_PREFIX' in env_vars:
-                env_vars['TOPIC_PREFIX'] = env_vars['MQTT_TOPIC_PREFIX']
+            # Environment variables are properly set by ParallelTestContext
                 
             # Service-specific settings
             if service == 'gpio-trigger':

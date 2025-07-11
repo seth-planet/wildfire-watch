@@ -201,12 +201,36 @@ class MQTTTestHelper:
     @staticmethod
     def create_mock_client(broker_host: str = 'localhost', 
                           broker_port: int = 1883) -> Mock:
-        """Create a mock MQTT client for unit testing"""
-        mock_client = Mock(spec=mqtt.Client)
-        mock_client.is_connected.return_value = True
-        mock_client.publish.return_value = (0, 1)  # Success
-        mock_client.subscribe.return_value = (0, 1)  # Success
-        return mock_client
+        """DEPRECATED: Do not use mock clients - use real MQTT broker instead.
+        
+        This method violates best practices. Use test_mqtt_broker fixture instead:
+        
+        def test_something(test_mqtt_broker, mqtt_client):
+            # Use real mqtt_client, not mocks
+            mqtt_client.publish(topic, payload)
+        
+        Raises:
+            DeprecationWarning: Always raised to prevent usage
+        """
+        import warnings
+        warnings.warn(
+            "create_mock_client is deprecated. Use real MQTT broker with test_mqtt_broker fixture instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        # Return a real client connected to test broker if possible
+        # This helps migration by not breaking tests immediately
+        try:
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+            client.connect(broker_host, broker_port, 60)
+            client.loop_start()
+            return client
+        except:
+            # If no broker available, raise error
+            raise RuntimeError(
+                "Mock MQTT clients are not allowed. "
+                "Use test_mqtt_broker fixture for real MQTT testing."
+            )
 
 
 # Migration patterns for common test scenarios

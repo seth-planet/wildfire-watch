@@ -27,6 +27,7 @@ import logging
 from typing import Any, Dict, List, Optional, Union, Type
 from abc import ABC, abstractmethod
 import yaml
+from .safe_logging import SafeLoggingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,7 @@ class ConfigSchema:
         self.description = description
 
 
-class ConfigBase(ABC):
+class ConfigBase(ABC, SafeLoggingMixin):
     """Base class for service configuration.
     
     Subclasses should:
@@ -162,10 +163,10 @@ class ConfigBase(ABC):
             
         # Validate numeric ranges
         if schema.min is not None and value < schema.min:
-            logger.warning(f"{env_key} value {value} below minimum {schema.min}, using minimum")
+            self._safe_log('warning', f"{env_key} value {value} below minimum {schema.min}, using minimum")
             value = schema.min
         if schema.max is not None and value > schema.max:
-            logger.warning(f"{env_key} value {value} above maximum {schema.max}, using maximum")
+            self._safe_log('warning', f"{env_key} value {value} above maximum {schema.max}, using maximum")
             value = schema.max
             
         # Validate choices
@@ -268,14 +269,14 @@ class ConfigBase(ABC):
         
         for pattern in injection_patterns:
             if pattern in raw_value:
-                logger.warning(f"Configuration '{env_key}' contains potentially dangerous character '{pattern}' - sanitizing")
+                self._safe_log('warning', f"Configuration '{env_key}' contains potentially dangerous character '{pattern}' - sanitizing")
                 # Remove the dangerous character instead of failing
                 raw_value = raw_value.replace(pattern, '')
         
         # Limit string size to prevent DoS
         max_string_size = 4096  # 4KB limit for strings
         if len(raw_value) > max_string_size:
-            logger.warning(f"Configuration '{env_key}' string too long ({len(raw_value)} chars), truncating to {max_string_size}")
+            self._safe_log('warning', f"Configuration '{env_key}' string too long ({len(raw_value)} chars), truncating to {max_string_size}")
             raw_value = raw_value[:max_string_size]
         
         return raw_value
@@ -390,6 +391,11 @@ class SharedMQTTConfig(ConfigBase):
             str,
             default='',
             description="MQTT password"
+        ),
+        'topic_prefix': ConfigSchema(
+            str,
+            default='',
+            description="Topic prefix for test isolation"
         )
     }
     
@@ -400,11 +406,11 @@ class SharedMQTTConfig(ConfigBase):
         """Validate MQTT configuration."""
         # If TLS enabled, ensure CA path exists
         if self.mqtt_tls and not os.path.exists(self.tls_ca_path):
-            logger.warning(f"TLS enabled but CA certificate not found at {self.tls_ca_path}")
+            self._safe_log('warning', f"TLS enabled but CA certificate not found at {self.tls_ca_path}")
             
         # Port 8883 is standard for MQTT over TLS
         if self.mqtt_tls and self.mqtt_port == 1883:
-            logger.info("TLS enabled with standard non-TLS port 1883, consider using 8883")
+            self._safe_log('info', "TLS enabled with standard non-TLS port 1883, consider using 8883")
 
 
 # Configuration validation utilities

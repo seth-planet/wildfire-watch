@@ -20,7 +20,7 @@ opencv-python==4.11.0.86
 av==15.0.0
 
 # Network utilities
-python-arp==0.0.2
+# python-arp==0.0.2  # Package doesn't exist, using scapy instead
 netifaces==0.11.0
 requests==2.32.4
 

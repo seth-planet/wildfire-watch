@@ -3,6 +3,7 @@
 Enhanced MQTT Test Broker with Connection Pooling and Isolation
 """
 import os
+import sys
 import time
 import threading
 import subprocess
@@ -14,30 +15,15 @@ from pathlib import Path
 from typing import Dict, Optional, Set
 import paho.mqtt.client as mqtt
 
+# Add path for imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from utils.safe_logging import safe_log
+
 logger = logging.getLogger(__name__)
 
 def _safe_log(level: str, message: str, exc_info: bool = False) -> None:
-    """Safely log a message with comprehensive checks."""
-    try:
-        test_logger = logging.getLogger(__name__)
-        if not test_logger:
-            return
-            
-        # Check if logger has handlers and they're not closed
-        if not hasattr(test_logger, 'handlers') or not test_logger.handlers:
-            return
-            
-        # Check each handler to ensure it's not closed
-        for handler in test_logger.handlers:
-            if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-                if handler.stream.closed:
-                    return
-                    
-        # Log the message
-        getattr(test_logger, level.lower())(message, exc_info=exc_info)
-    except (ValueError, AttributeError, OSError):
-        # Silently ignore logging errors during shutdown
-        pass
+    """Wrapper for module-level safe logging."""
+    safe_log(logger, level, message, exc_info)
 
 # Configuration toggle for per-worker brokers vs shared broker
 USE_PER_WORKER_BROKERS = os.getenv('TEST_PER_WORKER_BROKERS', 'true').lower() == 'true'
@@ -200,10 +186,14 @@ class TestMQTTBroker:
         self.data_dir = tempfile.mkdtemp(prefix="mqtt_test_")
         
         # Create mosquitto config with enhanced settings
+        pid_file = os.path.join(self.data_dir, "mosquitto.pid")
         config_content = f"""
 # Basic Configuration
 port {self.port}
 allow_anonymous true
+
+# PID file (unique for this instance)
+pid_file {pid_file}
 
 # Performance Settings
 max_connections 1000
@@ -217,6 +207,7 @@ persistence false
 # Logging
 log_type error
 log_type warning
+log_dest file /dev/null
 
 # Connection Settings
 sys_interval 30
@@ -244,7 +235,9 @@ protocol mqtt
         # Check if process is running
         if self.process.poll() is not None:
             stdout, stderr = self.process.communicate()
-            error_msg = stderr.decode() if stderr else "Unknown error"
+            stdout_msg = stdout.decode() if stdout else "No stdout"
+            stderr_msg = stderr.decode() if stderr else "No stderr"
+            error_msg = f"stdout: {stdout_msg}, stderr: {stderr_msg}"
             # Check for common issues
             if "bind" in error_msg.lower() or "address already in use" in error_msg.lower():
                 # Port conflict - try to allocate a different port

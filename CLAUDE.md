@@ -97,6 +97,71 @@ mqtt_broker (core)
 
 ## Development Patterns
 
+### MANDATORY: Base Class Architecture
+**All services MUST use the following base classes (78% code reduction achieved):**
+
+1. **MQTTService** (`utils/mqtt_service.py`)
+   - Handles all MQTT connectivity with automatic reconnection
+   - Provides thread-safe publishing with offline message queuing
+   - Manages Last Will Testament (LWT) for service health
+   - **DO NOT** implement custom MQTT handling - use this base class
+
+2. **ThreadSafeService** (`utils/thread_manager.py`)
+   - Use `SafeTimerManager` for all timer operations
+   - Use `BackgroundTaskRunner` for periodic tasks
+   - Provides graceful shutdown handling
+   - **DO NOT** create raw threads - use provided utilities
+
+3. **ConfigBase** (`utils/config_base.py`)
+   - Schema-based configuration with validation
+   - Type conversion and cross-service validation
+   - **DO NOT** parse environment variables manually
+
+4. **HealthReporter** (`utils/health_reporter.py`)
+   - Standardized health monitoring and reporting
+   - Automatic system metrics collection
+   - **DO NOT** implement custom health reporting
+
+**Example Implementation:**
+```python
+class MyService(MQTTService, ThreadSafeService):
+    def __init__(self):
+        config = MyServiceConfig()  # Inherits from ConfigBase
+        MQTTService.__init__(self, "my_service", config.__dict__)
+        ThreadSafeService.__init__(self)
+        self.health_reporter = MyHealthReporter(self)  # Inherits from HealthReporter
+```
+
+### MANDATORY: Service Initialization Pattern
+**All services MUST follow this exact initialization order:**
+
+1. **Create all components first** (health reporter, task runners, etc.)
+2. **Initialize MQTT connection** after components are ready
+3. **Wait for connection verification** before starting operations
+4. **Start health reporting** only after connection is verified
+
+**Critical Requirements:**
+- **NO duplicate initialization** - Check `main()` for redundant calls
+- Update callback signatures for paho-mqtt compatibility: `def _on_connect(self, client, userdata, flags, rc, properties=None)`
+- Always call `wait_for_connection(timeout=30)` before proceeding
+
+**Example:**
+```python
+def __init__(self):
+    # 1. Initialize components
+    self.health_reporter = MyHealthReporter(self)
+    self._start_monitoring_tasks()
+    
+    # 2. Connect to MQTT
+    self.connect()
+    
+    # 3. Wait and verify
+    if self.wait_for_connection(timeout=30):
+        self.health_reporter.start_health_reporting()
+    else:
+        raise RuntimeError("Failed to connect to MQTT broker")
+```
+
 ### Adding New Camera Support
 1. Modify `camera_detector/detect.py` discovery methods
 2. Update camera credential handling in environment variables
@@ -126,6 +191,35 @@ If conversions timeout:
 2. Reduce calibration dataset size
 3. Run on more powerful hardware
 4. Use pre-converted models when available
+
+#### MANDATORY: Model Conversion Optimization
+**All model conversions MUST implement caching to avoid repeated work:**
+
+1. **Caching System** (10-50x speedup achieved)
+   - Cache converted models with unique keys based on model/size/format/precision
+   - Check cache before any conversion operation
+   - Store cache metadata for validation
+
+2. **Parallel Conversion**
+   - Use `ThreadPoolExecutor` for converting multiple formats simultaneously
+   - Convert to ONNX first, then use it as source for other formats
+   - Maximum 4 parallel workers to avoid resource exhaustion
+
+3. **Tiered Testing Approach**
+   - **Unit tests**: Mock conversions entirely
+   - **Integration tests**: Use cached models
+   - **E2E tests**: Real conversions (run nightly only)
+
+**Example Cache Implementation:**
+```python
+cache_key = f"{model_name}_{size}x{size}_{format}_{precision}"
+cached_path = cache_manager.get_cached_model(cache_key)
+if cached_path:
+    return cached_path
+# Perform conversion only if not cached
+result = convert_model(...)
+cache_manager.cache_model(cache_key, result)
+```
 
 ### GPIO Safety Systems
 - All pump control in `gpio_trigger/trigger.py` uses state machine pattern
@@ -180,40 +274,84 @@ If conversions timeout:
 4. **Minimal mocking** - Only mock external I/O (files, network, hardware)
 5. **Test real behavior** - Include edge cases and error conditions
 
-### Integration Testing Philosophy
-**Avoid mocking functions and files within wildfire-watch**:
+### MANDATORY: Integration Testing Requirements
+**These are NOT optional - all integration tests MUST follow these patterns:**
 
-1. **Never mock internal modules** - Don't mock `consensus`, `trigger`, `detect`, etc.
-   - ❌ Bad: `@patch('consensus.FireConsensus')`
-   - ✅ Good: Actually instantiate and use `FireConsensus` class
+1. **NEVER mock internal modules** - Test failures will result from mocking:
+   - ❌ **FORBIDDEN**: `@patch('fire_consensus.consensus.FireConsensus')`
+   - ❌ **FORBIDDEN**: `@patch('paho.mqtt.client.Client')`
+   - ✅ **REQUIRED**: Use actual service instances with `TestMQTTBroker`
 
-2. **Only mock external dependencies**:
+2. **ALWAYS use real MQTT communication**:
+   - **REQUIRED**: Use `TestMQTTBroker` from fixtures
+   - **REQUIRED**: Test actual message flow between services
+   - **REQUIRED**: Verify connection handling and reconnection
+   - **FORBIDDEN**: Mock MQTT client or broker
 
-3. **MQTT Integration Testing Requirements**:
-   - **Always use real MQTT broker** - Use `TestMQTTBroker` class
-   - Test actual MQTT message flow between components
-   - Verify real connection handling and reconnection logic
-   - **Never mock MQTT client** - This prevents testing the actual communication layer
+3. **MUST implement topic namespacing**:
+   - **REQUIRED**: Prefix all topics with `worker_id` for parallel test isolation
+   - **REQUIRED**: Use `ParallelTestContext.get_topic_prefix()`
+   - **Example**: `f"{topic_prefix}/fire/trigger"`
 
-### Container Management and Test Isolation Best Practices
+4. **Event-driven synchronization ONLY**:
+   - ❌ **FORBIDDEN**: `time.sleep(5)` - causes flaky tests
+   - ✅ **REQUIRED**: Use `Event()` with callbacks for synchronization
+   - **Example**:
+     ```python
+     trigger_event = Event()
+     client.message_callback_add("*/fire/trigger", 
+                                lambda c,u,m: trigger_event.set())
+     assert trigger_event.wait(timeout=10), "Fire not triggered"
+     ```
 
-#### Use DockerContainerManager for Container Tests
-When writing tests that use Docker containers, always use `DockerContainerManager` for proper isolation and cleanup:
+5. **Test both success AND failure scenarios**:
+   - **REQUIRED**: Test error conditions, not just happy paths
+   - **REQUIRED**: Test service disconnections and recovery
+   - **REQUIRED**: Test invalid inputs and edge cases
+
+### MANDATORY: Docker Container Management
+**All Docker-based tests MUST use EnhancedDockerContainerManager:**
+
+1. **Container Naming Requirements**:
+   - **REQUIRED**: Worker-specific names: `f"wf-{worker_id}-{service}"`
+   - **FORBIDDEN**: Hardcoded container names in parallel tests
+   - **Example**: `manager.get_container_name("mqtt-broker")`
+
+2. **Container Lifecycle Management**:
+   - **REQUIRED**: Use atomic operations with thread-safe locks
+   - **REQUIRED**: Implement retry logic for Docker API errors
+   - **REQUIRED**: Cleanup sequence: Stop → Wait → Remove with verification
+   - **REQUIRED**: Define health checks for ALL containers
+
+3. **Health Check Implementation**:
+   ```python
+   def mqtt_health_check(container):
+       try:
+           exit_code, _ = container.exec_run(
+               "mosquitto_sub -h localhost -p 1883 -t test -C 1 -W 1"
+           )
+           return exit_code == 0
+       except:
+           return False
+   
+   container = manager.start_container(
+       image="eclipse-mosquitto",
+       health_check_fn=mqtt_health_check
+   )
+   ```
+
+4. **Cleanup Requirements**:
+   - **REQUIRED**: Cleanup old containers before creating new ones
+   - **REQUIRED**: Use `force=True` for cleanup in fixtures
+   - **REQUIRED**: Register cleanup handlers for unexpected exits
 
 #### Use ParallelTestContext for Multi-Service Tests
-For complex tests involving multiple services, use `ParallelTestContext` to get proper topic namespacing and environment variables:
+For complex tests involving multiple services, use `ParallelTestContext` to get proper topic namespacing and environment variables.
 
-#### Topic Namespace Strategy for Test Isolation
-All MQTT topics must be namespaced to prevent test interference:
-
-#### Container Environment Best Practices
-Always set proper environment variables for container isolation:
-
-#### Test Data Isolation Patterns
-Ensure test data doesn't interfere between parallel workers:
-
-#### Error Handling and Cleanup
-Always implement proper cleanup even when tests fail:
+#### Error Handling Patterns
+- **Retry transient errors**: "removal already in progress", "network has active endpoints"
+- **Wait for operations**: Allow time between stop and remove
+- **Disconnect before network removal**: Prevent "active endpoints" errors
 
 #### When to Use Each Testing Approach
 
@@ -474,3 +612,23 @@ Context7 MCP provides the following tools that LLMs can use:
 - Check `*_PLAN.md`, `*_SUMMARY.md`, `*_GUIDE.md` files for past solutions
 
 **Never speculate** - Search and verify all technical details.
+
+## Critical Best Practices Summary
+
+### Non-Negotiable Requirements
+The following practices are **MANDATORY** based on proven production issues and achieved improvements:
+
+1. **Base Class Usage**: 78% code reduction achieved - ALL services MUST use base classes
+2. **Service Initialization Order**: Prevents MQTT connection failures - MUST follow exact pattern
+3. **Integration Testing**: No mocking internal services - prevents false test passes
+4. **Docker Management**: Use EnhancedDockerContainerManager - prevents container conflicts
+5. **Model Conversion Caching**: 10-50x speedup - MUST implement for all conversions
+
+### Consequences of Not Following These Practices
+- **Without base classes**: 2000+ lines of duplicate code per service
+- **Wrong initialization order**: Services fail to connect to MQTT broker
+- **Mocking internal services**: Tests pass but production fails
+- **No container management**: Parallel tests fail with name conflicts
+- **No model caching**: Tests timeout after 30+ minutes
+
+These practices are the result of extensive debugging and optimization efforts. They are not suggestions - they are requirements for a stable, maintainable system.

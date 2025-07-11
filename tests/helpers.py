@@ -701,6 +701,77 @@ class DockerContainerManager:
             
         return False
     
+    def wait_for_healthy(self, container_name: str, timeout: int = 60) -> bool:
+        """
+        Wait for a container to become healthy based on its health check.
+        
+        Args:
+            container_name: Name of the container to check
+            timeout: Maximum time to wait in seconds
+            
+        Returns:
+            True if container became healthy, False if timeout
+            
+        Raises:
+            RuntimeError: If container exits or fails
+        """
+        start_time = time.time()
+        last_health_status = None
+        
+        while time.time() - start_time < timeout:
+            try:
+                container = self.client.containers.get(container_name)
+                container.reload()
+                
+                # Check if container is still running
+                if container.status == 'exited':
+                    logs = container.logs(tail=100).decode()
+                    raise RuntimeError(f"Container {container_name} exited. Last logs:\n{logs}")
+                
+                # Check health status
+                health = container.attrs.get('State', {}).get('Health', {})
+                if health:
+                    health_status = health.get('Status', 'none')
+                    
+                    # Log status changes
+                    if health_status != last_health_status:
+                        print(f"  Container {container_name} health: {health_status}")
+                        last_health_status = health_status
+                    
+                    if health_status == 'healthy':
+                        return True
+                    elif health_status == 'unhealthy':
+                        # Get last health check log
+                        logs = health.get('Log', [])
+                        if logs:
+                            last_check = logs[-1]
+                            output = last_check.get('Output', 'No output')
+                            print(f"  Health check failed: {output}")
+                else:
+                    # No health check defined, check if running
+                    if container.status == 'running':
+                        # Give it a few seconds to stabilize
+                        time.sleep(5)
+                        return True
+                
+                time.sleep(2)
+                
+            except docker.errors.NotFound:
+                raise RuntimeError(f"Container {container_name} not found")
+            except Exception as e:
+                print(f"  Error checking container health: {e}")
+                time.sleep(2)
+        
+        # Timeout - get final logs for debugging
+        try:
+            container = self.client.containers.get(container_name)
+            logs = container.logs(tail=50).decode()
+            print(f"  Container {container_name} logs at timeout:\n{logs}")
+        except:
+            pass
+            
+        return False
+    
     def get_container_name(self, service: str) -> str:
         """
         Get unique container name for a service.
@@ -1185,7 +1256,7 @@ class ParallelTestContext:
             'MQTT_PORT': str(self.mqtt_port),
             'MQTT_TLS': 'false',
             'MQTT_CLIENT_ID': f'{service}_{self.worker_id}',
-            'MQTT_TOPIC_PREFIX': self.namespace.namespace,
+            'TOPIC_PREFIX': self.namespace.namespace,
             'LOG_LEVEL': 'DEBUG'
         }
         

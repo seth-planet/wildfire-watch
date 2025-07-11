@@ -79,8 +79,10 @@ def camera_detector_with_mqtt(test_mqtt_broker, mqtt_topic_factory, monkeypatch,
     
     # Cleanup
     try:
-        detector.shutdown()
-    except:
+        detector.cleanup()
+    except Exception as e:
+        # Log but don't fail the test on cleanup errors
+        print(f"Warning: Cleanup error (expected during shutdown): {e}")
         pass
 
 
@@ -423,8 +425,10 @@ class TestCameraDetectorTLS:
         
         # Cleanup
         try:
-            detector.shutdown()
-        except:
+            detector.cleanup()
+        except Exception as e:
+            # Log but don't fail the test on cleanup errors
+            print(f"Warning: Cleanup error (expected during shutdown): {e}")
             pass
 
 

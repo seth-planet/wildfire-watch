@@ -4,6 +4,8 @@
 # Core dependencies
 paho-mqtt>=2.0.0
 python-dotenv>=1.0.0
+PyYAML>=6.0.0
+psutil>=5.9.0
 
 # For simulation on non-Pi systems
 fake-rpi>=0.7.1

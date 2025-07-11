@@ -7,42 +7,31 @@ import time
 import uuid
 import paho.mqtt.client as mqtt
 import multiprocessing
+import logging
 
-# Fix super-gradients logging issues that cause hanging during test teardown
-try:
-    import logging
-    # Import safe logging to prevent I/O on closed file errors
-    from safe_logging import disable_problem_loggers, cleanup_test_logging
-    disable_problem_loggers()
-except ImportError:
-    # Fallback if safe_logging not available
-    try:
-        import logging
-        # Prevent super-gradients from interfering with test teardown
-        logging.getLogger("super_gradients").setLevel(logging.CRITICAL)
-        logging.getLogger("super_gradients").propagate = False
-    except:
-        pass
+# Add tests directory to Python path to ensure imports work
+sys.path.insert(0, os.path.dirname(__file__))
 
-# Import enhanced process cleanup
+# Import safe logging to prevent I/O on closed file errors
+# This is critical for parallel test execution
+from utils.safe_logging import disable_problem_loggers, cleanup_test_logging
+disable_problem_loggers()
+
+# Import enhanced process cleanup for proper test isolation
 try:
-    # Try enhanced version first
     from enhanced_process_cleanup import get_process_cleaner, cleanup_on_test_failure
+    # Configure to not kill test processes
+    import enhanced_process_cleanup
+    if hasattr(enhanced_process_cleanup, 'PROTECTED_PATTERNS'):
+        # Add pytest worker processes to protected patterns
+        enhanced_process_cleanup.PROTECTED_PATTERNS.extend([
+            'pytest', 'py.test', 'xdist', 'gw[0-9]+', 'execnet'
+        ])
 except ImportError:
-    try:
-        # Fallback to basic version
-        from process_cleanup import ProcessCleaner
-        def get_process_cleaner():
-            return ProcessCleaner()
-        def cleanup_on_test_failure():
-            cleaner = ProcessCleaner()
-            cleaner.cleanup_all()
-    except ImportError:
-        # Fallback if cleanup module not available
-        def get_process_cleaner():
-            return None
-        def cleanup_on_test_failure():
-            pass
+    def get_process_cleaner():
+        return None
+    def cleanup_on_test_failure():
+        pass
 
 def has_coral_tpu():
     """Check if Coral TPU is available"""
@@ -330,13 +319,20 @@ def pytest_configure(config):
     worker_id = getattr(config, 'workerinput', {}).get('workerid', 'master')
     config._worker_id = worker_id
     
-    # Set multiprocessing start method to 'spawn' for fork safety
-    # This prevents issues with CUDA, threads, and file descriptors
-    try:
-        multiprocessing.set_start_method('spawn', force=True)
-    except RuntimeError:
-        # Already set, ignore
-        pass
+    # Set multiprocessing start method
+    # For pytest-xdist, we should not change the multiprocessing start method
+    # as it conflicts with execnet. Comment this out to use default fork mode.
+    # try:
+    #     # First check if we're on Linux
+    #     if sys.platform.startswith('linux'):
+    #         # Use forkserver for better safety while preserving imports
+    #         multiprocessing.set_start_method('forkserver', force=True)
+    #     else:
+    #         # Use spawn on other platforms
+    #         multiprocessing.set_start_method('spawn', force=True)
+    # except RuntimeError:
+    #     # Already set, ignore
+    #     pass
 
 
 def pytest_collection_modifyitems(config, items):
@@ -374,6 +370,13 @@ def docker_container_manager(worker_id):
     manager.cleanup()
 
 
+@pytest.fixture
+def security_nvr_manager(docker_container_manager):
+    """Provide Security NVR manager for tests that need Frigate containers"""
+    # This fixture wraps docker_container_manager for security NVR specific needs
+    return docker_container_manager
+
+
 # ============================================================================
 # LEGACY ADAPTERS FOR REFACTORED CLASSES (Temporary - Remove after migration)
 # ============================================================================
@@ -384,6 +387,11 @@ import threading
 
 # Import new classes - handle import errors gracefully
 try:
+    # Ensure parent directory is in path for utils imports
+    parent_dir = os.path.dirname(os.path.dirname(__file__))
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+        
     from utils.mqtt_service import MQTTService
     from utils.health_reporter import HealthReporter
     from utils.thread_manager import ThreadSafeService

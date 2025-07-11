@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from dotenv import load_dotenv
+from utils.safe_logging import safe_log
 
 # Import base classes
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -144,11 +145,11 @@ class TelemetryHealthReporter(HealthReporter):
             return
         
         try:
-            self.mqtt_service.logger.info(f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
+            self.telemetry._safe_log('info', f"[HEALTH DEBUG] _publish_health called for {self.mqtt_service.service_name}")
             
             # Check MQTT connection first
             if not self.mqtt_service.is_connected:
-                self.mqtt_service.logger.warning(f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
+                self.telemetry._safe_log('warning', f"[HEALTH DEBUG] MQTT not connected for {self.mqtt_service.service_name}, skipping health publish")
                 # Still reschedule to try again later
             else:
                 # Gather health data
@@ -161,7 +162,7 @@ class TelemetryHealthReporter(HealthReporter):
                 
                 # Publish to telemetry topic instead of health topic
                 topic = self.telemetry.config.telemetry_topic
-                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Publishing telemetry to {topic} with data keys: {list(health_data.keys())}")
+                self.telemetry._safe_log('info', f"[HEALTH DEBUG] Publishing telemetry to {topic} with data keys: {list(health_data.keys())}")
                 result = self.mqtt_service.publish_message(
                     topic,
                     health_data,
@@ -169,17 +170,17 @@ class TelemetryHealthReporter(HealthReporter):
                     qos=1
                 )
                 if result:
-                    self.mqtt_service.logger.info(f"[HEALTH DEBUG] Telemetry published successfully to {topic}")
+                    self.telemetry._safe_log('info', f"[HEALTH DEBUG] Telemetry published successfully to {topic}")
                 else:
-                    self.mqtt_service.logger.error(f"[HEALTH DEBUG] Failed to publish telemetry to {topic}")
+                    self.telemetry._safe_log('error', f"[HEALTH DEBUG] Failed to publish telemetry to {topic}")
             
         except Exception as e:
-            self.mqtt_service.logger.error(f"[HEALTH DEBUG] Error publishing telemetry: {e}", exc_info=True)
+            self.telemetry._safe_log('error', f"[HEALTH DEBUG] Error publishing telemetry: {e}", exc_info=True)
         
         # Reschedule next health report
         if not self._shutdown:
             with self._lock:
-                self.mqtt_service.logger.info(f"[HEALTH DEBUG] Scheduling next telemetry report in {self.interval}s")
+                self.telemetry._safe_log('info', f"[HEALTH DEBUG] Scheduling next telemetry report in {self.interval}s")
                 self._health_timer = threading.Timer(self.interval, self._publish_health)
                 self._health_timer.daemon = True
                 self._health_timer.start()
@@ -208,7 +209,7 @@ class TelemetryHealthReporter(HealthReporter):
                     "uptime_seconds": int(time.time() - psutil.boot_time())
                 }
             except Exception as e:
-                self.logger.error(f"Error collecting system metrics: {e}")
+                self.telemetry._safe_log('error', f"Error collecting system metrics: {e}")
         return metrics
 
 
@@ -243,16 +244,16 @@ class TelemetryService(MQTTService, ThreadSafeService):
             subscriptions=[]
         )
         
-        self.logger.info(f"Telemetry Service configured: {self.config.camera_id}")
+        self._safe_log('info', f"Telemetry Service configured: {self.config.camera_id}")
         
         # Connect to MQTT after everything is initialized
         # This prevents race conditions during startup
         self.connect()
-        self.logger.info(f"Telemetry Service fully initialized and connected: {self.config.camera_id}")
+        self._safe_log('info', f"Telemetry Service fully initialized and connected: {self.config.camera_id}")
         
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback."""
-        self.logger.info("MQTT connected, starting telemetry reporting")
+        self._safe_log('info', "MQTT connected, starting telemetry reporting")
         # Start health reporting on connection
         self._start_telemetry_reporting()
         
@@ -263,7 +264,7 @@ class TelemetryService(MQTTService, ThreadSafeService):
         
     def cleanup(self):
         """Clean shutdown of service."""
-        self.logger.info("Shutting down Telemetry Service")
+        self._safe_log('info', "Shutting down Telemetry Service")
         
         # Stop health reporting
         if hasattr(self, 'health_reporter'):
@@ -273,7 +274,7 @@ class TelemetryService(MQTTService, ThreadSafeService):
         ThreadSafeService.shutdown(self)
         MQTTService.shutdown(self)
         
-        self.logger.info("Telemetry Service shutdown complete")
+        self._safe_log('info', "Telemetry Service shutdown complete")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -297,9 +298,9 @@ def main():
         telemetry.wait_for_shutdown()
         
     except KeyboardInterrupt:
-        logging.info("Received interrupt signal")
+        safe_log(logging.getLogger(__name__), 'info', "Received interrupt signal")
     except Exception as e:
-        logging.error(f"Fatal error: {e}", exc_info=True)
+        safe_log(logging.getLogger(__name__), 'error', f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
         if 'telemetry' in locals():

@@ -23,8 +23,21 @@ WORKDIR /app
 
 # Copy utils module
 COPY utils /utils
-# Add root to Python path so utils can be imported
-ENV PYTHONPATH=/
+
+# Copy gpio_trigger module (needed for gpio_safety imports)
+COPY gpio_trigger /app/gpio_trigger
+
+# Copy debug scripts
+COPY scripts/debug_mqtt_connection.py /scripts/
+COPY scripts/container_connectivity_test.py /scripts/
+COPY gpio_trigger/test_entrypoint.sh /test_entrypoint.sh
+RUN chmod +x /test_entrypoint.sh
+
+# Add root and app to Python path so modules can be imported
+ENV PYTHONPATH=/:/app
+
+# Fix Python output buffering in Docker
+ENV PYTHONUNBUFFERED=1
 
 # Copy all requirements files
 COPY gpio_trigger/requirements*.txt ./
@@ -38,11 +51,12 @@ RUN if [ "$BUILD_ENV" = "test" ] && [ -f requirements_test.txt ]; then \
          pip install --no-cache-dir paho-mqtt>=2.0.0 python-dotenv>=1.0.0 PyYAML>=6.0.0 psutil>=5.9.0 fake-rpi>=0.7.1); \
     fi
 
-# Copy the trigger script
-COPY gpio_trigger/trigger.py .
-
 # Start Avahi, then run trigger.py
 ENTRYPOINT ["entrypoint.sh"]
 
-# Run the GPIO trigger loop
-CMD ["python3.12", "trigger.py"]
+# Set Python to unbuffered mode for immediate log output
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONIOENCODING=UTF-8
+
+# Run the GPIO trigger loop with unbuffered output
+CMD ["python3.12", "-u", "gpio_trigger/trigger.py"]

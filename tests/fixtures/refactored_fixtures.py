@@ -41,53 +41,74 @@ def mock_service_config(mock_mqtt_config):
 
 
 @pytest.fixture
-def mock_mqtt_client():
-    """Create a mock MQTT client for testing."""
-    client = MagicMock()
-    client.is_connected = MagicMock(return_value=True)
-    client.connect = MagicMock(return_value=(0, None))
-    client.disconnect = MagicMock()
-    client.loop_start = MagicMock()
-    client.loop_stop = MagicMock()
-    client.publish = MagicMock(return_value=(0, 1))
-    client.subscribe = MagicMock(return_value=(0, 1))
+def real_mqtt_service_factory(test_mqtt_broker, mqtt_topic_factory):
+    """Factory for creating services with real MQTT connections."""
+    import paho.mqtt.client as mqtt
     
-    # Track published messages
-    client.published_messages = []
+    def create_mqtt_service(service_name="test_service", config_overrides=None):
+        """Create a service with real MQTT broker connection."""
+        # Get broker connection params
+        conn_params = test_mqtt_broker.get_connection_params()
+        
+        # Create config dict with real broker info
+        config = {
+            'mqtt_broker': conn_params['host'],
+            'mqtt_port': conn_params['port'],
+            'mqtt_tls': False,
+            'mqtt_username': '',
+            'mqtt_password': '',
+            'topic_prefix': mqtt_topic_factory(''),  # Use unique prefix
+            'health_interval': 60,
+            'log_level': 'INFO',
+            'service_id': service_name
+        }
+        
+        # Apply overrides
+        if config_overrides:
+            config.update(config_overrides)
+        
+        # Create real MQTT client
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"{service_name}_client")
+        client.connect(config['mqtt_broker'], config['mqtt_port'])
+        client.loop_start()
+        
+        # Return config and client for service initialization
+        return config, client
     
-    def track_publish(topic, payload, **kwargs):
-        client.published_messages.append({
-            'topic': topic,
-            'payload': payload,
-            'kwargs': kwargs
-        })
-        return (0, 1)
-    
-    client.publish.side_effect = track_publish
-    
-    return client
+    return create_mqtt_service
 
 
 @pytest.fixture
-def refactored_service_factory(mock_service_config, mock_mqtt_client):
-    """Factory for creating refactored services with mocked dependencies."""
-    def create_service(service_class, config_overrides=None):
-        # Apply config overrides
-        if config_overrides:
-            for key, value in config_overrides.items():
-                setattr(mock_service_config, key, value)
-        
-        # Create service
-        service = service_class()
-        
-        # Replace MQTT client with mock
-        if hasattr(service, '_mqtt_client'):
-            service._mqtt_client = mock_mqtt_client
-            service._mqtt_connected = True
-        
-        return service, mock_mqtt_client
+def refactored_service_factory(real_mqtt_service_factory):
+    """Factory for creating refactored services with real MQTT connections."""
+    created_clients = []
     
-    return create_service
+    def create_service(service_class, config_overrides=None):
+        # Get real MQTT config and client
+        config, mqtt_client = real_mqtt_service_factory(
+            service_name=service_class.__name__,
+            config_overrides=config_overrides
+        )
+        
+        # Track client for cleanup
+        created_clients.append(mqtt_client)
+        
+        # Create service with real config
+        # Note: Service initialization depends on the specific service class
+        # This is a template that may need adjustment per service
+        service = service_class(config)
+        
+        return service, mqtt_client
+    
+    yield create_service
+    
+    # Cleanup all created clients
+    for client in created_clients:
+        try:
+            client.loop_stop()
+            client.disconnect()
+        except:
+            pass
 
 
 @pytest.fixture

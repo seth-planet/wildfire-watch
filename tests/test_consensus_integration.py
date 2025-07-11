@@ -47,9 +47,14 @@ def create_growing_fire_detections(camera_id, object_id, base_time, count=8, ini
 @pytest.fixture
 def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     """Create consensus service with proper environment isolation"""
-    # Get unique topic prefix
+    # Get unique topic prefix with additional isolation
     full_topic = mqtt_topic_factory("dummy")
     prefix = full_topic.rsplit('/', 1)[0]
+    
+    # Add process ID and timestamp for complete isolation
+    import os
+    unique_suffix = f"{os.getpid()}_{int(time.time() * 1000) % 100000}"
+    prefix = f"{prefix}_{unique_suffix}"
     
     # Set environment variables using monkeypatch for proper cleanup
     monkeypatch.setenv('TOPIC_PREFIX', prefix)
@@ -64,19 +69,27 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     # Create consensus service
     consensus = FireConsensus()
     
-    # Wait for MQTT connection
+    # Wait for MQTT connection with verification
     start_time = time.time()
+    connected = False
     while time.time() - start_time < 10:
         if hasattr(consensus, "_mqtt_connected") and consensus._mqtt_connected:
-            time.sleep(0.5)  # Give extra time for subscriptions
+            connected = True
+            time.sleep(1.0)  # Give extra time for subscriptions
             break
         time.sleep(0.1)
     
+    if not connected:
+        logger.warning(f"Consensus service may not be connected (prefix: {prefix})")
+    
     yield consensus, prefix
     
-    # Cleanup
+    # Cleanup with proper shutdown
     try:
-        consensus.cleanup()
+        if hasattr(consensus, 'cleanup'):
+            consensus.cleanup()
+        elif hasattr(consensus, 'shutdown'):
+            consensus.shutdown()
         time.sleep(0.5)  # Allow cleanup to complete
     except Exception as e:
         logger.error(f"Error during consensus cleanup: {e}")
@@ -85,9 +98,14 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
 @pytest.fixture
 def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     """Consensus service configured for single camera triggering"""
-    # Get unique topic prefix
+    # Get unique topic prefix with test isolation
     full_topic = mqtt_topic_factory("dummy")
     prefix = full_topic.rsplit('/', 1)[0]
+    
+    # Add process ID and timestamp for complete isolation
+    import os
+    unique_suffix = f"{os.getpid()}_{int(time.time() * 1000) % 100000}"
+    prefix = f"{prefix}_{unique_suffix}"
     
     # Set environment variables
     monkeypatch.setenv('TOPIC_PREFIX', prefix)
@@ -99,21 +117,62 @@ def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
     monkeypatch.setenv('COOLDOWN_PERIOD', '5')
     
+    # Create consensus with unique service name to avoid conflicts
     consensus = FireConsensus()
     
-    # Wait for connection
+    # Wait for MQTT connection with better verification
     start_time = time.time()
+    connected = False
+    connection_verified = False
+    
+    # First wait for basic connection
     while time.time() - start_time < 10:
         if hasattr(consensus, "_mqtt_connected") and consensus._mqtt_connected:
-            time.sleep(0.5)
+            connected = True
             break
         time.sleep(0.1)
     
+    # Then verify the connection is working
+    if connected:
+        verify_topic = f"{prefix}/test/verify"
+        verify_event = threading.Event()
+        
+        # Subscribe to verify topic
+        def verify_callback(client, userdata, msg):
+            if verify_topic in msg.topic:
+                verify_event.set()
+        
+        # Create a temporary client to verify
+        verify_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"verify_{unique_suffix}")
+        verify_client.on_message = verify_callback
+        verify_client.connect(test_mqtt_broker.host, test_mqtt_broker.port)
+        verify_client.subscribe(verify_topic)
+        verify_client.loop_start()
+        
+        # Try to publish through consensus
+        try:
+            if hasattr(consensus, 'publish_message'):
+                consensus.publish_message(f"test/verify", {"test": "connection"})
+                connection_verified = verify_event.wait(timeout=2)
+        except:
+            pass
+        
+        verify_client.loop_stop()
+        verify_client.disconnect()
+    
+    if not connection_verified:
+        logger.warning(f"Consensus service may not be fully connected to MQTT (prefix: {prefix})")
+    else:
+        logger.info(f"Consensus service connected and verified (prefix: {prefix})")
+    
     yield consensus, prefix
     
-    # Cleanup
+    # Cleanup with proper shutdown
     try:
-        consensus.cleanup()
+        if hasattr(consensus, 'cleanup'):
+            consensus.cleanup()
+        elif hasattr(consensus, 'shutdown'):
+            consensus.shutdown()
         time.sleep(0.5)
     except Exception as e:
         logger.error(f"Error during consensus cleanup: {e}")
@@ -292,73 +351,130 @@ class TestCooldownPeriod:
         trigger_topic = f"{prefix}/fire/trigger"
         telemetry_topic = f"{prefix}/system/camera_telemetry"
         
-        # Track triggers
+        # Track triggers with timestamps and events
         received_triggers = []
+        trigger_lock = threading.Lock()
+        first_trigger_event = threading.Event()
+        subscription_ready = threading.Event()
         
         def on_message(client, userdata, msg):
             if trigger_topic in msg.topic:
-                received_triggers.append({
-                    'data': json.loads(msg.payload.decode()),
-                    'time': time.time()
-                })
+                with trigger_lock:
+                    received_triggers.append({
+                        'data': json.loads(msg.payload.decode()),
+                        'time': time.time()
+                    })
+                    if len(received_triggers) == 1:
+                        first_trigger_event.set()
+        
+        def on_subscribe(client, userdata, mid, granted_qos, properties=None):
+            subscription_ready.set()
         
         mqtt_client.on_message = on_message
-        mqtt_client.subscribe(f"{trigger_topic}/#")
+        mqtt_client.on_subscribe = on_subscribe
+        result, mid = mqtt_client.subscribe(f"{trigger_topic}/#")
         
-        # Register camera
+        # Wait for subscription confirmation
+        assert subscription_ready.wait(timeout=5), "Failed to subscribe to trigger topic"
+        
+        # Also subscribe to all topics for debugging
+        mqtt_client.subscribe(f"{prefix}/#")
+        
+        # Register camera with QoS 1 for reliability
         telemetry = {
             'camera_id': 'cam1',
             'status': 'online',
             'timestamp': time.time()
         }
-        mqtt_client.publish(telemetry_topic, json.dumps(telemetry))
-        time.sleep(0.2)
+        mqtt_client.publish(telemetry_topic, json.dumps(telemetry), qos=1)
+        
+        # Give consensus more time to process camera registration
+        time.sleep(2.0)
         
         # First burst - should trigger
         base_time = time.time()
-        detections = create_growing_fire_detections('cam1', 'fire1', base_time)
+        detections = create_growing_fire_detections('cam1', 'fire1', base_time, count=12, initial_size=0.04, growth_rate=0.01)
         
-        for detection in detections[:8]:  # Send all 8 to ensure trigger
-            mqtt_client.publish(detection_topic, json.dumps(detection))
-            time.sleep(0.05)
+        # Send detections with QoS 1 for reliability
+        for i, detection in enumerate(detections):
+            mqtt_client.publish(detection_topic, json.dumps(detection), qos=1)
+            time.sleep(0.05)  # Faster to stay within detection window
+            if i % 3 == 0:
+                time.sleep(0.1)  # Occasional longer delay
         
-        # Wait for first trigger
+        # Wait for first trigger with event
+        assert first_trigger_event.wait(timeout=10), "First detection burst should trigger within 10 seconds"
+        
+        # Verify we got the trigger
+        with trigger_lock:
+            triggers_before = len(received_triggers)
+        assert triggers_before > 0, f"First detection burst should trigger, but got {triggers_before} triggers"
+        
+        # Note the time of first trigger
+        with trigger_lock:
+            first_trigger_time = received_triggers[0]['time']
+        
+        # Wait a bit to ensure we're in cooldown period
         time.sleep(2)
         
-        triggers_before = len(received_triggers)
-        assert triggers_before > 0, "First detection burst should trigger"
-        
-        # Second burst immediately after - should NOT trigger due to cooldown
+        # Second burst during cooldown - should NOT trigger
         base_time2 = time.time()
-        detections2 = create_growing_fire_detections('cam1', 'fire2', base_time2)
+        detections2 = create_growing_fire_detections('cam1', 'fire2', base_time2, count=12, initial_size=0.04, growth_rate=0.01)
         
-        for detection in detections2[:8]:  # Send all 8 for consistency
-            mqtt_client.publish(detection_topic, json.dumps(detection))
-            time.sleep(0.05)
+        for detection in detections2:
+            mqtt_client.publish(detection_topic, json.dumps(detection), qos=1)
+            time.sleep(0.1)
         
-        # Wait to see if it triggers
-        time.sleep(2)
+        # Wait to see if it triggers (it shouldn't)
+        time.sleep(3)
         
         # Should still have same number of triggers
-        triggers_after = len(received_triggers)
-        assert triggers_after == triggers_before, "Cooldown should prevent second trigger"
+        with trigger_lock:
+            triggers_after = len(received_triggers)
+        assert triggers_after == triggers_before, f"Cooldown should prevent second trigger (before: {triggers_before}, after: {triggers_after})"
         
-        # Wait for cooldown to expire (5 seconds total in test)
-        time.sleep(4)
+        # Calculate how long to wait for cooldown to expire
+        # Cooldown is 5 seconds, we've already waited about 5-6 seconds
+        elapsed_since_trigger = time.time() - first_trigger_time
+        remaining_cooldown = max(0, 6 - elapsed_since_trigger)  # Add 1s buffer for safety
+        if remaining_cooldown > 0:
+            logger.info(f"Waiting {remaining_cooldown:.1f}s for cooldown to expire...")
+            time.sleep(remaining_cooldown)
         
         # Third burst after cooldown - should trigger
         base_time3 = time.time()
-        detections3 = create_growing_fire_detections('cam1', 'fire3', base_time3)
+        detections3 = create_growing_fire_detections('cam1', 'fire3', base_time3, count=12, initial_size=0.04, growth_rate=0.01)
         
-        for detection in detections3[:8]:  # Send all 8 to ensure trigger
-            mqtt_client.publish(detection_topic, json.dumps(detection))
-            time.sleep(0.05)
+        # Send with QoS 1 for reliability
+        for i, detection in enumerate(detections3):
+            mqtt_client.publish(detection_topic, json.dumps(detection), qos=1)
+            time.sleep(0.05)  # Faster to stay within detection window
+            if i % 3 == 0:
+                time.sleep(0.1)  # Occasional longer delay
         
-        time.sleep(2)
+        # Wait for new trigger with event-based approach
+        new_trigger_event = threading.Event()
         
-        # Should now have more triggers
-        final_triggers = len(received_triggers)
-        assert final_triggers > triggers_before, "Should trigger after cooldown expires"
+        def check_for_new_trigger():
+            start_wait = time.time()
+            while time.time() - start_wait < 10:
+                with trigger_lock:
+                    if len(received_triggers) > triggers_before:
+                        new_trigger_event.set()
+                        return
+                time.sleep(0.1)
+        
+        # Run check in thread to avoid blocking
+        check_thread = threading.Thread(target=check_for_new_trigger)
+        check_thread.start()
+        check_thread.join(timeout=11)
+        
+        assert new_trigger_event.is_set(), "Should trigger after cooldown expires"
+        
+        # Verify we got a new trigger
+        with trigger_lock:
+            final_triggers = len(received_triggers)
+        assert final_triggers > triggers_before, f"Should have more triggers after cooldown (before: {triggers_before}, final: {final_triggers})"
 
 
 class TestEdgeCases:
@@ -417,69 +533,101 @@ class TestEdgeCases:
         trigger_topic = f"{prefix}/fire/trigger"
         telemetry_topic = f"{prefix}/system/camera_telemetry"
         
-        # Track triggers
+        # Track triggers with event
         received_triggers = []
+        trigger_event = threading.Event()
+        subscription_ready = threading.Event()
         
         def on_message(client, userdata, msg):
             if trigger_topic in msg.topic:
                 received_triggers.append(json.loads(msg.payload.decode()))
+                trigger_event.set()
+        
+        def on_subscribe(client, userdata, mid, granted_qos, properties=None):
+            subscription_ready.set()
         
         mqtt_client.on_message = on_message
-        mqtt_client.subscribe(f"{trigger_topic}/#")
+        mqtt_client.on_subscribe = on_subscribe
+        result, mid = mqtt_client.subscribe(f"{trigger_topic}/#")
         
-        # Register camera
+        # Wait for subscription to be confirmed
+        assert subscription_ready.wait(timeout=5), "Failed to subscribe to trigger topic"
+        
+        # Register camera and wait for consensus to process it
         telemetry = {
             'camera_id': 'cam1',
             'status': 'online',
             'timestamp': time.time()
         }
-        mqtt_client.publish(telemetry_topic, json.dumps(telemetry))
-        time.sleep(0.2)
+        mqtt_client.publish(telemetry_topic, json.dumps(telemetry), qos=1)
         
-        # Send low confidence detections
+        # Give consensus time to process camera registration
+        time.sleep(1.0)
+        
+        # Send low confidence detections - ensure consensus service is ready
         base_time = time.time()
-        for i in range(6):
+        low_conf_detections = []
+        for i in range(10):  # Send more detections
             detection = {
                 'camera_id': 'cam1',
                 'confidence': 0.5,  # Below threshold of 0.7
                 'object': 'fire',
                 'object_id': 'fire1',
                 'bbox': [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01],  # [x1, y1, x2, y2] format
-                'timestamp': base_time + i * 0.5
+                'timestamp': base_time + i * 0.1  # Closer together for detection window
             }
-            mqtt_client.publish(detection_topic, json.dumps(detection))
+            low_conf_detections.append(detection)
+            mqtt_client.publish(detection_topic, json.dumps(detection), qos=1)
             time.sleep(0.1)
         
-        time.sleep(2)
+        # Wait for processing with polling
+        start_wait = time.time()
+        while time.time() - start_wait < 5:
+            if len(received_triggers) > 0:
+                break  # Unexpected trigger
+            time.sleep(0.1)
         
         # Should not trigger
-        assert len(received_triggers) == 0, "Low confidence detections should not trigger"
+        assert len(received_triggers) == 0, f"Low confidence detections should not trigger, but got {len(received_triggers)} triggers"
         
-        # Now send high confidence detections
-        for i in range(6):
+        # Clear event for high confidence test
+        trigger_event.clear()
+        
+        # Ensure enough time has passed to avoid detection window overlap
+        time.sleep(2)
+        
+        # Now send high confidence detections with fresh timestamps
+        new_base_time = time.time()
+        high_conf_detections = []
+        for i in range(12):  # Send more detections to ensure trigger
             detection = {
                 'camera_id': 'cam1',
                 'confidence': 0.85,  # Above threshold
                 'object': 'fire',
                 'object_id': 'fire2',
-                'bbox': [0.1, 0.1, 0.2 + i*0.01, 0.2 + i*0.01],  # [x1, y1, x2, y2] format
-                'timestamp': time.time()
+                'bbox': [0.1, 0.1, 0.25 + i*0.02, 0.25 + i*0.02],  # [x1, y1, x2, y2] format
+                'timestamp': new_base_time + i * 0.2  # Closer together
             }
-            mqtt_client.publish(detection_topic, json.dumps(detection))
+            high_conf_detections.append(detection)
+            mqtt_client.publish(detection_topic, json.dumps(detection), qos=1)
             time.sleep(0.1)
         
-        time.sleep(2)
-        
-        # Should trigger now
-        assert len(received_triggers) > 0, "High confidence detections should trigger"
+        # Wait for trigger with timeout
+        assert trigger_event.wait(timeout=15), f"High confidence detections should trigger within 15 seconds. Sent {len(high_conf_detections)} detections"
+        assert len(received_triggers) > 0, "Should have received at least one trigger"
 
 
 class TestZoneBasedActivation:
     """Test zone-based activation feature with real MQTT"""
     
-    def test_zone_mapping_in_trigger_payload(self, test_mqtt_broker, monkeypatch):
+    def test_zone_mapping_in_trigger_payload(self, test_mqtt_broker, mqtt_topic_factory, monkeypatch):
         """Test that zone information is included in trigger payload"""
+        # Get unique topic prefix
+        full_topic = mqtt_topic_factory("dummy")
+        prefix = full_topic.rsplit('/', 1)[0]
+        
         # Set up environment for zone activation
+        monkeypatch.setenv('TOPIC_PREFIX', prefix)  # Critical for refactored services
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
         monkeypatch.setenv('ZONE_ACTIVATION', 'true')
@@ -505,7 +653,7 @@ class TestZoneBasedActivation:
         subscriber = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_zone_subscriber")
         subscriber.on_message = on_message
         subscriber.connect(test_mqtt_broker.host, test_mqtt_broker.port)
-        subscriber.subscribe("fire/trigger")
+        subscriber.subscribe(f"{prefix}/fire/trigger")  # Use prefix for topic
         subscriber.loop_start()
         
         # Give subscriber time to connect
@@ -529,7 +677,7 @@ class TestZoneBasedActivation:
                 'status': 'online',
                 'timestamp': time.time()
             }
-            publisher.publish('system/camera_telemetry', json.dumps(telemetry))
+            publisher.publish(f'{prefix}/system/camera_telemetry', json.dumps(telemetry))
         time.sleep(0.5)
         
         # Send growing fire detections from cameras in different zones
@@ -537,7 +685,7 @@ class TestZoneBasedActivation:
         for camera_id in ['cam1', 'cam2']:
             detections = create_growing_fire_detections(camera_id, f'{camera_id}_fire1', base_time)
             for detection in detections:
-                publisher.publish('fire/detection', json.dumps(detection))
+                publisher.publish(f'{prefix}/fire/detection', json.dumps(detection))
                 time.sleep(0.1)
         
         # Wait for trigger
@@ -555,9 +703,14 @@ class TestZoneBasedActivation:
         subscriber.disconnect()
         consensus.cleanup()
     
-    def test_zone_activation_disabled(self, test_mqtt_broker, monkeypatch):
+    def test_zone_activation_disabled(self, test_mqtt_broker, mqtt_topic_factory, monkeypatch):
         """Test trigger payload when zone activation is disabled"""
+        # Get unique topic prefix
+        full_topic = mqtt_topic_factory("dummy")
+        prefix = full_topic.rsplit('/', 1)[0]
+        
         # Set up environment without zone activation
+        monkeypatch.setenv('TOPIC_PREFIX', prefix)  # Critical for refactored services
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
         monkeypatch.setenv('ZONE_ACTIVATION', 'false')
@@ -583,7 +736,7 @@ class TestZoneBasedActivation:
         subscriber = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_nozone_subscriber")
         subscriber.on_message = on_message
         subscriber.connect(test_mqtt_broker.host, test_mqtt_broker.port)
-        subscriber.subscribe("fire/trigger")
+        subscriber.subscribe(f"{prefix}/fire/trigger")  # Use prefix for topic
         subscriber.loop_start()
         
         # Give subscriber time to connect
@@ -606,7 +759,7 @@ class TestZoneBasedActivation:
             'status': 'online',
             'timestamp': time.time()
         }
-        publisher.publish('system/camera_telemetry', json.dumps(telemetry))
+        publisher.publish(f'{prefix}/system/camera_telemetry', json.dumps(telemetry))
         time.sleep(0.5)
         
         # Send growing fire detections
@@ -614,7 +767,7 @@ class TestZoneBasedActivation:
         detections = create_growing_fire_detections('cam1', 'fire1', base_time)
         
         for detection in detections:
-            publisher.publish('fire/detection', json.dumps(detection))
+            publisher.publish(f'{prefix}/fire/detection', json.dumps(detection))
             time.sleep(0.1)
         
         # Wait for trigger

@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+
+{% block title %}Wildfire Watch Dashboard{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Left Column: System Status and GPIO States -->
+    <div class="lg:col-span-1 space-y-6">
+        <!-- System Overview -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">System Overview</h2>
+            <dl class="space-y-2">
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">Fire Status:</dt>
+                    <dd class="font-bold {{ 'text-red-600' if system_status.fire_active else 'text-green-600' }}">
+                        {{ system_status.fire_status }}
+                    </dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">Last Trigger:</dt>
+                    <dd class="text-sm font-mono">{{ system_status.last_trigger }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">Consensus Count:</dt>
+                    <dd class="font-bold">{{ system_status.consensus_count }}</dd>
+                </div>
+                <div class="flex justify-between">
+                    <dt class="text-gray-600">System Health:</dt>
+                    <dd>
+                        <div class="flex items-center">
+                            <div class="w-24 bg-gray-200 rounded-full h-2 mr-2">
+                                <div class="bg-green-600 h-2 rounded-full" style="width: {{ system_status.services.percentage }}%"></div>
+                            </div>
+                            <span class="text-sm">{{ system_status.services.percentage }}%</span>
+                        </div>
+                    </dd>
+                </div>
+            </dl>
+        </div>
+        
+        <!-- GPIO States -->
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">GPIO Pin States</h2>
+            <div class="space-y-3">
+                {% for pin_id, pin in gpio_states.items() %}
+                <div class="flex items-center justify-between p-2 rounded {{ 'bg-green-50' if pin.state_bool else 'bg-gray-50' }}">
+                    <div>
+                        <span class="font-medium">{{ pin.name }}</span>
+                        <span class="text-xs text-gray-500 block">Pin: {{ pin.id }}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-block px-2 py-1 text-xs rounded {{ 'bg-green-500 text-white' if pin.state_bool else 'bg-gray-400 text-white' }}">
+                            {{ pin.state }}
+                        </span>
+                        <span class="text-xs text-gray-500 block">{{ pin.last_change }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Middle Column: Service Health -->
+    <div class="lg:col-span-1">
+        <div class="bg-white rounded-lg shadow p-6">
+            <h2 class="text-xl font-bold mb-4 text-gray-800">Service Health</h2>
+            <div class="space-y-2">
+                {% for service in services %}
+                <div class="border rounded p-3 {{ 'border-green-400 bg-green-50' if service.status == 'healthy' else 'border-red-400 bg-red-50' if service.status == 'unhealthy' else 'border-yellow-400 bg-yellow-50' }}">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h3 class="font-medium">{{ service.name }}</h3>
+                            <p class="text-xs text-gray-600">Last seen: {{ service.last_seen }}</p>
+                        </div>
+                        <span class="text-xs px-2 py-1 rounded {{ 'bg-green-500 text-white' if service.status == 'healthy' else 'bg-red-500 text-white' if service.status == 'unhealthy' else 'bg-yellow-500 text-white' }}">
+                            {{ service.status }}
+                        </span>
+                    </div>
+                    <div class="mt-2 text-xs text-gray-600">
+                        <span>Uptime: {{ service.uptime_hours }}h</span>
+                        {% if service.cpu_percent %}
+                        <span class="ml-3">CPU: {{ service.cpu_percent }}%</span>
+                        {% endif %}
+                        {% if service.memory_mb %}
+                        <span class="ml-3">Mem: {{ service.memory_mb }}MB</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Right Column: Recent Events -->
+    <div class="lg:col-span-1">
+        <div class="bg-white rounded-lg shadow p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Recent Events</h2>
+                <button onclick="location.reload()" class="text-sm text-blue-600 hover:text-blue-800">
+                    Refresh
+                </button>
+            </div>
+            
+            <!-- Event filters -->
+            <div class="mb-4" x-data="{ filter: 'all' }">
+                <select x-model="filter" class="text-sm border rounded px-2 py-1 w-full">
+                    <option value="all">All Events</option>
+                    <option value="fire">Fire Events</option>
+                    <option value="gpio">GPIO Changes</option>
+                    <option value="health">Health Updates</option>
+                    <option value="camera">Camera Events</option>
+                </select>
+            </div>
+            
+            <!-- Events list -->
+            <div class="space-y-2 max-h-96 overflow-y-auto" id="events-container">
+                {% for event in recent_events %}
+                <div class="p-2 border rounded text-xs event-item" data-type="{{ event.type }}">
+                    <div class="flex justify-between items-start">
+                        <span class="font-mono text-gray-600">{{ event.timestamp }}</span>
+                        <span class="px-1 py-0.5 rounded text-xs 
+                            {% if event.type == 'fire' %}bg-red-100 text-red-700
+                            {% elif event.type == 'gpio' %}bg-blue-100 text-blue-700
+                            {% elif event.type == 'health' %}bg-green-100 text-green-700
+                            {% elif event.type == 'camera' %}bg-purple-100 text-purple-700
+                            {% else %}bg-gray-100 text-gray-700{% endif %}">
+                            {{ event.type }}
+                        </span>
+                    </div>
+                    <div class="mt-1">
+                        <span class="font-medium">{{ event.topic }}</span>
+                        {% if event.payload %}
+                        <pre class="mt-1 text-xs bg-gray-50 p-1 rounded overflow-x-auto">{{ event.payload | tojson(indent=2) }}</pre>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Additional Info Row -->
+<div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Camera Status -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-xl font-bold mb-4 text-gray-800">Camera Status</h2>
+        <p class="text-sm text-gray-600 mb-2">
+            Active Cameras: {{ system_status.cameras.active }} / {{ system_status.cameras.total }}
+        </p>
+        <div class="text-xs text-gray-500">
+            <p>Camera information updates via MQTT discovery</p>
+        </div>
+    </div>
+    
+    <!-- System Info -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-xl font-bold mb-4 text-gray-800">System Information</h2>
+        <dl class="text-sm space-y-1">
+            <div class="flex justify-between">
+                <dt class="text-gray-600">MQTT Connected:</dt>
+                <dd class="font-medium">{{ 'Yes' if system_status.mqtt_connected else 'No' }}</dd>
+            </div>
+            <div class="flex justify-between">
+                <dt class="text-gray-600">Event Buffer:</dt>
+                <dd class="font-medium">{{ system_status.buffer_usage }} events</dd>
+            </div>
+            <div class="flex justify-between">
+                <dt class="text-gray-600">Refresh Interval:</dt>
+                <dd class="font-medium">{{ refresh_interval }}s</dd>
+            </div>
+        </dl>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Simple event filtering with Alpine.js
+    document.addEventListener('alpine:init', () => {
+        Alpine.data('eventFilter', () => ({
+            filter: 'all',
+            filterEvents() {
+                const items = document.querySelectorAll('.event-item');
+                items.forEach(item => {
+                    if (this.filter === 'all' || item.dataset.type === this.filter) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'none';
+                    }
+                });
+            }
+        }));
+    });
+</script>
+{% endblock %}
