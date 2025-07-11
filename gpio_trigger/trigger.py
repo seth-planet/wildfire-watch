@@ -56,9 +56,13 @@ try:
     import RPi.GPIO as GPIO
     GPIO_AVAILABLE = True
 except ImportError:
-    GPIO = None
+    # Import simulated GPIO module for testing on non-Pi hardware
+    from utils.gpio_simulation import SimulatedGPIO
+    
+    # Create simulated GPIO instance
+    GPIO = SimulatedGPIO()
     GPIO_AVAILABLE = False
-    logging.warning("RPi.GPIO not available - entering simulation mode")
+    logging.warning("RPi.GPIO not available - using GPIO simulation mode")
 
 load_dotenv()
 
@@ -116,6 +120,7 @@ class GPIOTriggerConfig(ConfigBase):
         'max_engine_runtime': ConfigSchema(int, default=1800, min=60, max=7200),
         'max_dry_run_time': ConfigSchema(float, default=30.0, min=10.0, max=120.0),
         'pressure_check_delay': ConfigSchema(float, default=10.0, min=5.0, max=60.0),
+        'refill_multiplier': ConfigSchema(float, default=40.0, min=1.0, max=100.0, description="Refill time = runtime × multiplier"),
         
         # Safety settings
         'emergency_button_active_low': ConfigSchema(bool, default=True),
@@ -143,6 +148,17 @@ class GPIOTriggerConfig(ConfigBase):
     
     def __init__(self):
         super().__init__()
+        # Enforce minimum durations for safety
+        if self.priming_duration <= 0:
+            self.priming_duration = 1.0  # Minimum 1 second
+        if self.engine_start_duration <= 0:
+            self.engine_start_duration = 1.0  # Minimum 1 second
+        if self.engine_stop_duration <= 0:
+            self.engine_stop_duration = 1.0  # Minimum 1 second
+        if self.rpm_reduction_duration <= 0:
+            self.rpm_reduction_duration = 1.0  # Minimum 1 second
+        if self.cooldown_duration <= 0:
+            self.cooldown_duration = 10.0  # Minimum 10 seconds
         # Create legacy-style config dict for backward compatibility
         self._create_legacy_config()
         
@@ -190,6 +206,7 @@ class GPIOTriggerConfig(ConfigBase):
             'DRY_RUN_PROTECTION': self.dry_run_protection,
             'ENHANCED_STATUS_ENABLED': self.enhanced_status_enabled,
             'SIMULATION_MODE_WARNINGS': self.simulation_mode_warnings,
+            'REFILL_MULTIPLIER': self.refill_multiplier,
         })
 
 # Create module-level CONFIG for backward compatibility
@@ -215,7 +232,17 @@ class GPIOHealthReporter(HealthReporter):
                 'last_trigger': self.controller._last_trigger_time,
                 'refill_complete': self.controller._refill_complete,
                 'low_pressure_detected': self.controller._low_pressure_detected,
+                'last_error': self.controller._last_error,
             }
+            
+            # Add refill timing information
+            if self.controller._state == PumpState.REFILLING:
+                health_data['refill_info'] = {
+                    'refill_start_time': self.controller._refill_start_time,
+                    'calculated_duration': self.controller._calculated_refill_duration,
+                    'elapsed_time': time.time() - self.controller._refill_start_time if self.controller._refill_start_time else 0,
+                    'refill_multiplier': self.controller.config.refill_multiplier,
+                }
             
             # Enhanced status reporting
             if self.controller.config.enhanced_status_enabled:
@@ -315,6 +342,9 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
         self._last_hardware_check = None
         self._hardware_failures = []
         self._shutting_down = False
+        self._refill_start_time = None  # Track when refill started
+        self._calculated_refill_duration = None  # Track calculated refill duration
+        self._last_error = None  # Track last error message when entering ERROR state
         
         # Initialize GPIO
         print("PumpController.__init__: About to initialize GPIO...", flush=True)
@@ -390,22 +420,22 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
     
     def _init_gpio(self):
         """Initialize GPIO pins."""
-        if GPIO_AVAILABLE:
-            try:
-                GPIO.setmode(GPIO.BCM)
-                GPIO.setwarnings(False)
-                
-                # Setup output pins
-                output_pins = [
-                    'main_valve_pin', 'ign_start_pin', 'ign_on_pin', 'ign_off_pin',
-                    'refill_valve_pin', 'priming_valve_pin', 'rpm_reduce_pin'
-                ]
-                
-                for pin_name in output_pins:
-                    pin = getattr(self.config, pin_name)
-                    if pin:
-                        GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
-                        self._safe_log('debug', f"Setup {pin_name} on pin {pin} as OUTPUT")
+        # Always initialize GPIO (real or simulated)
+        try:
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False)
+            
+            # Setup output pins
+            output_pins = [
+                'main_valve_pin', 'ign_start_pin', 'ign_on_pin', 'ign_off_pin',
+                'refill_valve_pin', 'priming_valve_pin', 'rpm_reduce_pin'
+            ]
+            
+            for pin_name in output_pins:
+                pin = getattr(self.config, pin_name)
+                if pin:
+                    GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+                    self._safe_log('debug', f"Setup {pin_name} on pin {pin} as OUTPUT")
                 
                 # Setup input pins
                 input_configs = [
@@ -430,18 +460,13 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                                 callback=self._emergency_switch_callback,
                                 bouncetime=200
                             )
-                
-                self._last_hardware_check = time.time()
-                self._safe_log('info', "GPIO initialization complete")
-                
-            except Exception as e:
-                self._safe_log('error', f"GPIO initialization failed: {e}")
-                self._hardware_failures.append(str(e))
-        else:
-            self._safe_log('warning', "GPIO not available - simulation mode active")
-            # Force flush for Docker
-            if hasattr(sys.stdout, 'flush'):
-                sys.stdout.flush()
+            
+            self._last_hardware_check = time.time()
+            self._safe_log('info', "GPIO initialization complete")
+            
+        except Exception as e:
+            self._safe_log('error', f"GPIO initialization failed: {e}")
+            self._hardware_failures.append(str(e))
     
     def _start_monitoring_tasks(self):
         """Start background monitoring tasks."""
@@ -513,41 +538,61 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
         )
     
     def _set_pin(self, pin_name: str, value: bool) -> bool:
-        """Set GPIO pin state with verification."""
+        """Set GPIO pin state with verification and retry logic."""
         pin_key = f"{pin_name}_PIN" if not pin_name.endswith('_PIN') else pin_name
         pin = self.cfg.get(pin_key)
         
         if not pin:
             return True  # Pin not configured, consider it successful
         
-        if GPIO_AVAILABLE:
+        # Retry logic - up to 3 attempts for transient failures
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                # Set the pin
+                # Set the pin (works for both real and simulated GPIO)
                 GPIO.output(pin, GPIO.HIGH if value else GPIO.LOW)
-                self._safe_log('debug', f"Set {pin_name} (pin {pin}) to {'HIGH' if value else 'LOW'}")
+                self._safe_log('debug', f"Set {pin_name} (pin {pin}) to {'HIGH' if value else 'LOW'} (attempt {attempt + 1})")
                 
-                # CRITICAL SAFETY FIX: Verify pin state after setting
-                time.sleep(0.05)  # Allow hardware to settle
-                read_back_value = GPIO.input(pin)
-                expected_value = GPIO.HIGH if value else GPIO.LOW
+                # Verify pin state after setting (for real GPIO only)
+                if GPIO_AVAILABLE:
+                    # CRITICAL SAFETY FIX: Verify pin state after setting
+                    time.sleep(0.05)  # Allow hardware to settle
+                    read_back_value = GPIO.input(pin)
+                    expected_value = GPIO.HIGH if value else GPIO.LOW
+                    
+                    if read_back_value != expected_value:
+                        if attempt < max_retries - 1:
+                            # Retry on verification failure
+                            self._safe_log('warning', f"GPIO verification failed for {pin_name} (pin {pin}) - attempt {attempt + 1}/{max_retries}")
+                            time.sleep(0.1)  # Brief delay before retry
+                            continue
+                        else:
+                            # Final attempt failed
+                            error_msg = f"CRITICAL GPIO VERIFICATION FAILED: {pin_name} (pin {pin}) - Expected {expected_value}, got {read_back_value} after {max_retries} attempts"
+                            self._safe_log('critical', error_msg)
+                            # Enter error state for safety-critical pins
+                            if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START', 'IGN_OFF']:
+                                self._enter_error_state(error_msg)
+                            return False
                 
-                if read_back_value != expected_value:
-                    error_msg = f"CRITICAL GPIO VERIFICATION FAILED: {pin_name} (pin {pin}) - Expected {expected_value}, got {read_back_value}"
-                    self._safe_log('critical', error_msg)
-                    # Enter error state for safety-critical pins
-                    if pin_name in ['MAIN_VALVE', 'IGN_ON', 'IGN_START', 'IGN_OFF']:
-                        self._enter_error_state(error_msg)
-                    return False
-                
+                # Success
                 return True
             except Exception as e:
-                error_msg = f"GPIO hardware failure on {pin_name}: {e}"
-                self._safe_log('critical', error_msg)
-                self._enter_error_state(error_msg)
-                return False
-        else:
-            self._safe_log('debug', f"[SIMULATION] Would set {pin_name} to {'HIGH' if value else 'LOW'}")
-            return True
+                if attempt < max_retries - 1:
+                    # Retry on exception
+                    self._safe_log('warning', f"GPIO operation failed on {pin_name}: {e} - attempt {attempt + 1}/{max_retries}")
+                    time.sleep(0.1)  # Brief delay before retry
+                    continue
+                else:
+                    # Final attempt failed
+                    error_msg = f"GPIO operation failure on {pin_name}: {e} after {max_retries} attempts"
+                    self._safe_log('critical', error_msg)
+                    if GPIO_AVAILABLE:  # Only enter error state for real GPIO failures
+                        self._enter_error_state(error_msg)
+                    return False
+        
+        # Should never reach here, but return False for safety
+        return False
     
     def _get_state_snapshot(self) -> Dict[str, bool]:
         """Get current state of all pins."""
@@ -563,7 +608,7 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
     def _get_pin_state(self, pin_key: str) -> bool:
         """Get current state of a pin."""
         pin = self.cfg.get(pin_key)
-        if pin and GPIO_AVAILABLE:
+        if pin:
             try:
                 return bool(GPIO.input(pin))
             except:
@@ -614,8 +659,21 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                 if self._is_reservoir_full():
                     self._set_pin('REFILL_VALVE', False)
                     self._refill_complete = True
-                    self._publish_event('refill_complete_float')
-                    self._safe_log('info', "Reservoir full - float switch triggered")
+                    # Cancel any pending refill timeout timer
+                    self.timer_manager.cancel('refill_timeout')
+                    # Calculate actual refill time
+                    actual_refill_time = time.time() - self._refill_start_time if self._refill_start_time else 0
+                    self._publish_event('refill_complete_float', {
+                        'actual_duration': actual_refill_time,
+                        'planned_duration': self._calculated_refill_duration,
+                        'method': 'float_switch'
+                    })
+                    self._safe_log('info', f"Reservoir full - float switch triggered after {actual_refill_time:.0f}s")
+                    # Enter cooldown state
+                    self._state = PumpState.COOLDOWN
+                    self._refill_start_time = None
+                    self._calculated_refill_duration = None
+                    self.timer_manager.schedule('cooldown_complete', self._cooldown_complete, self.config.cooldown_duration)
             
             self.wait_for_shutdown(1.0)
     
@@ -633,9 +691,11 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                         if not flow_detected:
                             dry_run_time = time.time() - self._pump_start_time
                             if dry_run_time > self.config.max_dry_run_time:
+                                self._dry_run_warnings += 1  # Increment warning counter before entering error state
                                 self._publish_event('dry_run_protection_triggered', {
                                     'dry_run_time': dry_run_time,
-                                    'max_allowed': self.config.max_dry_run_time
+                                    'max_allowed': self.config.max_dry_run_time,
+                                    'dry_run_warnings': self._dry_run_warnings
                                 })
                                 self._enter_error_state(f"Dry run protection: {dry_run_time:.1f}s without water flow")
                     except:
@@ -677,6 +737,7 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
             if self._state == PumpState.STARTING:
                 self._state = PumpState.RUNNING
                 self._set_pin('IGN_START', False)
+                self._set_pin('PRIMING_VALVE', False)  # Turn off priming valve when running
                 self._engine_start_time = time.time()
                 self._pump_start_time = time.time()
                 self._publish_event('pump_started')
@@ -692,13 +753,25 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
         """Shutdown engine with RPM reduction."""
         with self._state_lock:
             if self._state in [PumpState.RUNNING, PumpState.LOW_PRESSURE]:
-                # First reduce RPM
+                # First reduce RPM for running engine
                 self._state = PumpState.REDUCING_RPM
                 self._set_pin('RPM_REDUCE', True)
                 self._publish_event('rpm_reduction_started')
                 
                 # Then stop after reduction period
                 self.timer_manager.schedule('rpm_complete', self._rpm_reduction_complete, self.config.rpm_reduction_duration)
+            elif self._state in [PumpState.PRIMING, PumpState.STARTING]:
+                # For startup states, go directly to stopping since engine isn't fully running
+                self._state = PumpState.STOPPING
+                # Turn off all startup pins
+                self._set_pin('MAIN_VALVE', False)
+                self._set_pin('PRIMING_VALVE', False)
+                self._set_pin('IGN_START', False)
+                self._set_pin('IGN_ON', False)
+                self._publish_event('startup_aborted')
+                
+                # Schedule stop completion
+                self.timer_manager.schedule('stop_complete', self._stop_complete, 0.5)
     
     def _rpm_reduction_complete(self):
         """Handle RPM reduction completion."""
@@ -721,19 +794,35 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                 self._engine_start_time = None
                 self._pump_start_time = None
             
-            # Close valves
+            # Close valves EXCEPT refill valve (per documentation it stays open)
             self._set_pin('IGN_OFF', False)
             self._set_pin('MAIN_VALVE', False)
             self._set_pin('PRIMING_VALVE', False)
+            # NOTE: Refill valve remains OPEN for continuous refilling
             
-            # Enter cooldown
-            self._state = PumpState.COOLDOWN
-            self._publish_event('pump_stopped', {'runtime': self._current_runtime})
+            # Calculate refill duration based on actual runtime
+            if not self._refill_complete and self._current_runtime > 0:
+                self._calculated_refill_duration = self._current_runtime * self.config.refill_multiplier
+                self._safe_log('info', f"Calculated refill duration: {self._calculated_refill_duration:.0f}s (runtime {self._current_runtime:.0f}s × {self.config.refill_multiplier}x)")
             
-            # Schedule refill if needed
+            # Enter refill state immediately if needed (no 5 second delay)
             if not self._refill_complete:
-                self.timer_manager.schedule('start_refill', self._start_refill, 5.0)
+                self._state = PumpState.REFILLING
+                # Track refill start time if not already set
+                if not self._refill_start_time:
+                    self._refill_start_time = time.time()
+                self._publish_event('refill_continuing', {
+                    'runtime': self._current_runtime,
+                    'refill_duration': self._calculated_refill_duration,
+                    'refill_multiplier': self.config.refill_multiplier
+                })
+                # Set timer for refill completion based on calculated duration
+                if self._calculated_refill_duration:
+                    self.timer_manager.schedule('refill_timeout', self._refill_timeout, self._calculated_refill_duration)
             else:
+                # Enter cooldown
+                self._state = PumpState.COOLDOWN
+                self._publish_event('pump_stopped', {'runtime': self._current_runtime})
                 self.timer_manager.schedule('cooldown_complete', self._cooldown_complete, self.config.cooldown_duration)
     
     def _cooldown_complete(self):
@@ -743,11 +832,33 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                 self._state = PumpState.IDLE
                 self._publish_event('system_ready')
     
+    def _refill_timeout(self):
+        """Handle refill timeout after calculated duration."""
+        with self._state_lock:
+            if self._state == PumpState.REFILLING:
+                self._set_pin('REFILL_VALVE', False)
+                self._refill_complete = True
+                self._state = PumpState.COOLDOWN
+                self._publish_event('refill_complete_timer', {
+                    'refill_duration': self._calculated_refill_duration,
+                    'method': 'timer'
+                })
+                self._safe_log('info', f"Refill complete after {self._calculated_refill_duration:.0f}s (timer)")
+                # Reset tracking variables
+                self._refill_start_time = None
+                self._calculated_refill_duration = None
+                # Schedule cooldown
+                self.timer_manager.schedule('cooldown_complete', self._cooldown_complete, self.config.cooldown_duration)
+    
     def _start_refill(self):
-        """Start reservoir refill."""
+        """Start reservoir refill.
+        
+        Note: This method is now only called for edge cases.
+        Normal refill continues from pump start without interruption.
+        """
         with self._state_lock:
             self._state = PumpState.REFILLING
-            self._set_pin('REFILL_VALVE', True)
+            self._set_pin('REFILL_VALVE', True)  # Ensure valve is open
             self._publish_event('refill_started')
     
     def _max_runtime_reached(self):
@@ -759,6 +870,9 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
     def _enter_error_state(self, reason: str):
         """Enter error state."""
         with self._state_lock:
+            # Store the last error message
+            self._last_error = reason
+            
             # CRITICAL SAFETY FIX: Cancel all active timers immediately to prevent
             # pump restart after emergency shutdown
             self.timer_manager.cancel_all()
@@ -790,14 +904,35 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                 self._last_trigger_time = time.time()
                 self._state = PumpState.PRIMING
                 
-                # Open valves
+                # Open valves - refill opens immediately per README requirements
                 self._set_pin('MAIN_VALVE', True)
                 self._set_pin('PRIMING_VALVE', True)
+                self._set_pin('REFILL_VALVE', True)  # Start refilling immediately
+                self._refill_complete = False  # Mark refill as needed
+                self._refill_start_time = time.time()  # Track when refill started
                 
                 self._publish_event('fire_trigger_received')
                 
                 # Start priming timer
                 self.timer_manager.schedule('priming_complete', self._priming_complete, self.config.priming_duration)
+            elif self._state == PumpState.REDUCING_RPM:
+                # Cancel shutdown and return to running state
+                self._safe_log('info', "Fire trigger during RPM reduction - canceling shutdown")
+                self._last_trigger_time = time.time()
+                
+                # Cancel specific shutdown timers
+                self.timer_manager.cancel('rpm_reduction_complete')
+                self.timer_manager.cancel('engine_stop_complete')
+                self.timer_manager.cancel('cooldown_complete')
+                
+                # Return RPM to normal
+                self._set_pin('RPM_REDUCE', False)
+                
+                # Go back to RUNNING state
+                self._state = PumpState.RUNNING
+                self._runtime_start = time.time()  # Reset runtime counter
+                
+                self._publish_event('shutdown_cancelled_fire_detected')
             else:
                 self._safe_log('warning', f"Cannot start pump - state: {self._state.name}, refill: {self._refill_complete}")
     
@@ -816,10 +951,18 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                     self._publish_event('emergency_start')
             
             elif command == 'stop':
-                # Force stop
+                # Force stop - cancel any pending operations and shutdown if pump is active
                 if self._state in [PumpState.RUNNING, PumpState.PRIMING, PumpState.STARTING]:
+                    # Cancel any pending startup timers to prevent pump from continuing startup
+                    self.timer_manager.cancel('priming_complete')
+                    self.timer_manager.cancel('start_complete')
                     self._shutdown_engine()
                     self._publish_event('emergency_stop')
+                elif self._state == PumpState.IDLE:
+                    # If we're idle but have pending timers (race condition), cancel them
+                    if self.timer_manager.cancel('priming_complete'):
+                        self._safe_log('info', "Cancelled pending priming during emergency stop")
+                        self._publish_event('emergency_stop')
             
             elif command == 'reset':
                 # Reset from error state
@@ -829,6 +972,7 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                     self._refill_complete = True
                     self._low_pressure_detected = False
                     self._dry_run_warnings = 0
+                    self._last_error = None  # Clear last error message
                     
                     # Ensure all pins are off
                     for pin in ['IGN_START', 'IGN_ON', 'IGN_OFF', 'MAIN_VALVE', 
@@ -850,6 +994,7 @@ class PumpController(MQTTService, ThreadSafeService, SafeLoggingMixin):
                 'refill_complete': self._refill_complete,
                 'low_pressure_detected': self._low_pressure_detected,
                 'dry_run_warnings': self._dry_run_warnings,
+                'last_error': self._last_error,
                 'safety': {
                     'low_pressure_detected': self._low_pressure_detected,
                     'reservoir_full': self._refill_complete,
