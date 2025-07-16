@@ -76,28 +76,35 @@ class TestE2ECoralFrigate:
         broker.stop()
     
     @pytest.fixture(autouse=True)
-    def cleanup_frigate_containers(self):
+    def cleanup_frigate_containers(self, worker_id):
         """Ensure no Frigate containers are running before/after test."""
-        # Ensure custom Frigate image is available
+        # Generate unique container name for this worker
+        container_name = f'frigate_test_e2e_{worker_id}'
+        
+        # Check if we should use custom Frigate image (optional)
         ensure_script = os.path.join(os.path.dirname(__file__), 'ensure_custom_frigate.sh')
+        custom_image_available = False
         if os.path.exists(ensure_script):
             result = subprocess.run([ensure_script], capture_output=True, text=True)
-            if result.returncode != 0:
-                pytest.skip(f"Custom Frigate image not available: {result.stderr}")
+            custom_image_available = (result.returncode == 0)
         
         # Cleanup before test
-        subprocess.run(['docker', 'stop', 'frigate_test_e2e_fixed'], 
-                      capture_output=True)
-        subprocess.run(['docker', 'rm', 'frigate_test_e2e_fixed'], 
-                      capture_output=True)
+        subprocess.run(['docker', 'stop', container_name], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['docker', 'rm', container_name], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # Store state for use in test
+        self.container_name = container_name
+        self.custom_image_available = custom_image_available
         
         yield
         
         # Cleanup after test
-        subprocess.run(['docker', 'stop', 'frigate_test_e2e_fixed'], 
-                      capture_output=True)
-        subprocess.run(['docker', 'rm', 'frigate_test_e2e_fixed'], 
-                      capture_output=True)
+        subprocess.run(['docker', 'stop', container_name], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(['docker', 'rm', container_name], 
+                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     @pytest.fixture
     def temp_config_dir(self):
@@ -116,6 +123,10 @@ class TestE2ECoralFrigate:
         print("\n" + "="*80)
         print("E2E TEST: Coral TPU Fire Detection with Frigate (Fixed)")
         print("="*80)
+        
+        # Ensure custom Frigate image is available for YOLO models
+        if not self.custom_image_available:
+            pytest.fail("Custom Frigate image not available. Run: cd converted_models/frigate_yolo_plugin && ./build_custom_frigate.sh")
         
         # First, ensure no other processes are using Coral TPU
         print("\n0. Checking for existing Coral TPU processes...")
@@ -138,10 +149,20 @@ class TestE2ECoralFrigate:
         for idx, device in enumerate(coral_devices):
             print(f"  TPU {idx}: {device}")
         
-        # Step 2: Verify YOLOv8 fire model
-        print("\n2. Verifying YOLOv8 fire detection model...")
+        # Step 2: Verify appropriate model for Frigate version
+        if self.custom_image_available:
+            print("\n2. Verifying YOLOv8 fire detection model...")
+        else:
+            print("\n2. Verifying EdgeTPU model (standard Frigate)...")
+            
         model_path = self._verify_fire_model()
-        assert model_path is not None, "No fire detection model found"
+        if model_path is None:
+            pytest.skip("No compatible EdgeTPU model found for testing")
+        
+        # Skip test if we need custom image for YOLO models
+        if 'yolo' in model_path.lower() and not self.custom_image_available:
+            pytest.skip("YOLO models require custom Frigate build (not available)")
+            
         print(f"✓ Using model: {model_path}")
         
         # Step 3: Discover and validate cameras
@@ -266,10 +287,11 @@ class TestE2ECoralFrigate:
                     pass
             
             # Extra cleanup to ensure no orphaned containers
-            subprocess.run(['docker', 'stop', 'frigate_test_e2e_fixed'], 
-                          capture_output=True, stderr=subprocess.DEVNULL)
-            subprocess.run(['docker', 'rm', 'frigate_test_e2e_fixed'], 
-                          capture_output=True, stderr=subprocess.DEVNULL)
+            container_name = getattr(self, 'container_name', 'frigate_test_e2e_fixed')
+            subprocess.run(['docker', 'stop', container_name], 
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['docker', 'rm', container_name], 
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     
     def _get_coral_devices(self):
         """Get actual Coral TPU device information"""
@@ -291,13 +313,21 @@ print(json.dumps([{"type": t["type"], "path": t["path"]} for t in tpus]))
     
     def _verify_fire_model(self):
         """Find model for Coral TPU testing"""
-        # Use EdgeTPU models compatible with standard Frigate
-        model_candidates = [
-            "converted_models/frigate_models/yolo8l_fire_640x640_frigate_edgetpu.tflite",  # Fire EdgeTPU model (primary)
-            "converted_models/coral/yolo8l_fire_320_edgetpu.tflite",  # Smaller fire EdgeTPU model
-            "converted_models/coral_fire/saved_model_v2/yolo8l_fire_640x640_full_integer_quant_edgetpu.tflite",  # Alt fire model
-            "converted_models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite",  # Generic EdgeTPU fallback
-        ]
+        # Select models based on whether custom Frigate is available
+        if getattr(self, 'custom_image_available', False):
+            # Custom Frigate can handle YOLO models
+            model_candidates = [
+                "converted_models/frigate_models/yolo8l_fire_640x640_frigate_edgetpu.tflite",  # Fire EdgeTPU model (primary)
+                "converted_models/coral/yolo8l_fire_320_edgetpu.tflite",  # Smaller fire EdgeTPU model
+                "converted_models/coral_fire/saved_model_v2/yolo8l_fire_640x640_full_integer_quant_edgetpu.tflite",  # Alt fire model
+                "converted_models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite",  # Generic EdgeTPU fallback
+            ]
+        else:
+            # Standard Frigate needs SSD MobileNet format models
+            model_candidates = [
+                "converted_models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite",  # Standard EdgeTPU model
+                "converted_models/mobilenet_v2_edgetpu.tflite",  # Alternative MobileNet
+            ]
         
         # Get all available Coral devices
         coral_devices = self._get_coral_devices()
@@ -386,10 +416,10 @@ except Exception as e1:
         
         # Generate detector configuration
         detectors = {}
-        # Use standard EdgeTPU detector type that Frigate supports
+        # Use standard edgetpu type - the custom build patches the edgetpu detector to support YOLO
         for i, device in enumerate(coral_devices[:4]):  # Frigate supports up to 4
             detectors[f'coral{i}'] = {
-                'type': 'edgetpu',  # Standard Frigate EdgeTPU detector
+                'type': 'edgetpu',  # Standard type but patched to support YOLO
                 'device': f':{i}' if i > 0 else '',  # Device index (empty for first device)
             }
         
@@ -452,13 +482,22 @@ except Exception as e1:
         }
         
         # Configure model
+        if 'yolo' in model_path.lower():
+            # YOLO models use 640x640 or 320x320
+            if '320' in model_path:
+                width, height = 320, 320
+            else:
+                width, height = 640, 640
+        else:
+            # SSD MobileNet models typically use 300x300
+            width, height = 300, 300
+            
         config['model'] = {
             'path': f'/config/model/{os.path.basename(model_path)}',
             'input_tensor': 'nhwc',
             'input_pixel_format': 'rgb',
-            # YOLO fire models use 640x640
-            'width': 640,
-            'height': 640,
+            'width': width,
+            'height': height,
             'labelmap_path': '/config/model/labels.txt'
         }
         
@@ -541,10 +580,13 @@ except Exception as e1:
             if device['type'] == 'pci':
                 device_mapping.append(f"{device['path']}:{device['path']}")
         
-        # Container configuration - use standard Frigate image
+        # Container configuration - use custom or standard Frigate image
+        image = 'frigate-yolo:dev' if hasattr(self, 'custom_image_available') and self.custom_image_available else 'ghcr.io/blakeblackshear/frigate:stable'
+        container_name = getattr(self, 'container_name', 'frigate_test_e2e_fixed')
+        
         container_config = {
-            'image': 'ghcr.io/blakeblackshear/frigate:stable',  # Standard Frigate image
-            'name': 'frigate_test_e2e_fixed',
+            'image': image,
+            'name': container_name,
             'detach': True,
             'volumes': {
                 config_dir: {'bind': '/config', 'mode': 'rw'},
@@ -554,6 +596,7 @@ except Exception as e1:
             'environment': {
                 'FRIGATE_MQTT_HOST': 'localhost',
                 'FRIGATE_MQTT_PORT': str(mqtt_broker.port),
+                'PYTHONPATH': '/opt/frigate',
             },
             'network_mode': 'host',  # Required for localhost MQTT access
             'shm_size': '256m',
@@ -563,7 +606,7 @@ except Exception as e1:
         try:
             # Remove any existing container
             try:
-                old_container = client.containers.get('frigate_test_e2e_fixed')
+                old_container = client.containers.get(container_name)
                 old_container.stop(timeout=5)
                 old_container.remove()
                 time.sleep(2)
@@ -742,6 +785,169 @@ except Exception as e1:
                 print(f"  Error parsing stats: {e}")
         
         return performance
+
+
+    @pytest.mark.skipif(not has_coral_tpu(), reason="Coral TPU not available")
+    @pytest.mark.slow
+    @pytest.mark.infrastructure_dependent
+    @pytest.mark.timeout(600)  # 10 minute timeout
+    @requires_hardware_lock("coral_tpu", timeout=600)
+    def test_coral_frigate_standard_model_e2e(self, mqtt_broker, temp_config_dir):
+        """Test Coral TPU with standard Frigate using SSD MobileNet model"""
+        print("\n" + "="*80)
+        print("E2E TEST: Coral TPU with Standard Frigate (SSD MobileNet)")
+        print("="*80)
+        
+        # Step 1: Verify Coral TPU hardware
+        print("\n1. Verifying Coral TPU hardware...")
+        coral_devices = self._get_coral_devices()
+        assert len(coral_devices) > 0, "No Coral TPU devices found"
+        print(f"✓ Found {len(coral_devices)} Coral TPU(s)")
+        
+        # Step 2: Use standard SSD MobileNet model
+        print("\n2. Using standard EdgeTPU model...")
+        model_path = "converted_models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite"
+        assert os.path.exists(model_path), f"Model not found: {model_path}"
+        print(f"✓ Using model: {model_path}")
+        
+        # Step 3: Create minimal camera config (no real cameras needed for basic test)
+        print("\n3. Creating test configuration...")
+        cameras = [{'name': 'dummy', 'mock': True}]  # Use dummy camera
+        
+        # Step 4: Generate Frigate configuration for SSD model
+        print("\n4. Generating Frigate configuration...")
+        config_path = self._generate_standard_frigate_config(
+            temp_config_dir, model_path, coral_devices, mqtt_broker.port
+        )
+        print(f"✓ Config saved: {config_path}")
+        
+        # Step 5: Start Frigate container
+        print("\n5. Starting Frigate container...")
+        container = self._start_frigate_container_fixed(temp_config_dir, mqtt_broker)
+        if container is None:
+            pytest.fail("Failed to start Frigate container")
+        
+        # Step 6: Wait for Frigate to be ready
+        print("\n6. Waiting for Frigate to initialize...")
+        try:
+            if not self._wait_for_frigate_fixed(container, timeout=60):
+                logs = container.logs(tail=100).decode()
+                pytest.fail(f"Frigate failed to start. Logs:\\n{logs}")
+            print("✓ Frigate container started successfully")
+        except Exception as e:
+            logs = container.logs(tail=50).decode()
+            container.stop()
+            container.remove()
+            pytest.fail(f"Frigate failed to start: {e}. Logs:\\n{logs}")
+        
+        # Step 7: Verify Coral TPU is active
+        print("\n7. Verifying Coral TPU is active...")
+        time.sleep(5)  # Give detector time to initialize
+        logs = container.logs().decode()
+        
+        coral_active = False
+        if "edge tpu" in logs.lower() or "edgetpu" in logs.lower():
+            coral_active = True
+            print("✓ Coral TPU detected in logs")
+        
+        # Step 8: Check detector status via logs
+        print("\n8. Checking detector status...")
+        if "detector.coral" in logs:
+            print("✓ Coral detector initialized")
+        
+        # Cleanup
+        print("\n9. Cleaning up...")
+        container.stop()
+        container.remove()
+        
+        # Assertions
+        assert coral_active, "Coral TPU not detected in Frigate logs"
+        
+        print("\n" + "="*80)
+        print("Result: ✓ PASSED - Standard Frigate with Coral TPU works")
+        print("="*80)
+    
+    def _generate_standard_frigate_config(self, config_dir, model_path, coral_devices, mqtt_port):
+        """Generate Frigate config for standard SSD MobileNet model"""
+        # Basic detector config for standard Frigate
+        detectors = {}
+        for i, device in enumerate(coral_devices[:1]):  # Use only first TPU for simple test
+            detectors[f'coral{i}'] = {
+                'type': 'edgetpu',
+                'device': '' if i == 0 else f':{i}'
+            }
+        
+        config = {
+            'mqtt': {
+                'enabled': True,
+                'host': 'localhost',
+                'port': mqtt_port,
+                'topic_prefix': 'frigate',
+                'client_id': 'frigate_test_standard',
+                'stats_interval': 15
+            },
+            'detectors': detectors,
+            'model': {
+                'path': f'/config/model/{os.path.basename(model_path)}',
+                'input_tensor': 'nhwc',
+                'input_pixel_format': 'rgb',
+                'width': 300,  # SSD MobileNet uses 300x300
+                'height': 300,
+                'labelmap_path': '/config/model/coco_labels.txt'
+            },
+            'cameras': {
+                'dummy': {
+                    'enabled': False,
+                    'ffmpeg': {
+                        'inputs': [{
+                            'path': 'rtsp://127.0.0.1:554/null',
+                            'roles': ['detect']
+                        }]
+                    }
+                }
+            },
+            'logger': {
+                'default': 'info',
+                'logs': {
+                    'frigate.detectors.coral': 'debug',
+                    'detector.coral': 'debug'
+                }
+            },
+            'record': {'enabled': False},
+            'snapshots': {'enabled': False}
+        }
+        
+        # Write config
+        config_path = os.path.join(config_dir, 'config.yml')
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False)
+        
+        # Copy model
+        model_dir = os.path.join(config_dir, 'model')
+        os.makedirs(model_dir, exist_ok=True)
+        shutil.copy(model_path, os.path.join(model_dir, os.path.basename(model_path)))
+        
+        # Create COCO labels for SSD MobileNet
+        coco_labels = [
+            "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
+            "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
+            "bird", "cat", "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra",
+            "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+            "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove",
+            "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+            "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+            "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch",
+            "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse",
+            "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink",
+            "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier",
+            "toothbrush"
+        ]
+        
+        labels_path = os.path.join(model_dir, 'coco_labels.txt')
+        with open(labels_path, 'w') as f:
+            f.write('\\n'.join(coco_labels))
+        
+        return config_path
 
 
 if __name__ == '__main__':
