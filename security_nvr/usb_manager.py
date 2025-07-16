@@ -61,9 +61,9 @@ import pyudev
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.command_runner import run_command, CommandError
 from utils.safe_logging import SafeLoggingMixin
+from utils.logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
+logger = setup_logging("usb_manager")
 
 class USBStorageManager(SafeLoggingMixin):
     """Manages USB storage devices for Frigate NVR recordings.

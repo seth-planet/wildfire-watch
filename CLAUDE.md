@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Documentation Status
+
+This documentation reflects the **current state** of the codebase to ensure accuracy for AI assistants and developers. Patterns are marked with status indicators:
+
+- **[STABLE & IN USE]** - Current production patterns, use these
+- **[TARGET PATTERN - IN DEVELOPMENT]** - Future patterns being developed, do not use yet
+- **[DEPRECATED - REQUIRED FOR LEGACY]** - Old patterns still needed, continue using until migration
+
+When in doubt, use the patterns marked as [STABLE & IN USE].
+
 ## Project Overview
 
 Wildfire Watch is an automated fire detection and suppression system that runs on edge devices. It uses AI-powered cameras with multi-camera consensus to detect fires and automatically activates sprinkler systems via GPIO control.
@@ -97,30 +107,35 @@ mqtt_broker (core)
 
 ## Development Patterns
 
-### MANDATORY: Base Class Architecture
-**All services MUST use the following base classes (78% code reduction achieved):**
+### Base Class Architecture
+**Recommended base classes for services (78% code reduction achieved):**
 
 1. **MQTTService** (`utils/mqtt_service.py`)
    - Handles all MQTT connectivity with automatic reconnection
    - Provides thread-safe publishing with offline message queuing
    - Manages Last Will Testament (LWT) for service health
-   - **DO NOT** implement custom MQTT handling - use this base class
+   - **Recommended** for all services that use MQTT communication
 
 2. **ThreadSafeService** (`utils/thread_manager.py`)
    - Use `SafeTimerManager` for all timer operations
    - Use `BackgroundTaskRunner` for periodic tasks
    - Provides graceful shutdown handling
-   - **DO NOT** create raw threads - use provided utilities
+   - **Recommended** instead of creating raw threads
 
 3. **ConfigBase** (`utils/config_base.py`)
    - Schema-based configuration with validation
    - Type conversion and cross-service validation
-   - **DO NOT** parse environment variables manually
+   - **Recommended** for configuration management
 
 4. **HealthReporter** (`utils/health_reporter.py`)
    - Standardized health monitoring and reporting
    - Automatic system metrics collection
-   - **DO NOT** implement custom health reporting
+   - **Recommended** for consistent health reporting
+
+**Current Implementation Status:**
+- ✅ **Fire Consensus**: Uses MQTTService, ThreadSafeService, ConfigBase
+- ✅ **Camera Detector**: Uses MQTTService, ThreadSafeService, ConfigBase
+- ⚡ **GPIO Trigger**: Uses ConfigBase only (intentional design for hardware reliability)
 
 **Example Implementation:**
 ```python
@@ -132,20 +147,27 @@ class MyService(MQTTService, ThreadSafeService):
         self.health_reporter = MyHealthReporter(self)  # Inherits from HealthReporter
 ```
 
-### MANDATORY: Service Initialization Pattern
-**All services MUST follow this exact initialization order:**
+**Exception: GPIO PumpController**
+The PumpController intentionally does NOT inherit from MQTTService for safety-critical reasons:
+- Direct hardware control requires minimal dependencies
+- Network failures must not prevent pump activation
+- Lower latency for emergency response
+- Simpler code path reduces failure modes
+
+### Service Initialization Pattern
+**Recommended initialization order for services using MQTTService:**
 
 1. **Create all components first** (health reporter, task runners, etc.)
 2. **Initialize MQTT connection** after components are ready
-3. **Wait for connection verification** before starting operations
+3. **Wait for connection verification** before starting operations (for MQTTService-based services)
 4. **Start health reporting** only after connection is verified
 
-**Critical Requirements:**
-- **NO duplicate initialization** - Check `main()` for redundant calls
+**Implementation Notes:**
+- Check `main()` for redundant initialization calls
 - Update callback signatures for paho-mqtt compatibility: `def _on_connect(self, client, userdata, flags, rc, properties=None)`
-- Always call `wait_for_connection(timeout=30)` before proceeding
+- Services using MQTTService should call `wait_for_connection(timeout=30)`
 
-**Example:**
+**Example for MQTTService-based services:**
 ```python
 def __init__(self):
     # 1. Initialize components
@@ -161,6 +183,8 @@ def __init__(self):
     else:
         raise RuntimeError("Failed to connect to MQTT broker")
 ```
+
+**Note:** PumpController connects automatically in `__init__` and does not have `wait_for_connection()` method
 
 ### Adding New Camera Support
 1. Modify `camera_detector/detect.py` discovery methods
@@ -179,6 +203,12 @@ def __init__(self):
 - Model accuracy validation ensures <2% degradation for production
 - **Calibration data**: https://huggingface.co/datasets/mailseth/wildfire-watch/resolve/main/wildfire_calibration_data.tar.gz?download=true
 
+#### Frigate EdgeTPU Model Requirements
+- **Input Tensor Type**: Frigate's EdgeTPU detector sends UINT8 data to models
+- **Model Compatibility**: Ensure TFLite models accept UINT8 input tensors (not INT8 or FLOAT32)
+- **Conversion Settings**: Use `converter.inference_input_type = tf.uint8` when creating TFLite models
+- **Verification**: Test models with pycoral before deployment to confirm UINT8 input compatibility
+
 #### Model Conversion Timeouts
 - **ONNX**: ~2-5 minutes
 - **TFLite**: ~15-30 minutes (INT8 quantization)
@@ -192,8 +222,8 @@ If conversions timeout:
 3. Run on more powerful hardware
 4. Use pre-converted models when available
 
-#### MANDATORY: Model Conversion Optimization
-**All model conversions MUST implement caching to avoid repeated work:**
+#### Model Conversion Optimization
+**Strongly recommended: implement caching to avoid repeated work:**
 
 1. **Caching System** (10-50x speedup achieved)
    - Cache converted models with unique keys based on model/size/format/precision
@@ -273,9 +303,12 @@ cache_manager.cache_model(cache_key, result)
 3. **Preserve test intent** - Don't remove assertions to make tests pass
 4. **Minimal mocking** - Only mock external I/O (files, network, hardware)
 5. **Test real behavior** - Include edge cases and error conditions
+6. **Fix import paths** - Use `test_utils` not `utils` for test helpers
+7. **Update CONFIG after env vars** - CONFIG dictionary loads at module import time
+8. **Use correct config keys** - IGNITION_START_DURATION not ENGINE_START_DURATION
 
-### MANDATORY: Integration Testing Requirements
-**These are NOT optional - all integration tests MUST follow these patterns:**
+### Integration Testing Best Practices
+**Recommended patterns for reliable integration tests:**
 
 1. **NEVER mock internal modules** - Test failures will result from mocking:
    - ❌ **FORBIDDEN**: `@patch('fire_consensus.consensus.FireConsensus')`
@@ -283,15 +316,16 @@ cache_manager.cache_model(cache_key, result)
    - ✅ **REQUIRED**: Use actual service instances with `TestMQTTBroker`
 
 2. **ALWAYS use real MQTT communication**:
-   - **REQUIRED**: Use `TestMQTTBroker` from fixtures
+   - **REQUIRED**: Use `TestMQTTBroker` from `test_utils.mqtt_test_broker`
    - **REQUIRED**: Test actual message flow between services
    - **REQUIRED**: Verify connection handling and reconnection
    - **FORBIDDEN**: Mock MQTT client or broker
+   - **Note**: The test broker uses dynamic port allocation to avoid conflicts
 
 3. **MUST implement topic namespacing**:
    - **REQUIRED**: Prefix all topics with `worker_id` for parallel test isolation
-   - **REQUIRED**: Use `ParallelTestContext.get_topic_prefix()`
-   - **Example**: `f"{topic_prefix}/fire/trigger"`
+   - **REQUIRED**: Use `mqtt_topic_factory` fixture from conftest.py
+   - **Example**: `topic = mqtt_topic_factory("fire/trigger")`
 
 4. **Event-driven synchronization ONLY**:
    - ❌ **FORBIDDEN**: `time.sleep(5)` - causes flaky tests
@@ -309,8 +343,184 @@ cache_manager.cache_model(cache_key, result)
    - **REQUIRED**: Test service disconnections and recovery
    - **REQUIRED**: Test invalid inputs and edge cases
 
-### MANDATORY: Docker Container Management
-**All Docker-based tests MUST use EnhancedDockerContainerManager:**
+### MQTT Configuration for Parallel Testing
+**Best practices to prevent ConnectionRefusedError in parallel test execution:**
+
+#### The Problem
+Services like GPIO trigger load configuration at module import time, before test fixtures can set worker-specific MQTT broker details. This causes connection failures in parallel tests as all workers try to connect to the same (non-existent) broker.
+
+#### The Solution: Dependency Injection Pattern
+
+1. **For GPIO Trigger Service**:
+   
+   **[STABLE & IN USE] - Current Pattern:**
+   ```python
+   from tests.test_utils.helpers import update_gpio_config_for_tests
+   update_gpio_config_for_tests(test_env, conn_params, topic_prefix)
+   controller = PumpController(auto_connect=False)
+   controller.connect()  # Connect when ready
+   ```
+   
+   **[TARGET PATTERN - IN DEVELOPMENT]:**
+   ```python
+   # create_pump_controller_with_config exists but is not yet used in tests
+   from tests.test_utils.helpers import create_pump_controller_with_config
+   controller = create_pump_controller_with_config(
+       test_env, conn_params, topic_prefix, auto_connect=False
+   )
+   controller.connect()  # Connect when ready
+   ```
+   
+   **Note**: Continue using `update_gpio_config_for_tests()` until migration is complete.
+
+2. **For Services Using ConfigBase (fire_consensus, camera_detector)**:
+   ```python
+   # Set environment variables BEFORE creating service
+   monkeypatch.setenv("MQTT_BROKER", conn_params['host'])
+   monkeypatch.setenv("MQTT_PORT", str(conn_params['port']))
+   monkeypatch.setenv("TOPIC_PREFIX", topic_prefix)
+   
+   # Service reads configuration at runtime
+   service = FireConsensus()  # ConfigBase loads from environment
+   ```
+
+3. **Key Implementation Details**:
+   - **PumpController accepts config parameter**: `PumpController(config=PumpControllerConfig())`
+   - **PumpControllerConfig uses ConfigBase**: Runtime loading from environment
+   - **Global CONFIG dictionary**: Still actively used in production and tests
+   - **Current test helper**: `update_gpio_config_for_tests()` [STABLE & IN USE]
+   - **Future test helper**: `create_pump_controller_with_config()` [TARGET PATTERN - IN DEVELOPMENT]
+
+4. **Migration Status**:
+   - **Current State**: All tests use `update_gpio_config_for_tests()`
+   - **Target State**: Tests will eventually use `create_pump_controller_with_config()`
+   - **Timeline**: Migration not yet scheduled - continue using current pattern
+
+#### Best Practices Summary
+
+1. **Never rely on import-time configuration loading**
+2. **Always use dependency injection for configuration**
+3. **Set environment variables BEFORE service instantiation**
+4. **Use worker-specific MQTT broker instances**
+5. **Implement proper cleanup in fixtures**
+
+### Common Test Patterns and Fixes
+
+#### CONFIG Dictionary Updates in GPIO Tests
+When testing GPIO functionality, the CONFIG dictionary is loaded at module import time. Tests must update it after setting environment variables:
+
+```python
+# WRONG - CONFIG won't see the environment changes
+os.environ['MQTT_BROKER'] = 'test-broker'
+controller = PumpController()  # Uses old CONFIG values
+
+# CORRECT - Update CONFIG after environment changes
+os.environ['MQTT_BROKER'] = 'test-broker'
+from gpio_trigger.trigger import CONFIG
+CONFIG['MQTT_BROKER'] = os.environ['MQTT_BROKER']
+CONFIG['MQTT_PORT'] = int(os.environ.get('MQTT_PORT', '1883'))
+controller = PumpController()  # Uses updated CONFIG
+```
+
+#### Test Import Paths
+Test utilities have been moved to `tests/test_utils/`. Update imports accordingly:
+
+```python
+# WRONG - Old import paths
+from tests.mqtt_test_broker import MQTTTestBroker
+from utils.helpers import DockerContainerManager
+
+# CORRECT - New import paths
+from tests.test_utils.mqtt_test_broker import MQTTTestBroker
+from tests.test_utils.helpers import DockerContainerManager
+```
+
+#### Hardware Test Python Version Requirements
+Different hardware requires specific Python versions:
+
+- **Coral TPU**: Python 3.8 only (tflite_runtime compatibility)
+- **YOLO-NAS/Hailo**: Python 3.10 (super-gradients compatibility)
+- **TensorRT/GPU**: Python 3.12 compatible
+
+#### Timing Configuration Validation
+For pump safety tests, ensure timing parameters are self-consistent:
+
+```python
+# Set reduced timing for tests
+os.environ['MAX_ENGINE_RUNTIME'] = '15'     # Total runtime
+os.environ['PRIMING_DURATION'] = '2'        # Startup priming
+os.environ['IGNITION_START_DURATION'] = '3' # Engine start (not ENGINE_START_DURATION)
+os.environ['RPM_REDUCTION_LEAD'] = '5'      # Time before shutdown
+
+# RPM reduction occurs at: MAX_ENGINE_RUNTIME - RPM_REDUCTION_LEAD
+# In this example: 15 - 5 = 10 seconds
+```
+
+6. **Service Configuration Pattern**:
+   - **Current Implementation**: Mixed patterns exist
+   - **FireConsensus/CameraDetector**: Read from environment via ConfigBase
+   - **PumpController**: Supports both patterns:
+     ```python
+     # Method 1: Environment variables (auto-config)
+     controller = PumpController()
+     
+     # Method 2: Dependency injection (for tests)
+     config = PumpControllerConfig()
+     controller = PumpController(config=config)
+     ```
+
+7. **GPIO PumpController Implementation Details**:
+   - **Architecture**: PumpController does NOT inherit from MQTTService base class (intentional for reliability)
+   - **Connection**: PumpController connects to MQTT automatically in `__init__`
+   - **No wait_for_connection**: This method doesn't exist on PumpController
+   - **Testing Pattern**:
+     ```python
+     # Create controller - it connects automatically
+     controller = PumpController()
+     
+     # Optional: Add small delay to ensure connection is established
+     time.sleep(1.0)
+     
+     # Controller is ready to use
+     ```
+   - **Configuration**: Supports both global CONFIG and dependency injection (config parameter)
+
+### GPIO Testing Best Practices
+**Based on extensive testing experience (40+ test scenarios), follow these practices:**
+
+1. **NO mocking of GPIO internals**:
+   - ✅ **REQUIRED**: Use real PumpController instances
+   - ✅ **REQUIRED**: Use real GPIO module or built-in simulation
+   - ❌ **FORBIDDEN**: Mock GPIO operations or state machine
+   - **Rationale**: Tests must verify actual hardware behavior
+
+2. **Use existing GPIO test utilities**:
+   ```python
+   from utils.gpio_test_helpers import (
+       wait_for_state,           # Wait for specific pump states
+       verify_pin_states,        # Verify multiple pins at once
+       PinMonitor,              # Monitor pin changes over time
+       verify_safe_shutdown_state  # Ensure safe pin states
+   )
+   ```
+
+3. **Proper GPIO cleanup between tests**:
+   - **REQUIRED**: Reset all pins to LOW state
+   - **REQUIRED**: Clear GPIO._state dictionary
+   - **REQUIRED**: Cancel any active timers
+   - **Example**: Use gpio_test_setup fixture which handles cleanup
+
+4. **Test with missing sensors**:
+   - **REQUIRED**: Test operation without any sensors
+   - **REQUIRED**: Test with various sensor combinations
+   - **Example**: Set sensor pins to 0 to disable
+
+5. **Error state is last resort**:
+   - **Only enter ERROR for**: Main valve failure, dry run >5min, engine start failure
+   - **Automatic recovery for**: GPIO retries, MQTT disconnection, non-critical failures
+
+### Docker Container Management
+**Use DockerContainerManager for reliable container testing:**
 
 1. **Container Naming Requirements**:
    - **REQUIRED**: Worker-specific names: `f"wf-{worker_id}-{service}"`
@@ -345,8 +555,21 @@ cache_manager.cache_model(cache_key, result)
    - **REQUIRED**: Use `force=True` for cleanup in fixtures
    - **REQUIRED**: Register cleanup handlers for unexpected exits
 
-#### Use ParallelTestContext for Multi-Service Tests
-For complex tests involving multiple services, use `ParallelTestContext` to get proper topic namespacing and environment variables.
+#### Multi-Service Test Patterns
+
+**[STABLE & IN USE] - Both patterns are actively used:**
+
+1. **ParallelTestContext** - For complex integration tests:
+   ```python
+   from test_utils.helpers import ParallelTestContext
+   env_vars = parallel_context.get_service_env('fire_consensus')
+   ```
+
+2. **mqtt_topic_factory** - For topic namespacing in all tests:
+   ```python
+   full_topic = mqtt_topic_factory("fire/trigger")
+   topic_prefix = full_topic.rsplit('/', 1)[0]
+   ```
 
 #### Error Handling Patterns
 - **Retry transient errors**: "removal already in progress", "network has active endpoints"
@@ -361,6 +584,11 @@ For complex tests involving multiple services, use `ParallelTestContext` to get 
 - Want dynamic port allocation to avoid conflicts
 
 **Use `ParallelTestContext` when:**
+- Testing multiple interacting services
+- Need complete environment variable setup for services
+- Running complex integration tests
+
+**Use `mqtt_topic_factory` when:**
 - Testing multiple interacting services
 - Need complete environment variable setup
 - Want automatic MQTT topic namespacing
@@ -547,8 +775,8 @@ Choose models based on task complexity and domain:
 - **o3**: Logic problems, algorithmic optimization, mathematical reasoning
 - **Enable web search**: For current API documentation, best practices, error solutions
 
-#### Plan Review Requirements
-**All implementation plans MUST be reviewed by advanced models before finalization:**
+#### Plan Review Recommendations
+**For critical features, review implementation plans with advanced models:**
 
 - **Use o3 or Gemini Pro** to review plans created by other models
 - **Critical for safety systems**: Fire suppression, GPIO control, consensus algorithms
@@ -615,14 +843,15 @@ Context7 MCP provides the following tools that LLMs can use:
 
 ## Critical Best Practices Summary
 
-### Non-Negotiable Requirements
-The following practices are **MANDATORY** based on proven production issues and achieved improvements:
+### Best Practices Summary
+The following practices are strongly recommended based on proven production improvements:
 
-1. **Base Class Usage**: 78% code reduction achieved - ALL services MUST use base classes
-2. **Service Initialization Order**: Prevents MQTT connection failures - MUST follow exact pattern
+1. **Base Class Usage**: 78% code reduction achieved - Use base classes for new services
+   - Exception: GPIO PumpController uses custom implementation for safety reasons
+2. **Service Initialization Order**: Prevents MQTT connection failures - Follow recommended pattern
 3. **Integration Testing**: No mocking internal services - prevents false test passes
-4. **Docker Management**: Use EnhancedDockerContainerManager - prevents container conflicts
-5. **Model Conversion Caching**: 10-50x speedup - MUST implement for all conversions
+4. **Docker Management**: Use DockerContainerManager - prevents container conflicts
+5. **Model Conversion Caching**: 10-50x speedup - Implement for all conversions
 
 ### Consequences of Not Following These Practices
 - **Without base classes**: 2000+ lines of duplicate code per service
@@ -631,4 +860,4 @@ The following practices are **MANDATORY** based on proven production issues and 
 - **No container management**: Parallel tests fail with name conflicts
 - **No model caching**: Tests timeout after 30+ minutes
 
-These practices are the result of extensive debugging and optimization efforts. They are not suggestions - they are requirements for a stable, maintainable system.
+These practices are the result of extensive debugging and optimization efforts. Following them ensures a stable, maintainable system while allowing for justified exceptions where safety or reliability requires custom implementations.

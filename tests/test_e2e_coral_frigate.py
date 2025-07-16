@@ -6,6 +6,9 @@ Do NOT run with Python 3.12 - it will fail or skip.
 End-to-End Test: Coral TPU with Custom YOLOv8 Fire Detection in Frigate
 Tests the complete pipeline from camera to fire detection using real hardware
 Fixed version addressing network, device, and configuration issues
+
+Now using properly converted UINT8 fire detection model that's compatible with Frigate.
+The model was converted specifically for Frigate's EdgeTPU detector which always sends UINT8 data.
 """
 import sys
 import pytest
@@ -41,69 +44,47 @@ from threading import Event
 # Add parent directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.conftest import has_coral_tpu, has_camera_on_network
-from tests.mqtt_test_broker import MQTTTestBroker as TestMQTTBroker
+from tests.conftest import has_coral_tpu
+# has_camera_on_network is not used in this test
+from tests.test_utils.enhanced_mqtt_broker import TestMQTTBroker
+from utils.hardware_lock import hardware_lock, requires_hardware_lock
 
 # Hardware lockfile system for non-parallelizable hardware
-@contextlib.contextmanager
-def hardware_lock(hardware_name: str, timeout: int = 30):
-    """Context manager for hardware exclusive access."""
-    lock_file = f"/tmp/wildfire_watch_{hardware_name}_lock"
-    lock_fd = None
-    
-    try:
-        # Create lock file
-        lock_fd = os.open(lock_file, os.O_CREAT | os.O_TRUNC | os.O_RDWR)
-        
-        # Try to acquire lock with timeout
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # Write process info to lock file
-                os.write(lock_fd, f"PID:{os.getpid()}\nTime:{time.time()}\n".encode())
-                yield
-                return
-            except BlockingIOError:
-                time.sleep(0.1)
-        
-        # Timeout reached
-        raise TimeoutError(f"Could not acquire {hardware_name} lock within {timeout} seconds")
-        
-    finally:
-        if lock_fd is not None:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                os.close(lock_fd)
-                os.unlink(lock_file)
-            except:
-                pass
-
-def requires_hardware_lock(hardware_name: str, timeout: int = 1800):
-    """Decorator for hardware-exclusive test methods."""
-    def decorator(func):
-        def wrapper(*args, **kwargs):
-            with hardware_lock(hardware_name, timeout):
-                return func(*args, **kwargs)
-        return wrapper
-    return decorator
+# Now using centralized implementation from utils.hardware_lock
+# The local implementations have been replaced with imports from utils.hardware_lock
 
 
 class TestE2ECoralFrigate:
     """End-to-end test for Coral TPU fire detection with Frigate (Fixed)"""
     
+    @pytest.fixture(autouse=True)
+    def setup_camera_credentials(self, monkeypatch):
+        """Set camera credentials for test"""
+        monkeypatch.setenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
+    
     @pytest.fixture
-    def mqtt_broker(self):
-        """Start test MQTT broker"""
-        broker = TestMQTTBroker()
+    def mqtt_broker(self, worker_id):
+        """Start test MQTT broker with worker isolation"""
+        broker = TestMQTTBroker(session_scope=False, worker_id=worker_id)
         broker.start()
-        time.sleep(2)  # Wait for broker to start
+        
+        # Wait for broker to be ready
+        if not broker.wait_for_ready(timeout=10):
+            pytest.fail("MQTT broker failed to start")
+            
         yield broker
         broker.stop()
     
     @pytest.fixture(autouse=True)
     def cleanup_frigate_containers(self):
         """Ensure no Frigate containers are running before/after test."""
+        # Ensure custom Frigate image is available
+        ensure_script = os.path.join(os.path.dirname(__file__), 'ensure_custom_frigate.sh')
+        if os.path.exists(ensure_script):
+            result = subprocess.run([ensure_script], capture_output=True, text=True)
+            if result.returncode != 0:
+                pytest.skip(f"Custom Frigate image not available: {result.stderr}")
+        
         # Cleanup before test
         subprocess.run(['docker', 'stop', 'frigate_test_e2e_fixed'], 
                       capture_output=True)
@@ -309,12 +290,13 @@ print(json.dumps([{"type": t["type"], "path": t["path"]} for t in tpus]))
         return []
     
     def _verify_fire_model(self):
-        """Find YOLOv8 fire detection model for Coral"""
+        """Find model for Coral TPU testing"""
+        # Use EdgeTPU models compatible with standard Frigate
         model_candidates = [
-            "converted_models/yolov8n_fire_320_edgetpu.tflite",
-            "converted_models/yolo8l_fire_320_edgetpu.tflite",
-            "converted_models/yolov8n_320_edgetpu.tflite",
-            "converted_models/mobilenet_v2_edgetpu.tflite",
+            "converted_models/frigate_models/yolo8l_fire_640x640_frigate_edgetpu.tflite",  # Fire EdgeTPU model (primary)
+            "converted_models/coral/yolo8l_fire_320_edgetpu.tflite",  # Smaller fire EdgeTPU model
+            "converted_models/coral_fire/saved_model_v2/yolo8l_fire_640x640_full_integer_quant_edgetpu.tflite",  # Alt fire model
+            "converted_models/ssd_mobilenet_v2_coco_quant_postprocess_edgetpu.tflite",  # Generic EdgeTPU fallback
         ]
         
         # Get all available Coral devices
@@ -364,11 +346,11 @@ except Exception as e1:
     def _discover_and_validate_cameras(self):
         """Discover cameras and validate accessibility"""
         cameras = []
-        camera_creds = os.getenv('CAMERA_CREDENTIALS', '')
+        camera_creds = os.getenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
         
         if not camera_creds:
-            print("  No camera credentials set")
-            return cameras
+            print("  No camera credentials set, using default: admin:S3thrule")
+            camera_creds = 'admin:S3thrule'
         
         print(f"  Camera credentials set: {camera_creds.split(':')[0]}:***")
         
@@ -396,18 +378,19 @@ except Exception as e1:
         """Generate Frigate configuration with fixes"""
         
         # Get camera credentials
-        camera_creds = os.getenv('CAMERA_CREDENTIALS', '')
+        camera_creds = os.getenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
         if camera_creds and ':' in camera_creds:
             username, password = camera_creds.split(':')
         else:
-            username, password = 'admin', 'password'  # Default for mock cameras
+            username, password = 'admin', 'S3thrule'  # Default credentials
         
-        # Generate detector configuration based on actual devices
+        # Generate detector configuration
         detectors = {}
+        # Use standard EdgeTPU detector type that Frigate supports
         for i, device in enumerate(coral_devices[:4]):  # Frigate supports up to 4
             detectors[f'coral{i}'] = {
-                'type': 'edgetpu',
-                'device': f'pci:{i}'  # Frigate uses index, not path
+                'type': 'edgetpu',  # Standard Frigate EdgeTPU detector
+                'device': f':{i}' if i > 0 else '',  # Device index (empty for first device)
             }
         
         # Configure cameras
@@ -466,14 +449,21 @@ except Exception as e1:
                 'stats_interval': 15  # Minimum allowed by Frigate
             },
             'detectors': detectors,
-            'model': {
-                'path': f'/config/model/{os.path.basename(model_path)}',  # Fixed: proper model path
-                'input_tensor': 'nhwc',
-                'input_pixel_format': 'rgb',
-                'width': 320,
-                'height': 320
-            },
-            'cameras': camera_configs if camera_configs else {
+        }
+        
+        # Configure model
+        config['model'] = {
+            'path': f'/config/model/{os.path.basename(model_path)}',
+            'input_tensor': 'nhwc',
+            'input_pixel_format': 'rgb',
+            # YOLO fire models use 640x640
+            'width': 640,
+            'height': 640,
+            'labelmap_path': '/config/model/labels.txt'
+        }
+        
+        # Add remaining configuration
+        config['cameras'] = camera_configs if camera_configs else {
                 'dummy': {
                     'enabled': False,
                     'ffmpeg': {
@@ -483,20 +473,22 @@ except Exception as e1:
                         }]
                     }
                 }
-            },
-            'logger': {
-                'default': 'info',
-                'logs': {
-                    'frigate.detectors.coral': 'debug',
-                    'detector.coral': 'debug'
-                }
-            },
-            'record': {
-                'enabled': False
-            },
-            'snapshots': {
-                'enabled': False
             }
+        
+        config['logger'] = {
+            'default': 'info',
+            'logs': {
+                'frigate.detectors.coral': 'debug',
+                'detector.coral': 'debug'
+            }
+        }
+        
+        config['record'] = {
+            'enabled': False
+        }
+        
+        config['snapshots'] = {
+            'enabled': False
         }
         
         # Write config
@@ -508,6 +500,26 @@ except Exception as e1:
         model_dir = os.path.join(config_dir, 'model')
         os.makedirs(model_dir, exist_ok=True)
         shutil.copy(model_path, os.path.join(model_dir, os.path.basename(model_path)))
+        
+        # Create appropriate labels file based on model
+        if 'fire' in model_path:
+            # Fire detection model labels - use the actual 32-class fire labels
+            fire_labels_src = "converted_models/frigate_yolo_plugin/fire_labels.txt"
+            if os.path.exists(fire_labels_src):
+                # Copy the actual fire labels file
+                shutil.copy(fire_labels_src, os.path.join(model_dir, 'labels.txt'))
+            else:
+                # Fallback to basic fire labels
+                labels_content = "fire\nsmoke\nperson\nvehicle\nflame\nember\nspark\nheat"
+                labels_path = os.path.join(model_dir, 'labels.txt')
+                with open(labels_path, 'w') as f:
+                    f.write(labels_content)
+        else:
+            # Generic COCO labels for other models
+            labels_content = "person\nbicycle\ncar\nmotorcycle\nairplane\nbus\ntrain\ntruck"
+            labels_path = os.path.join(model_dir, 'labels.txt')
+            with open(labels_path, 'w') as f:
+                f.write(labels_content)
         
         return config_path
     
@@ -529,9 +541,9 @@ except Exception as e1:
             if device['type'] == 'pci':
                 device_mapping.append(f"{device['path']}:{device['path']}")
         
-        # Container configuration
+        # Container configuration - use standard Frigate image
         container_config = {
-            'image': 'ghcr.io/blakeblackshear/frigate:stable',
+            'image': 'ghcr.io/blakeblackshear/frigate:stable',  # Standard Frigate image
             'name': 'frigate_test_e2e_fixed',
             'detach': True,
             'volumes': {
@@ -541,7 +553,7 @@ except Exception as e1:
             'devices': device_mapping,
             'environment': {
                 'FRIGATE_MQTT_HOST': 'localhost',
-                'FRIGATE_MQTT_PORT': str(mqtt_broker.port)
+                'FRIGATE_MQTT_PORT': str(mqtt_broker.port),
             },
             'network_mode': 'host',  # Required for localhost MQTT access
             'shm_size': '256m',

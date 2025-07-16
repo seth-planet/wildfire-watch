@@ -39,7 +39,7 @@ class TestDockerComposeDeployment:
         with open(compose_file, 'r') as f:
             compose_config = yaml.safe_load(f)
         
-        services = compose_config.services
+        services = compose_config['services']
         
         # Check MQTT broker has no dependencies
         assert 'depends_on' not in services['mqtt_broker']
@@ -62,7 +62,7 @@ class TestDockerComposeDeployment:
         with open(compose_file, 'r') as f:
             compose_config = yaml.safe_load(f)
         
-        services = compose_config.services
+        services = compose_config['services']
         
         # Critical services should have health checks
         critical_services = ['mqtt_broker']
@@ -84,7 +84,7 @@ class TestDockerComposeDeployment:
         with open(compose_file, 'r') as f:
             compose_config = yaml.safe_load(f)
         
-        services = compose_config.services
+        services = compose_config['services']
         
         # Check if deploy limits are set for production
         for service_name, service in services.items():
@@ -104,16 +104,16 @@ class TestDockerComposeDeployment:
             compose_config = yaml.safe_load(f)
         
         # Check network exists
-        assert 'wildfire_net' in compose_config.networks
+        assert 'wildfire_net' in compose_config['networks']
         
-        network_config = compose_config.networks['wildfire_net']
+        network_config = compose_config['networks']['wildfire_net']
         assert 'driver' in network_config
-        assert network_config.driver == 'bridge'
+        assert network_config['driver'] == 'bridge'
         
         # Check IPAM configuration
         if 'ipam' in network_config:
-            assert 'config' in network_config.ipam
-            assert 'subnet' in network_config.ipam['config'][0]
+            assert 'config' in network_config['ipam']
+            assert 'subnet' in network_config['ipam']['config'][0]
 
 
 class TestMultiNodeConfiguration:
@@ -141,7 +141,7 @@ class TestMultiNodeConfiguration:
             compose_config = yaml.safe_load(f)
         
         # Check services use NODE_ID or BALENA_DEVICE_UUID
-        services = compose_config.services
+        services = compose_config['services']
         
         # Check if at least some services use node identity
         services_with_node_id = 0
@@ -257,7 +257,7 @@ class TestStorageConfiguration:
         with open(compose_file, 'r') as f:
             compose_config = yaml.safe_load(f)
         
-        volumes = compose_config.volumes
+        volumes = compose_config['volumes']
         
         # Required volumes
         required_volumes = ['mqtt_data', 'mqtt_logs', 'frigate_data']
@@ -273,7 +273,7 @@ class TestStorageConfiguration:
             compose_config = yaml.safe_load(f)
         
         # Check that Frigate recordings and database are persisted
-        frigate_service = compose_config.services.get('security_nvr')
+        frigate_service = compose_config['services'].get('security_nvr')
         if frigate_service:
             volumes = frigate_service.get('volumes', [])
             # Should have volumes for recordings and database
@@ -315,7 +315,7 @@ class TestSecurityDeployment:
         with open(compose_file, 'r') as f:
             compose_config = yaml.safe_load(f)
         
-        services = compose_config.services
+        services = compose_config['services']
         mqtt_service = services['mqtt_broker']
         
         # Check TLS port is exposed

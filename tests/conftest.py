@@ -9,19 +9,45 @@ import paho.mqtt.client as mqtt
 import multiprocessing
 import logging
 
-# Add tests directory to Python path to ensure imports work
-sys.path.insert(0, os.path.dirname(__file__))
+# Add project root to Python path to ensure imports work
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+# Also add tests directory for test utils
+tests_dir = os.path.dirname(os.path.abspath(__file__))
+if tests_dir not in sys.path:
+    sys.path.insert(0, tests_dir)
+
 
 # Import safe logging to prevent I/O on closed file errors
 # This is critical for parallel test execution
-from utils.safe_logging import disable_problem_loggers, cleanup_test_logging
-disable_problem_loggers()
+try:
+    from test_utils.safe_logging import (
+        disable_problem_loggers, 
+        cleanup_test_logging,
+        cleanup_all_registered_loggers,
+        SafeStreamHandler
+    )
+    disable_problem_loggers()
+except ImportError as e:
+    print(f"WARNING: Could not import safe_logging: {e}")
+    print(f"  Current directory: {os.getcwd()}")
+    print(f"  Project root: {project_root}")
+    print(f"  sys.path: {sys.path[:3]}")
+    # Define dummy functions to prevent further errors
+    def disable_problem_loggers():
+        pass
+    def cleanup_test_logging():
+        pass
+    def cleanup_all_registered_loggers():
+        pass
+    SafeStreamHandler = None
 
 # Import enhanced process cleanup for proper test isolation
 try:
-    from enhanced_process_cleanup import get_process_cleaner, cleanup_on_test_failure
+    from test_utils.enhanced_process_cleanup import get_process_cleaner, cleanup_on_test_failure
     # Configure to not kill test processes
-    import enhanced_process_cleanup
+    import test_utils.enhanced_process_cleanup as enhanced_process_cleanup
     if hasattr(enhanced_process_cleanup, 'PROTECTED_PATTERNS'):
         # Add pytest worker processes to protected patterns
         enhanced_process_cleanup.PROTECTED_PATTERNS.extend([
@@ -109,6 +135,14 @@ def session_process_cleanup():
         if sum(initial_results.values()) > 0:
             print(f"Cleaned up {sum(initial_results.values())} leaked processes from previous runs")
     
+    # Build Docker images if needed
+    if os.path.exists('/home/seth/wildfire-watch/scripts/build_test_images.sh'):
+        print("🔨 Building Docker images for tests...")
+        result = subprocess.run(['/home/seth/wildfire-watch/scripts/build_test_images.sh'], 
+                              capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Warning: Failed to build Docker images: {result.stderr}")
+    
     yield
     
     # Cleanup at end of session
@@ -128,7 +162,7 @@ def test_mqtt_broker(worker_id):
     """Provide a test MQTT broker using enhanced broker with session reuse"""
     # Import here to avoid circular dependencies
     sys.path.insert(0, os.path.dirname(__file__))
-    from enhanced_mqtt_broker import TestMQTTBroker
+    from test_utils.enhanced_mqtt_broker import TestMQTTBroker
     
     broker = TestMQTTBroker(session_scope=True, worker_id=worker_id)
     broker.start()
@@ -206,12 +240,84 @@ def worker_id(request):
     return getattr(request.config, 'workerinput', {}).get('workerid', 'master')
 
 
+@pytest.fixture(autouse=True)
+def thread_cleanup():
+    """Enhanced thread cleanup fixture for all tests.
+    
+    Automatically tracks threads created during tests and ensures
+    they are properly cleaned up to prevent resource leaks.
+    """
+    import gc
+    import threading
+    import time
+    import logging
+    
+    logger = logging.getLogger(__name__)
+    
+    # Record initial state
+    initial_threads = {t.ident for t in threading.enumerate() if t.is_alive()}
+    initial_count = threading.active_count()
+    
+    yield
+    
+    # Force garbage collection first
+    gc.collect()
+    
+    # Give threads a moment to finish naturally
+    time.sleep(0.1)
+    
+    # Check for orphaned threads
+    current_threads = threading.enumerate()
+    orphaned = [t for t in current_threads 
+                if t.ident not in initial_threads and t.is_alive()]
+    
+    if orphaned:
+        logger.debug(f"Found {len(orphaned)} orphaned threads after test")
+        
+        # Try graceful shutdown
+        for thread in orphaned:
+            # Standard thread stop methods
+            if hasattr(thread, 'stop') and callable(thread.stop):
+                try:
+                    thread.stop()
+                except Exception:
+                    pass
+            
+            # Timer threads
+            if hasattr(thread, 'cancel') and callable(thread.cancel):
+                try:
+                    thread.cancel()
+                except Exception:
+                    pass
+            
+            # Set common stop flags
+            for attr in ['_stop_event', '_shutdown', 'shutdown_flag']:
+                if hasattr(thread, attr):
+                    flag = getattr(thread, attr)
+                    if hasattr(flag, 'set'):
+                        flag.set()
+                    elif isinstance(flag, bool):
+                        setattr(thread, attr, True)
+        
+        # Wait briefly for cleanup
+        time.sleep(0.2)
+        
+        # Check again
+        still_alive = [t for t in orphaned if t.is_alive()]
+        if still_alive:
+            logger.warning(f"{len(still_alive)} threads still alive after cleanup: "
+                         f"{[t.name for t in still_alive]}")
+    
+    # Final garbage collection
+    gc.collect()
+
+
 @pytest.fixture
 def test_mqtt_tls_broker(tmp_path):
     """Provide a test MQTT broker with TLS enabled"""
     # Import here to avoid circular dependencies
     sys.path.insert(0, os.path.dirname(__file__))
-    from mqtt_tls_test_broker import MQTTTLSTestBroker
+    from test_utils.mqtt_tls_test_broker import MQTTTLSTestBroker
     
     broker = MQTTTLSTestBroker(cert_dir=str(tmp_path))
     broker.start()
@@ -257,7 +363,10 @@ def pytest_sessionfinish(session, exitstatus):
     
     # Clean up all test logging to prevent I/O on closed file errors
     try:
-        from safe_logging import cleanup_test_logging
+        from test_utils.safe_logging import cleanup_test_logging, cleanup_all_registered_loggers
+        # Clean up registered loggers first
+        cleanup_all_registered_loggers()
+        # Then do general test logging cleanup
         cleanup_test_logging()
     except ImportError:
         # Fallback: Prevent super-gradients from writing to closed file handles during teardown
@@ -271,7 +380,7 @@ def pytest_sessionfinish(session, exitstatus):
     
     # Import here to avoid circular dependencies
     sys.path.insert(0, os.path.dirname(__file__))
-    from enhanced_mqtt_broker import TestMQTTBroker
+    from test_utils.enhanced_mqtt_broker import TestMQTTBroker
     
     # Clean up all worker brokers
     TestMQTTBroker.cleanup_session()
@@ -357,14 +466,14 @@ def pytest_collection_modifyitems(config, items):
 @pytest.fixture
 def parallel_test_context(worker_id):
     """Provide parallel test context for isolation"""
-    from tests.helpers import ParallelTestContext
+    from test_utils.helpers import ParallelTestContext
     return ParallelTestContext(worker_id)
 
 
 @pytest.fixture
 def docker_container_manager(worker_id):
     """Provide Docker container manager with worker isolation"""
-    from tests.helpers import DockerContainerManager
+    from test_utils.helpers import DockerContainerManager
     manager = DockerContainerManager(worker_id=worker_id)
     yield manager
     manager.cleanup()
@@ -388,21 +497,30 @@ import threading
 # Import new classes - handle import errors gracefully
 try:
     # Ensure parent directory is in path for utils imports
-    parent_dir = os.path.dirname(os.path.dirname(__file__))
+    parent_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
     if parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
+    
+    # Debug output
+    debug_env = os.environ.get('DEBUG_IMPORTS', '')
+    if debug_env:
+        print(f"DEBUG: tests/conftest.py - parent_dir: {parent_dir}")
+        print(f"DEBUG: tests/conftest.py - sys.path[0]: {sys.path[0]}")
+        print(f"DEBUG: tests/conftest.py - utils exists: {os.path.exists(os.path.join(parent_dir, 'utils'))}")
         
-    from utils.mqtt_service import MQTTService
-    from utils.health_reporter import HealthReporter
-    from utils.thread_manager import ThreadSafeService
-    from utils.config_base import ConfigBase
+    from test_utils.mqtt_service import MQTTService
+    from test_utils.health_reporter import HealthReporter
+    from test_utils.thread_manager import ThreadSafeService
+    from test_utils.config_base import ConfigBase
     from camera_detector.detect import Camera, CameraDetector, CameraDetectorConfig
     from fire_consensus.consensus import FireConsensus, FireConsensusConfig, Detection, CameraState
 except ImportError as e:
-    print(f"Warning: Could not import refactored classes: {e}")
+    # Skip warning for now - the trigger test will handle its own imports
+    pass  # print(f"Warning: Could not import refactored classes: {e}")
     # Define dummy classes for tests that don't need the real ones
     Camera = CameraDetector = CameraDetectorConfig = None
     FireConsensus = FireConsensusConfig = Detection = CameraState = None
+    MQTTService = HealthReporter = ThreadSafeService = ConfigBase = None
 
 
 class LegacyCameraAdapter:
@@ -562,3 +680,131 @@ def legacy_config_adapter():
             setattr(config, key.lower(), value)
         return LegacyConfigAdapter(config)
     return _create_config
+
+
+def configure_pump_controller_for_test(test_mqtt_broker, mqtt_topic_factory):
+    """Configure PumpController CONFIG for test environment.
+    
+    This helper function properly updates the CONFIG dictionary that PumpController
+    uses, since CONFIG is loaded at module import time before test fixtures run.
+    
+    Args:
+        test_mqtt_broker: The test MQTT broker fixture
+        mqtt_topic_factory: The MQTT topic factory fixture
+        
+    Returns:
+        dict: The updated CONFIG values for verification
+    """
+    from gpio_trigger.trigger import CONFIG
+    
+    # Get connection parameters from test broker
+    conn_params = test_mqtt_broker.get_connection_params()
+    
+    # Get unique topic prefix for test isolation
+    full_topic = mqtt_topic_factory("dummy")
+    topic_prefix = full_topic.rsplit('/', 1)[0]
+    
+    # Update CONFIG directly since it's loaded at module import time
+    CONFIG['MQTT_BROKER'] = conn_params['host']
+    CONFIG['MQTT_PORT'] = conn_params['port']
+    CONFIG['MQTT_TLS'] = False
+    CONFIG['TOPIC_PREFIX'] = topic_prefix
+    
+    # Update topic paths with prefix
+    if topic_prefix:
+        CONFIG['TRIGGER_TOPIC'] = f"{topic_prefix}/fire/trigger"
+        CONFIG['EMERGENCY_TOPIC'] = f"{topic_prefix}/fire/emergency"
+        CONFIG['TELEMETRY_TOPIC'] = f"{topic_prefix}/system/trigger_telemetry"
+    
+    return {
+        'host': conn_params['host'],
+        'port': conn_params['port'],
+        'topic_prefix': topic_prefix
+    }
+
+
+# ==============================
+# GPIO Test Fixtures
+# ==============================
+
+@pytest.fixture
+def gpio_test_setup():
+    """Setup GPIO for testing - uses real GPIO module or simulation.
+    
+    BEST PRACTICE: This is NOT a mock - it uses the real GPIO module when available
+    or the built-in simulation mode when running on non-Pi hardware.
+    """
+    import threading
+    # Import the current GPIO from trigger module to ensure we use the right instance
+    from gpio_trigger.trigger import GPIO, CONFIG
+    
+    # GPIO is now always available (real or simulated)
+    # Ensure GPIO lock exists (for compatibility with older code)
+    if not hasattr(GPIO, '_lock'):
+        GPIO._lock = threading.RLock()
+    
+    # Set BCM mode
+    GPIO.setmode(GPIO.BCM)
+    
+    with GPIO._lock:
+        # Clear any existing state
+        if hasattr(GPIO, '_state'):
+            GPIO._state.clear()
+        
+        # Set all pins to LOW initially
+        for pin_name in ['MAIN_VALVE_PIN', 'IGN_START_PIN', 'IGN_ON_PIN',
+                        'IGN_OFF_PIN', 'REFILL_VALVE_PIN', 'PRIMING_VALVE_PIN',
+                        'RPM_REDUCE_PIN']:
+            if pin_name in CONFIG:
+                GPIO.setup(CONFIG[pin_name], GPIO.OUT, initial=GPIO.LOW)
+    
+    yield GPIO
+    
+    # Cleanup after test
+    try:
+        GPIO.cleanup()
+    except Exception:
+        pass  # Ignore cleanup errors
+    if hasattr(GPIO, '_state'):
+        with GPIO._lock:
+            GPIO._state.clear()
+
+
+def wait_for_state(controller, state, timeout=5):
+    """Wait for controller to reach specific state"""
+    import time
+    from gpio_trigger.trigger import PumpState
+    
+    start = time.time()
+    while time.time() - start < timeout:
+        if controller._state == state:
+            return True
+        # Log ERROR state entries for analysis
+        if controller._state == PumpState.ERROR:
+            import inspect
+            import logging
+            frame = inspect.currentframe()
+            caller = frame.f_back.f_code.co_name if frame.f_back else "unknown"
+            logging.getLogger(__name__).warning(f"ERROR state reached in test: {caller}, waiting for: {state.name}")
+        time.sleep(0.01)
+    return False
+
+
+def wait_for_any_state(controller, states, timeout=5):
+    """Wait for controller to reach any of the specified states"""
+    import time
+    from gpio_trigger.trigger import PumpState
+    
+    start = time.time()
+    while time.time() - start < timeout:
+        if controller._state in states:
+            return controller._state
+        # Log ERROR state entries for analysis
+        if controller._state == PumpState.ERROR:
+            import inspect
+            import logging
+            frame = inspect.currentframe()
+            caller = frame.f_back.f_code.co_name if frame.f_back else "unknown"
+            logging.getLogger(__name__).warning(f"ERROR state reached in test: {caller}, waiting for any of: {[s.name for s in states]}")
+        time.sleep(0.01)
+    return None

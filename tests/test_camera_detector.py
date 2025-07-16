@@ -18,14 +18,8 @@ from typing import Dict, List, Optional
 import ipaddress
 import threading
 
-# Add module to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../camera_detector")))
-
-# Import after path setup
-try:
-    from detect import CameraDetector, Camera, CameraProfile, CameraDetectorConfig
-except ImportError:
-    from camera_detector.detect import CameraDetector, Camera, CameraProfile, CameraDetectorConfig
+# Import camera detector module - conftest.py handles path setup
+from camera_detector.detect import CameraDetector, Camera, CameraProfile, CameraDetectorConfig
 
 
 @pytest.fixture

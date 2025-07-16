@@ -221,7 +221,7 @@ def state_manager():
 @pytest.fixture
 def mqtt_broker():
     """Enhanced MQTT broker with session reuse"""
-    from enhanced_mqtt_broker import TestMQTTBroker
+    from test_utils.enhanced_mqtt_broker import TestMQTTBroker
     
     broker = TestMQTTBroker(session_scope=True)
     broker.start()

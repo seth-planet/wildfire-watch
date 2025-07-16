@@ -9,6 +9,21 @@ and doesn't accidentally collect tests from incompatible directories.
 import os
 import sys
 from pathlib import Path
+import pytest
+import threading
+import time
+
+# Ensure project root is in sys.path for imports to work correctly
+project_root = os.path.dirname(os.path.abspath(__file__))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# Also ensure that subdirectories can be imported without needing relative imports
+# This allows tests to import from fire_consensus, gpio_trigger, etc.
+for subdir in ['fire_consensus', 'gpio_trigger', 'camera_detector', 'cam_telemetry', 'security_nvr']:
+    subdir_path = os.path.join(project_root, subdir)
+    if os.path.exists(subdir_path) and subdir_path not in sys.path:
+        sys.path.insert(0, subdir_path)
 
 def pytest_ignore_collect(collection_path, config):
     """
@@ -67,6 +82,8 @@ def pytest_ignore_collect(collection_path, config):
         yolo_nas_dirs = [
             "converted_models/YOLO-NAS-pytorch/tests",
             "tests/test_yolo_nas_training.py",
+            "tests/test_yolo_nas_training_updated.py",
+            "tests/test_yolo_nas_qat_hailo_e2e.py",
             "tests/test_api_usage.py", 
             "tests/test_qat_functionality.py"
         ]
@@ -176,3 +193,147 @@ def pytest_sessionstart(session):
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
     print(f"Starting pytest session with Python {python_version}")
     print(f"Test collection will be restricted to Python {python_version} compatible tests")
+
+
+# GPIO State Isolation Fixtures
+@pytest.fixture(scope="session")
+def gpio_state_manager():
+    """Session-level fixture to manage GPIO state across all tests."""
+    class GPIOStateManager:
+        def __init__(self):
+            self.initial_states = {}
+            self.lock = threading.Lock()
+            
+        def save_initial_state(self):
+            """Save the initial GPIO state at the beginning of the session."""
+            try:
+                from gpio_trigger.trigger import GPIO
+                if hasattr(GPIO, '_state') and hasattr(GPIO, '_mode'):
+                    with self.lock:
+                        self.initial_states = {
+                            'state': GPIO._state.copy() if GPIO._state else {},
+                            'mode': GPIO._mode.copy() if GPIO._mode else {},
+                            'pull': GPIO._pull.copy() if hasattr(GPIO, '_pull') and GPIO._pull else {}
+                        }
+            except Exception as e:
+                print(f"Could not save initial GPIO state: {e}")
+                
+        def restore_initial_state(self):
+            """Restore GPIO to initial state."""
+            try:
+                from gpio_trigger.trigger import GPIO
+                if hasattr(GPIO, '_state') and hasattr(GPIO, '_mode'):
+                    with GPIO._lock:
+                        # Clear current state
+                        GPIO._state.clear()
+                        GPIO._mode.clear()
+                        if hasattr(GPIO, '_pull'):
+                            GPIO._pull.clear()
+                        
+                        # Restore initial state
+                        if self.initial_states:
+                            GPIO._state.update(self.initial_states.get('state', {}))
+                            GPIO._mode.update(self.initial_states.get('mode', {}))
+                            if hasattr(GPIO, '_pull'):
+                                GPIO._pull.update(self.initial_states.get('pull', {}))
+            except Exception as e:
+                print(f"Could not restore GPIO state: {e}")
+    
+    manager = GPIOStateManager()
+    manager.save_initial_state()
+    
+    yield manager
+    
+    # Session cleanup
+    manager.restore_initial_state()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def gpio_module_cleanup(gpio_state_manager):
+    """Module-level fixture to clean GPIO state between test modules."""
+    yield
+    
+    # Clean up after each module
+    try:
+        from gpio_trigger.trigger import GPIO
+        if hasattr(GPIO, '_state') and hasattr(GPIO, '_lock'):
+            with GPIO._lock:
+                # Reset all pins to LOW
+                for pin in list(GPIO._state.keys()):
+                    if pin in GPIO._mode and GPIO._mode.get(pin) == GPIO.OUT:
+                        GPIO._state[pin] = GPIO.LOW
+                        
+                # Call cleanup to reset hardware
+                if hasattr(GPIO, 'cleanup'):
+                    GPIO.cleanup()
+                    
+                # IMPORTANT: Force clear all internal state dictionaries after cleanup
+                # This ensures no state persists between modules
+                if hasattr(GPIO, '_state'):
+                    GPIO._state.clear()
+                if hasattr(GPIO, '_mode'):
+                    GPIO._mode.clear()
+                if hasattr(GPIO, '_pull'):
+                    GPIO._pull.clear()
+                if hasattr(GPIO, '_edge_callbacks'):
+                    GPIO._edge_callbacks.clear()
+                    
+                # Re-initialize for next module
+                if hasattr(GPIO, 'setmode'):
+                    GPIO.setmode(GPIO.BCM)
+                    GPIO.setwarnings(False)
+    except Exception as e:
+        print(f"GPIO module cleanup error: {e}")
+
+
+@pytest.fixture(autouse=True)
+def ensure_gpio_cleanup():
+    """Function-level fixture to ensure GPIO is properly cleaned up after each test."""
+    # Pre-test setup
+    initial_gpio_state = None
+    try:
+        from gpio_trigger.trigger import GPIO
+        if hasattr(GPIO, '_state') and hasattr(GPIO, '_lock'):
+            with GPIO._lock:
+                initial_gpio_state = GPIO._state.copy() if GPIO._state else {}
+    except Exception:
+        pass
+    
+    yield
+    
+    # Post-test cleanup
+    try:
+        from gpio_trigger.trigger import GPIO
+        if hasattr(GPIO, '_state') and hasattr(GPIO, '_lock'):
+            with GPIO._lock:
+                # Reset all output pins to LOW
+                for pin in list(GPIO._state.keys()):
+                    if pin in GPIO._mode and GPIO._mode.get(pin) == GPIO.OUT:
+                        GPIO._state[pin] = GPIO.LOW
+                        
+                # If we had an initial state, restore non-output pins
+                if initial_gpio_state:
+                    for pin, value in initial_gpio_state.items():
+                        if pin in GPIO._mode and GPIO._mode.get(pin) == GPIO.IN:
+                            GPIO._state[pin] = value
+    except Exception as e:
+        print(f"GPIO cleanup error: {e}")
+
+
+@pytest.fixture(autouse=True)
+def cleanup_controller_instances():
+    """Ensure controller instances are cleaned up between tests."""
+    yield
+    
+    # Clean up any lingering controller instances
+    try:
+        import gpio_trigger.trigger as trigger_module
+        if hasattr(trigger_module, 'controller') and trigger_module.controller:
+            try:
+                trigger_module.controller._shutdown = True
+                trigger_module.controller.cleanup()
+                trigger_module.controller = None
+            except Exception:
+                pass
+    except Exception:
+        pass

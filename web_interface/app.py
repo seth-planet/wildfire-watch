@@ -34,17 +34,15 @@ from .security import (
     AuditLogger, DebugAuthMiddleware, generate_csrf_token
 )
 
-# Initialize logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Import safe logging utility
+# Import logging utilities
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from utils.safe_logging import safe_log
+from utils.safe_logging import safe_log, register_logger_for_cleanup
+from utils.logging_config import setup_logging
+
+# Initialize standardized logging
+logger = setup_logging("web_interface", format_string="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+register_logger_for_cleanup(logger)
 
 # Create module-level safe logging wrapper
 def _safe_log(level: str, message: str, exc_info: bool = False) -> None:

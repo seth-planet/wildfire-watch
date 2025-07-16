@@ -12,8 +12,9 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.config_base import ConfigBase, ConfigSchema, SharedMQTTConfig, ConfigValidationError
 from utils.safe_logging import safe_log
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class WebInterfaceConfig(ConfigBase):

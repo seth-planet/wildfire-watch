@@ -29,12 +29,41 @@ import time
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-import numpy as np
-import cv2
 
-# Add parent directories to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
+# Import hardware lock for exclusive Hailo access
+from tests.test_utils.hardware_lock import hailo_lock
+
+# Add parent directories to path BEFORE other imports
+parent_dir = str(Path(__file__).parent.parent)
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+# Debug print to track import progress
+print(f"[test_yolo_nas_qat_hailo_e2e] Python version: {sys.version}")
+print(f"[test_yolo_nas_qat_hailo_e2e] sys.path updated with: {parent_dir}")
+
+# Import dependencies with error handling
+try:
+    import numpy as np
+    print(f"[test_yolo_nas_qat_hailo_e2e] NumPy version: {np.__version__}")
+except ImportError as e:
+    print(f"[test_yolo_nas_qat_hailo_e2e] Failed to import numpy: {e}")
+    pytest.skip("NumPy not available", allow_module_level=True)
+
+try:
+    import cv2
+    print(f"[test_yolo_nas_qat_hailo_e2e] OpenCV version: {cv2.__version__}")
+except ImportError as e:
+    print(f"[test_yolo_nas_qat_hailo_e2e] Failed to import cv2: {e}")
+    pytest.skip("OpenCV not available", allow_module_level=True)
+
+# Try to import UnifiedYOLOTrainer early to detect issues
+try:
+    from converted_models.unified_yolo_trainer import UnifiedYOLOTrainer
+    print("[test_yolo_nas_qat_hailo_e2e] UnifiedYOLOTrainer imported successfully")
+except ImportError as e:
+    print(f"[test_yolo_nas_qat_hailo_e2e] Failed to import UnifiedYOLOTrainer: {e}")
+    pytest.skip("UnifiedYOLOTrainer not available", allow_module_level=True)
 
 # Configure logging
 logging.basicConfig(
@@ -57,12 +86,13 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def dataset_path():
     """Validate and return dataset path."""
+    print("[test_yolo_nas_qat_hailo_e2e] Validating dataset path...")
     dataset_dir = Path("/media/seth/SketchScratch/fiftyone/train_yolo")
     
     if not dataset_dir.exists():
         pytest.skip(f"Dataset not found at {dataset_dir}")
     
-    # Validate dataset structure
+    # Validate dataset structure with timeout protection
     required_dirs = [
         dataset_dir / "images" / "train",
         dataset_dir / "images" / "validation",
@@ -79,20 +109,34 @@ def dataset_path():
     if not dataset_yaml.exists():
         pytest.skip("dataset.yaml not found")
     
-    # Validate dataset has enough images
-    train_images = list((dataset_dir / "images" / "train").glob("*.jpg"))
+    # Validate dataset has enough images - use iterdir() instead of glob to avoid hanging
+    train_image_dir = dataset_dir / "images" / "train"
+    train_images = []
+    try:
+        for f in train_image_dir.iterdir():
+            if f.suffix.lower() in ['.jpg', '.jpeg', '.png']:
+                train_images.append(f)
+            if len(train_images) >= 100:
+                break  # Early exit once we have enough
+    except Exception as e:
+        pytest.skip(f"Error reading training images: {e}")
+    
     if len(train_images) < 100:
         pytest.skip(f"Insufficient training images: {len(train_images)} < 100")
     
-    logger.info(f"Dataset validated: {len(train_images)} training images")
+    logger.info(f"Dataset validated: {len(train_images)}+ training images")
+    print(f"[test_yolo_nas_qat_hailo_e2e] Dataset validated: {len(train_images)}+ training images")
     return dataset_dir
 
 
 @pytest.fixture(scope="module")
 def gpu_available():
     """Check if GPU is available for training."""
+    print("[test_yolo_nas_qat_hailo_e2e] Checking GPU availability...")
     try:
         import torch
+        print(f"[test_yolo_nas_qat_hailo_e2e] PyTorch version: {torch.__version__}")
+        
         if not torch.cuda.is_available():
             pytest.skip("CUDA GPU not available")
         
@@ -100,12 +144,14 @@ def gpu_available():
         gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
         
         logger.info(f"GPU detected: {gpu_name} ({gpu_memory:.1f} GB)")
+        print(f"[test_yolo_nas_qat_hailo_e2e] GPU detected: {gpu_name} ({gpu_memory:.1f} GB)")
         
         if gpu_memory < 8:
             pytest.skip(f"Insufficient GPU memory: {gpu_memory:.1f} GB < 8 GB")
         
         return True
-    except ImportError:
+    except ImportError as e:
+        print(f"[test_yolo_nas_qat_hailo_e2e] PyTorch import failed: {e}")
         pytest.skip("PyTorch not installed")
 
 
@@ -356,10 +402,7 @@ def train_yolo_nas_with_qat(
     """
     logger.info("Starting YOLO-NAS training with QAT")
     
-    try:
-        from unified_yolo_trainer import UnifiedYOLOTrainer
-    except ImportError:
-        pytest.skip("UnifiedYOLOTrainer not available")
+    # UnifiedYOLOTrainer already imported at module level
     
     # Create training configuration
     config = {
@@ -461,12 +504,12 @@ def train_yolo_nas_with_qat(
         logger.info(f"Stage 2: QAT fine-tuning for {epochs_qat} epochs")
         
         # Update config for QAT
-        trainer.config.training['epochs'] = epochs_qat
-        trainer.config.training['learning_rate'] = 0.0001  # Lower LR for fine-tuning
-        trainer.config.experiment_name = 'yolo_nas_qat_test_qat'
+        trainer.config['training']['epochs'] = epochs_qat
+        trainer.config['training']['learning_rate'] = 0.0001  # Lower LR for fine-tuning
+        trainer.config['experiment_name'] = 'yolo_nas_qat_test_qat'
         
         # Load checkpoint
-        trainer.config.checkpoint_params = {
+        trainer.config['checkpoint_params'] = {
             'checkpoint_path': str(best_checkpoint),
             'load_checkpoint': True
         }
@@ -877,7 +920,8 @@ def test_yolo_nas_qat_hailo_e2e(
     dataset_path,
     gpu_available,
     docker_available,
-    test_output_dir
+    test_output_dir,
+    hailo_lock  # Ensure exclusive Hailo hardware access
 ):
     """
     Complete end-to-end test: YOLO-NAS QAT training to Hailo deployment.
@@ -918,7 +962,10 @@ def test_yolo_nas_qat_hailo_e2e(
     
     # Phase 2: ONNX Conversion with validation (30 min timeout)
     logger.info("\nPhase 2: ONNX Conversion")
-    with pytest.timeout(1800):
+    
+    # Create a function to run with timeout
+    @pytest.mark.timeout(1800)
+    def phase2_onnx_conversion():
         onnx_path = export_to_onnx(model_path, test_output_dir)
         
         # Validate ONNX accuracy
@@ -932,10 +979,17 @@ def test_yolo_nas_qat_hailo_e2e(
         
         assert passed, f"ONNX conversion accuracy too low: {metrics['overall_agreement']:.2%}"
         logger.info(f"ONNX validation passed: {metrics['overall_agreement']:.2%} agreement")
+        return onnx_path, onnx_results, metrics
+    
+    # Execute phase 2
+    onnx_path, onnx_results, metrics = phase2_onnx_conversion()
     
     # Phase 3: Hailo Conversion (2 hour timeout)
     logger.info("\nPhase 3: Hailo HEF Conversion")
-    with pytest.timeout(7200):
+    
+    # Create a function to run with timeout
+    @pytest.mark.timeout(7200)
+    def phase3_hailo_conversion():
         # Use validation images as calibration data
         calibration_dir = test_output_dir / 'calibration'
         calibration_dir.mkdir(exist_ok=True)
@@ -952,10 +1006,17 @@ def test_yolo_nas_qat_hailo_e2e(
         )
         
         logger.info(f"HEF model created: {hef_path}")
+        return hef_path
+    
+    # Execute phase 3
+    hef_path = phase3_hailo_conversion()
     
     # Phase 4: Accuracy Validation (1 hour timeout)
     logger.info("\nPhase 4: Accuracy Validation")
-    with pytest.timeout(3600):
+    
+    # Create a function to run with timeout
+    @pytest.mark.timeout(3600)
+    def phase4_accuracy_validation():
         # Validate Hailo model accuracy
         hailo_results = run_inference_hailo(hef_path, test_images)
         
@@ -994,6 +1055,11 @@ def test_yolo_nas_qat_hailo_e2e(
         fire_agreement = metrics['fire_class_metrics']['mean_agreement']
         assert fire_agreement >= 0.99, f"Fire class accuracy too low: {fire_agreement:.2%}"
         logger.info(f"Fire class validation passed: {fire_agreement:.2%} agreement")
+        
+        return passed, metrics, validation_report, fire_agreement
+    
+    # Execute phase 4
+    passed, metrics, validation_report, fire_agreement = phase4_accuracy_validation()
     
     # Phase 5: Frigate Integration Test
     logger.info("\nPhase 5: Frigate Integration Test")

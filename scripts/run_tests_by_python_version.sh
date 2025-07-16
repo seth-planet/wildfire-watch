@@ -283,6 +283,9 @@ run_python_tests() {
         return 1
     fi
     
+    # Set PYTHONPATH to ensure imports work correctly
+    export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
+    
     local cmd="$python_cmd -m pytest -c $config_file"
     
     # Add coverage options if enabled
@@ -582,7 +585,38 @@ else
     # Default: run all tests
     print_status "$YELLOW" "No specific version selected, running all tests..."
     RUN_ALL=true
-    exec "$0" --all "${EXTRA_ARGS[@]}"
+    # Don't use exec to avoid recursion
+    # Instead, set the flag and continue
+fi
+
+# If RUN_ALL was set but we didn't execute yet, do it now
+if [[ "$RUN_ALL" == "true" && "$TOTAL_RUNS" -eq 0 ]]; then
+    # Run Python 3.12 tests (most tests)
+    if run_python_tests "3.12"; then
+        RESULTS+=("Python 3.12: ✅ PASSED")
+        ((SUCCESSFUL_RUNS++))
+    else
+        RESULTS+=("Python 3.12: ❌ FAILED")
+    fi
+    ((TOTAL_RUNS++))
+    
+    # Run Python 3.10 tests (YOLO-NAS)
+    if run_python_tests "3.10"; then
+        RESULTS+=("Python 3.10: ✅ PASSED")
+        ((SUCCESSFUL_RUNS++))
+    else
+        RESULTS+=("Python 3.10: ❌ FAILED")
+    fi
+    ((TOTAL_RUNS++))
+    
+    # Run Python 3.8 tests (Coral TPU)
+    if run_python_tests "3.8"; then
+        RESULTS+=("Python 3.8: ✅ PASSED")
+        ((SUCCESSFUL_RUNS++))
+    else
+        RESULTS+=("Python 3.8: ❌ FAILED")
+    fi
+    ((TOTAL_RUNS++))
 fi
 
 # Report results

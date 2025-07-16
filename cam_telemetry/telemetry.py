@@ -31,6 +31,7 @@ from utils.mqtt_service import MQTTService
 from utils.health_reporter import HealthReporter
 from utils.thread_manager import ThreadSafeService
 from utils.config_base import ConfigBase, ConfigSchema
+from utils.logging_config import setup_logging
 
 # Try to import psutil for system metrics
 try:
@@ -284,12 +285,8 @@ class TelemetryService(MQTTService, ThreadSafeService):
 
 def main():
     """Main entry point for telemetry service."""
-    # Setup logging
-    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
+    # Setup logging using standardized configuration
+    logger = setup_logging("cam_telemetry")
     
     try:
         telemetry = TelemetryService()
@@ -298,9 +295,9 @@ def main():
         telemetry.wait_for_shutdown()
         
     except KeyboardInterrupt:
-        safe_log(logging.getLogger(__name__), 'info', "Received interrupt signal")
+        safe_log(logger, 'info', "Received interrupt signal")
     except Exception as e:
-        safe_log(logging.getLogger(__name__), 'error', f"Fatal error: {e}", exc_info=True)
+        safe_log(logger, 'error', f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
         if 'telemetry' in locals():

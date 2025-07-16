@@ -1,0 +1,1 @@
+"""GPIO Trigger module for Wildfire Watch."""

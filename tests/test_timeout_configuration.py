@@ -12,7 +12,7 @@ This test validates that:
 import time
 import pytest
 import logging
-from tests.timeout_utils import expect_long_timeout, mqtt_infrastructure_test, timeout_context
+from test_utils.timeout_utils import expect_long_timeout, mqtt_infrastructure_test, timeout_context
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3.12
 """
 Docker SDK-based integration tests for Wildfire Watch
-Tests services running in Docker containers using Docker SDK
+Tests services running in Docker containers using Docker SDK with proper test isolation
 """
 import os
 import sys
@@ -13,70 +13,63 @@ import paho.mqtt.client as mqtt
 from typing import Dict, List, Optional
 import logging
 from pathlib import Path
+from threading import Event
 
-# Add parent directory
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from tests.helpers import DockerHealthChecker, ensure_docker_available, requires_docker
+# Import test utilities for proper isolation
+from test_utils.helpers import ParallelTestContext, DockerContainerManager
+from test_utils.topic_namespace import create_namespaced_client
 
 logger = logging.getLogger(__name__)
 
 
 class DockerSDKIntegrationTest:
-    """Test integration using Docker SDK directly"""
+    """Test integration using Docker SDK with proper isolation"""
     
-    def __init__(self):
+    def __init__(self, parallel_context: ParallelTestContext, docker_manager: DockerContainerManager, mqtt_broker):
         self.docker_client = docker.from_env()
-        self.containers = {}
+        self.parallel_context = parallel_context
+        self.docker_manager = docker_manager
+        self.mqtt_broker = mqtt_broker
+        self.containers = []
         self.test_passed = False
-        self.network = None
         
-    def setup_network(self):
-        """Create Docker network for test containers"""
-        network_name = "wildfire-test-net"
+    def get_service_env(self, service_name: str) -> Dict[str, str]:
+        """Get environment variables for a service with proper test isolation"""
+        env = self.parallel_context.get_service_env(service_name)
+        # Override MQTT settings to use test broker
+        env['MQTT_BROKER'] = self.mqtt_broker.host
+        env['MQTT_PORT'] = str(self.mqtt_broker.port)
+        env['MQTT_TLS'] = 'false'
+        return env
         
-        # Remove existing network if any
-        try:
-            old_net = self.docker_client.networks.get(network_name)
-            old_net.remove()
-        except docker.errors.NotFound:
-            pass
-            
-        # Create new network
-        self.network = self.docker_client.networks.create(
-            name=network_name,
-            driver="bridge"
+    def start_service_container(self, service_name: str, image: str, depends_on: List[str] = None) -> docker.models.containers.Container:
+        """Start a service container with proper isolation"""
+        logger.info(f"Starting {service_name} container...")
+        
+        container_name = self.docker_manager.get_container_name(f"sdk-{service_name}")
+        env_vars = self.get_service_env(service_name)
+        
+        # Wait for dependencies
+        if depends_on:
+            for dep in depends_on:
+                logger.info(f"Waiting for {dep} to be ready...")
+                time.sleep(2)
+        
+        # Start container
+        container = self.docker_manager.start_container(
+            image=image,
+            name=container_name,
+            config={
+                'environment': env_vars,
+                'network_mode': 'host',
+                'detach': True
+            },
+            wait_timeout=10
         )
-        logger.info(f"Created network: {network_name}")
-        return self.network
         
-    def start_mqtt_container(self):
-        """Start MQTT broker container"""
-        logger.info("Starting MQTT broker container...")
-        
-        # Pull mosquitto image if needed
-        try:
-            self.docker_client.images.get("eclipse-mosquitto:latest")
-        except docker.errors.ImageNotFound:
-            logger.info("Pulling mosquitto image...")
-            self.docker_client.images.pull("eclipse-mosquitto:latest")
-        
-        # Remove existing test container if any
-        container_name = "mqtt-test-sdk"
-        try:
-            old_container = self.docker_client.containers.get(container_name)
-            old_container.stop(timeout=5)
-            old_container.remove()
-        except docker.errors.NotFound:
-            pass
-            
-        # Create mosquitto config with verbose logging
-        config_content = """
-listener 1883
-allow_anonymous true
-log_type all
-log_dest stdout
-"""
+        self.containers.append(container)
+        logger.info(f"Started {service_name} container: {container_name}")
+        return container
         
         # Create and start container
         container = self.docker_client.containers.run(
@@ -311,37 +304,27 @@ log_dest stdout
             self.cleanup()
             
     def cleanup(self):
-        """Clean up containers and network"""
+        """Clean up containers using DockerContainerManager"""
         logger.info("\nCleaning up containers...")
         
-        # Stop and remove containers
-        for name, container in self.containers.items():
-            try:
-                container.stop(timeout=5)
-                container.remove()
-                logger.info(f"✓ Removed {name} container")
-            except Exception as e:
-                logger.error(f"Error removing {name}: {e}")
-                
-        # Remove network
-        if self.network:
-            try:
-                self.network.remove()
-                logger.info("✓ Removed test network")
-            except Exception as e:
-                logger.error(f"Error removing network: {e}")
+        # The DockerContainerManager will handle cleanup of containers it started
+        # We just need to clear our tracking list
+        self.containers.clear()
+        logger.info("✓ Container cleanup handled by DockerContainerManager")
 
 
 @pytest.mark.docker
+@pytest.mark.integration
 @pytest.mark.timeout(300)
-def test_docker_sdk_integration(parallel_test_context, docker_container_manager):
-    """Test Docker container integration using SDK"""
-    test = DockerSDKIntegrationTest()
-    test.parallel_context = parallel_test_context
-    test.container_manager = docker_container_manager
+def test_docker_sdk_integration(parallel_test_context, docker_container_manager, test_mqtt_broker):
+    """Test Docker container integration using SDK with proper isolation"""
+    test = DockerSDKIntegrationTest(parallel_test_context, docker_container_manager, test_mqtt_broker)
     
-    success = test.test_fire_detection_flow()
-    assert success, "Docker SDK integration test should trigger fire consensus"
+    try:
+        success = test.test_fire_detection_flow()
+        assert success, "Docker SDK integration test should trigger fire consensus"
+    finally:
+        test.cleanup()
 
 
 if __name__ == "__main__":

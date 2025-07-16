@@ -28,12 +28,8 @@ import fcntl
 import contextlib
 
 # Import parallel test utilities
-try:
-    from helpers import ParallelTestContext, DockerContainerManager
-    from topic_namespace import create_namespaced_client
-except ImportError:
-    from tests.helpers import ParallelTestContext, DockerContainerManager
-    from tests.topic_namespace import create_namespaced_client
+from test_utils.helpers import ParallelTestContext, DockerContainerManager
+from test_utils.topic_namespace import create_namespaced_client
 
 # Hardware lockfile system for non-parallelizable hardware
 @contextlib.contextmanager
@@ -792,7 +788,7 @@ class TestSystemIntegration(unittest.TestCase):
             client.on_connect = on_connect
             
             try:
-                client.connect("localhost", 1883, 60)
+                client.connect(test_mqtt_broker.host, test_mqtt_broker.port, 60)
                 client.loop_start()
                 time.sleep(2)
                 client.loop_stop()

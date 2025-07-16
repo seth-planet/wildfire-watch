@@ -220,17 +220,21 @@ class TestWebInterfaceIntegration:
         assert all(status == 200 for status in responses)
 
 
-@pytest.mark.skip(reason="MQTT integration tests need topic namespace fixes")
 class TestMQTTIntegration:
     """Test MQTT message handling with real broker."""
     
     @pytest.fixture
-    def mqtt_handler_with_broker(self, test_mqtt_broker, monkeypatch):
-        """Create MQTT handler connected to test broker."""
+    def mqtt_handler_with_broker(self, test_mqtt_broker, mqtt_topic_factory, monkeypatch):
+        """Create MQTT handler connected to test broker with topic namespace."""
+        # Get unique topic prefix for test isolation
+        full_topic = mqtt_topic_factory("dummy")
+        topic_prefix = full_topic.rsplit('/', 1)[0]
+        
         # Set environment variables
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
         monkeypatch.setenv('MQTT_TLS', 'false')
+        monkeypatch.setenv('TOPIC_PREFIX', topic_prefix)
         monkeypatch.setenv('STATUS_PANEL_MQTT_BUFFER_SIZE', '100')
         monkeypatch.setenv('STATUS_PANEL_ALLOWED_NETWORKS', '["127.0.0.1", "localhost", "testclient"]')
         monkeypatch.setenv('STATUS_PANEL_AUDIT_LOG_ENABLED', 'false')
@@ -248,7 +252,8 @@ class TestMQTTIntegration:
         # Wait for connection
         assert handler.wait_for_connection(timeout=5)
         
-        yield handler
+        # Return handler and topic prefix for tests
+        yield handler, topic_prefix
         
         # Cleanup
         handler.shutdown()
@@ -256,17 +261,17 @@ class TestMQTTIntegration:
     def test_mqtt_event_reception(self, mqtt_handler_with_broker, test_mqtt_broker):
         """Test that MQTT handler receives and buffers events."""
         from web_interface.models import EventType
-        handler = mqtt_handler_with_broker
+        handler, topic_prefix = mqtt_handler_with_broker
         
         # Create test MQTT client to publish events
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.connect(test_mqtt_broker.host, test_mqtt_broker.port)
         client.loop_start()
         
-        # Publish test events
+        # Publish test events - use the topic prefix
         events_published = []
         for i in range(5):
-            topic = f"system/test_service/health"
+            topic = f"{topic_prefix}/system/test_service/health" if topic_prefix else "system/test_service/health"
             payload = {
                 "timestamp": time.time(),
                 "uptime": i * 10,
@@ -284,27 +289,33 @@ class TestMQTTIntegration:
         print(f"DEBUG: Received {len(recent_events)} events")
         for event in recent_events:
             print(f"DEBUG: Event - topic: {event.topic}, type: {event.event_type}")
-        assert len(recent_events) >= 5
         
-        # Verify event content
-        for event in recent_events:
+        # Filter for health events we published
+        health_events = [e for e in recent_events if e.event_type == EventType.HEALTH and 'test_service' in e.topic]
+        assert len(health_events) >= 5, f"Expected at least 5 health events, got {len(health_events)}"
+        
+        # Verify health event content
+        for event in health_events:
             assert event.event_type == EventType.HEALTH
             assert 'test_service' in event.topic
+            assert isinstance(event.payload, dict)
+            assert 'status' in event.payload
             
         client.loop_stop()
         client.disconnect()
         
     def test_system_status_aggregation(self, mqtt_handler_with_broker, test_mqtt_broker):
         """Test that system status is correctly aggregated from MQTT messages."""
-        handler = mqtt_handler_with_broker
+        handler, topic_prefix = mqtt_handler_with_broker
         
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.connect(test_mqtt_broker.host, test_mqtt_broker.port)
         client.loop_start()
         
-        # Publish various status messages
+        # Publish various status messages - use topic prefix
         # Service health
-        client.publish("system/gpio_trigger/health", json.dumps({
+        topic = f"{topic_prefix}/system/gpio_trigger/health" if topic_prefix else "system/gpio_trigger/health"
+        client.publish(topic, json.dumps({
             "timestamp": time.time(),
             "uptime_hours": 2.5,
             "mqtt_connected": True,
@@ -312,14 +323,16 @@ class TestMQTTIntegration:
         }))
         
         # GPIO status
-        client.publish("gpio/status", json.dumps({
+        topic = f"{topic_prefix}/gpio/status" if topic_prefix else "gpio/status"
+        client.publish(topic, json.dumps({
             "main_valve": True,
             "ignition_on": False,
             "pump_running": True
         }))
         
         # Fire trigger
-        client.publish("fire/trigger", json.dumps({
+        topic = f"{topic_prefix}/fire/trigger" if topic_prefix else "fire/trigger"
+        client.publish(topic, json.dumps({
             "cameras": ["cam1", "cam2"],
             "timestamp": time.time()
         }))
@@ -338,7 +351,8 @@ class TestMQTTIntegration:
         
     def test_event_rate_limiting(self, mqtt_handler_with_broker, test_mqtt_broker):
         """Test that event rate limiting works per topic type."""
-        handler = mqtt_handler_with_broker
+        from web_interface.models import EventType
+        handler, topic_prefix = mqtt_handler_with_broker
         
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.connect(test_mqtt_broker.host, test_mqtt_broker.port)
@@ -346,14 +360,16 @@ class TestMQTTIntegration:
         
         # Flood with telemetry messages (low priority)
         for i in range(30):
-            client.publish("telemetry/test/data", json.dumps({"count": i}))
+            topic = f"{topic_prefix}/telemetry/test/data" if topic_prefix else "telemetry/test/data"
+            client.publish(topic, json.dumps({"count": i}))
             
         # These should be rate limited after 20
         time.sleep(0.5)
         
         # Fire events should still work (high priority)
         for i in range(5):
-            client.publish("fire/detection/cam1", json.dumps({"confidence": 0.9}))
+            topic = f"{topic_prefix}/fire/detection/cam1" if topic_prefix else "fire/detection/cam1"
+            client.publish(topic, json.dumps({"confidence": 0.9}))
             
         time.sleep(1.0)
         

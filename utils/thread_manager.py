@@ -8,9 +8,9 @@ coordination to prevent timer leaks and ensure proper cleanup.
 import threading
 import logging
 import time
-from typing import Dict, Callable, Optional, List, Set
+from typing import Dict, Callable, Optional, List
 from contextlib import contextmanager
-from .safe_logging import SafeLoggingMixin
+from .safe_logging import SafeLoggingMixin, register_logger_for_cleanup
 
 
 class SafeTimerManager(SafeLoggingMixin):
@@ -30,9 +30,12 @@ class SafeTimerManager(SafeLoggingMixin):
             logger: Optional logger instance
         """
         self._timers: Dict[str, threading.Timer] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Use reentrant lock to prevent deadlocks
         self.logger = logger or logging.getLogger(__name__)
         self._shutdown = False
+        
+        # Register logger for cleanup
+        register_logger_for_cleanup(self.logger)
     
         
     def schedule(self, name: str, func: Callable, delay: float,
@@ -67,6 +70,17 @@ class SafeTimerManager(SafeLoggingMixin):
                 try:
                     func()
                 except Exception as e:
+                    # Check if error is due to shutdown
+                    error_msg = str(e).lower()
+                    if any(shutdown_indicator in error_msg for shutdown_indicator in [
+                        "closed file", 
+                        "interpreter shutdown",
+                        "i/o operation on closed file",
+                        "cannot schedule new futures"
+                    ]):
+                        # Expected during shutdown, don't log or call error handler
+                        return
+                        
                     self._safe_log('error', f"Timer '{name}' failed: {e}")
                     if error_handler:
                         try:
@@ -115,19 +129,6 @@ class SafeTimerManager(SafeLoggingMixin):
         if cancelled > 0:
             self._safe_log('info', f"Cancelled {cancelled} active timers")
         return cancelled
-    
-    def has_timer(self, name: str) -> bool:
-        """Check if a timer is scheduled and active.
-        
-        Args:
-            name: Timer name to check
-            
-        Returns:
-            True if timer exists and is active
-        """
-        with self._lock:
-            timer = self._timers.get(name)
-            return timer is not None and timer.is_alive()
     
     def get_active_timers(self) -> List[str]:
         """Get list of active timer names.
@@ -179,16 +180,19 @@ class ThreadSafeService(SafeLoggingMixin):
         self.service_name = service_name
         self.logger = logger or logging.getLogger(service_name)
         
+        # Register logger for cleanup
+        register_logger_for_cleanup(self.logger)
+        
         # Thread management
         self._threads: Dict[str, threading.Thread] = {}
-        self._thread_lock = threading.Lock()
+        self._thread_lock = threading.RLock()  # Use reentrant lock to prevent deadlocks
         self._shutdown_event = threading.Event()
         
         # Timer management
         self.timer_manager = SafeTimerManager(self.logger)
         
         # Service state
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()  # Use reentrant lock to prevent deadlocks
         self._state = "initialized"
     
         
@@ -357,6 +361,9 @@ class BackgroundTaskRunner(SafeLoggingMixin):
         self.task = task
         self.logger = logger or logging.getLogger(name)
         
+        # Register logger for cleanup
+        register_logger_for_cleanup(self.logger)
+        
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._error_count = 0
@@ -417,7 +424,13 @@ class BackgroundTaskRunner(SafeLoggingMixin):
                 
             except Exception as e:
                 # Check if error is due to shutdown
-                if "closed file" in str(e).lower() or "interpreter shutdown" in str(e).lower():
+                error_msg = str(e).lower()
+                if any(shutdown_indicator in error_msg for shutdown_indicator in [
+                    "closed file", 
+                    "interpreter shutdown",
+                    "i/o operation on closed file",
+                    "cannot schedule new futures"
+                ]):
                     # These are expected during shutdown, just exit cleanly
                     break
                     

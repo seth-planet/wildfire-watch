@@ -39,12 +39,8 @@ def _safe_log(level: str, message: str, exc_info: bool = False) -> None:
         # Silently ignore logging errors during shutdown
         pass
 
-# Add consensus module to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../fire_consensus")))
-
-# Import after path setup
-import consensus
-from consensus import FireConsensus, Detection, CameraState, FireConsensusConfig
+# Note: We'll import FireConsensus and related classes dynamically in fixtures/tests after env vars are set
+# This prevents ConnectionRefusedError from using default localhost:1883
 
 # ─────────────────────────────────────────────────────────────
 # Test Fixtures and Mocks
@@ -63,7 +59,11 @@ def class_mqtt_broker():
     
     # Add test directory to path
     sys.path.insert(0, os.path.dirname(__file__))
-    from mqtt_test_broker import MQTTTestBroker
+    try:
+        from test_utils.mqtt_test_broker import MQTTTestBroker
+    except ImportError:
+        # Try alternate path
+        from mqtt_test_broker import MQTTTestBroker
     
     _safe_log('info', "Starting class-scoped MQTT broker for consensus tests")
     broker = MQTTTestBroker()
@@ -257,20 +257,18 @@ def consensus_service(class_mqtt_broker, monkeypatch):
     monkeypatch.setenv("MQTT_KEEPALIVE", "60")
     monkeypatch.setenv("MQTT_TLS", "false")
     
+    # Import FireConsensus AFTER environment variables are set
+    # This ensures the configuration picks up the test broker settings
+    from fire_consensus.consensus import FireConsensus
+    
     # Create service with real MQTT
     service = FireConsensus()
     
     # Wait for MQTT connection with improved timeout and verification
-    # The service connects asynchronously, so we need to wait for mqtt_connected flag
-    start_time = time.time()
-    while time.time() - start_time < 15:  # 15 second timeout
-        if hasattr(service, "_mqtt_connected") and service._mqtt_connected:
-            # Give a bit more time for subscriptions to complete
-            time.sleep(0.5)
-            break
-        time.sleep(0.1)
+    # The service uses wait_for_connection from MQTTService base class
+    connected = service.wait_for_connection(timeout=15.0)
     
-    assert service._mqtt_connected, "Service must connect to test MQTT broker"
+    assert connected, "Service must connect to test MQTT broker"
     
     yield service
     
@@ -299,6 +297,9 @@ def wait_for_condition(condition_func, timeout=2):
 class TestBasicOperation:
     def test_fire_consensus_initialization(self, consensus_service):
         """Test FireConsensus service initializes correctly"""
+        # Import classes after environment is set
+        from fire_consensus.consensus import FireConsensus, Detection, CameraState
+        
         assert consensus_service.config.consensus_threshold == 2
         assert consensus_service.cameras == {}
         assert consensus_service.trigger_count == 0
@@ -319,6 +320,9 @@ class TestBasicOperation:
     
     def test_detection_class_creation(self):
         """Test Detection class functionality"""
+        # Import classes
+        from fire_consensus.consensus import Detection
+        
         # The refactored Detection class has a simpler constructor
         detection = Detection(
             confidence=0.85,
@@ -334,6 +338,9 @@ class TestBasicOperation:
     
     def test_camera_state_tracking(self):
         """Test CameraState class functionality"""
+        # Import classes
+        from fire_consensus.consensus import CameraState
+        
         # The refactored CameraState only takes camera_id
         camera = CameraState("test_camera")
         
@@ -571,6 +578,8 @@ class TestDetectionProcessing:
 class TestConsensusAlgorithm:
     def _add_growing_fire(self, service, camera_id: str, object_id: str, num_detections: int):
         """Helper to add a sequence of growing fire detections for a specific object."""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
         # The growth logic needs at least moving_average_window * 2 detections
         required_detections = max(num_detections, service.config.moving_average_window * 2)
         
@@ -615,6 +624,9 @@ class TestConsensusAlgorithm:
     
     def test_multiple_fire_objects_per_camera(self, consensus_service):
         """Test handling multiple simultaneous fires per camera"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # Add detections for multiple fire objects to consensus service
         # First fire object (growing)
         self._add_growing_fire(consensus_service, 'multi_fire_cam', 'fire_obj_1', 8)
@@ -689,6 +701,9 @@ class TestConsensusAlgorithm:
     
     def test_growing_fire_detection(self, consensus_service):
         """Test fire growth pattern detection with moving averages"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # Add detections with growing area pattern
         areas = [0.01, 0.011, 0.013, 0.015, 0.018, 0.021, 0.025, 0.030]  # Growing with some noise
         for i, area in enumerate(areas):
@@ -707,6 +722,9 @@ class TestConsensusAlgorithm:
     
     def test_non_growing_fire_ignored(self, consensus_service):
         """Test that non-growing fires don't trigger consensus"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # Add detections with decreasing area (shrinking fire)
         areas = [0.025, 0.022, 0.020, 0.018, 0.015, 0.012, 0.010, 0.008]  # Decreasing
         for i, area in enumerate(areas):
@@ -724,6 +742,9 @@ class TestConsensusAlgorithm:
     
     def test_moving_average_with_noise(self, consensus_service):
         """Test that moving averages handle noisy detection data"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # Add detections with growth trend but significant noise
         base_areas = [0.01, 0.015, 0.012, 0.018, 0.016, 0.022, 0.020, 0.025]  # Growing with noise
         for i, area in enumerate(base_areas):
@@ -742,6 +763,9 @@ class TestConsensusAlgorithm:
     
     def test_insufficient_detections_for_moving_average(self, consensus_service):
         """Test that insufficient detections don't trigger consensus"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # Add only 4 detections (need 6+ for moving average with window=3)
         areas = [0.01, 0.013, 0.016, 0.020]
         for i, area in enumerate(areas):
@@ -795,6 +819,9 @@ class TestConsensusAlgorithm:
     
     def test_offline_cameras_ignored(self, consensus_service, mqtt_publisher, trigger_monitor, monkeypatch):
         """Test that offline cameras are ignored in consensus"""
+        # Import CameraState class
+        from fire_consensus.consensus import CameraState
+        
         # Disable single camera trigger for this test
         monkeypatch.setattr(consensus_service.config, 'single_camera_trigger', False)
         monkeypatch.setattr(consensus_service.config, 'consensus_threshold', 2)
@@ -990,6 +1017,9 @@ class TestHealthMonitoring:
     
     def test_camera_timeout_detection(self, consensus_service):
         """Test detection of offline cameras"""
+        # Import CameraState class
+        from fire_consensus.consensus import CameraState
+        
         current_time = time.time()
         
         # Add camera with recent activity
@@ -1010,6 +1040,9 @@ class TestHealthMonitoring:
     
     def test_stale_camera_cleanup(self, consensus_service):
         """Test cleanup of very stale cameras"""
+        # Import CameraState class
+        from fire_consensus.consensus import CameraState
+        
         current_time = time.time()
         
         # Add cameras with different staleness levels
@@ -1058,6 +1091,9 @@ class TestHealthMonitoring:
 class TestConfiguration:
     def test_config_class_loading(self):
         """Test configuration loading from environment"""
+        # Import config class
+        from fire_consensus.consensus import FireConsensusConfig
+        
         config = FireConsensusConfig()
         
         # Test default values using new attribute names
@@ -1098,6 +1134,9 @@ class TestConfiguration:
     
     def test_detection_validation(self, consensus_service):
         """Test detection validation logic"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # The refactored service doesn't have a _validate_detection method
         # Validation is done inline in _handle_fire_detection
         # Test by sending detections and checking if cameras are created
@@ -1112,6 +1151,9 @@ class TestConfiguration:
     
     def test_moving_average_calculation(self, consensus_service):
         """Test moving average calculation helper method"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # The refactored service uses numpy for moving averages in get_growing_fires
         # Test by adding detections and checking growth detection
         
@@ -1132,6 +1174,9 @@ class TestConfiguration:
     
     def test_growth_trend_checking(self, consensus_service):
         """Test growth trend checking logic"""
+        # Import Detection class
+        from fire_consensus.consensus import Detection
+        
         # The refactored service checks growth in get_growing_fires
         # Test different growth patterns
         
@@ -1156,6 +1201,9 @@ class TestConfiguration:
     
     def test_object_tracking_cleanup(self, consensus_service):
         """Test automatic cleanup of stale object tracks"""
+        # Import classes
+        from fire_consensus.consensus import CameraState, Detection
+        
         # Create camera through service
         camera = CameraState('test_cam')
         current_time = time.time()
@@ -1223,8 +1271,8 @@ class TestAdditionalFeatures:
         try:
             monkeypatch.setenv("TLS_CA_PATH", dummy_cert_path)
             
-            # Verify the config loads TLS settings correctly
-            import consensus
+            # Import config class and verify the config loads TLS settings correctly
+            from fire_consensus.consensus import FireConsensusConfig
             config = FireConsensusConfig()
             assert config.mqtt_tls is True
             assert config.tls_ca_path == dummy_cert_path

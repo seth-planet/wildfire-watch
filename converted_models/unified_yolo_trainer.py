@@ -398,7 +398,7 @@ class UnifiedYOLOTrainer:
         
         # Check if dataset needs preprocessing
         try:
-            from dataset_preprocessor import preprocess_dataset
+            from converted_models.dataset_preprocessor import preprocess_dataset
             
             # First analyze the dataset
             self.logger.info("Checking dataset for invalid class indices...")
@@ -427,7 +427,7 @@ class UnifiedYOLOTrainer:
             self.logger.warning("Dataset preprocessor not available, attempting class index fixer")
             # Fallback to class index fixer
             try:
-                from class_index_fixer import fix_yolo_nas_class_issues
+                from converted_models.class_index_fixer import fix_yolo_nas_class_issues
                 fix_result = fix_yolo_nas_class_issues(dataset_dir, num_classes)
                 
                 if not fix_result['is_fixed']:
@@ -499,7 +499,7 @@ class UnifiedYOLOTrainer:
             if str(current_dir) not in sys.path:
                 sys.path.insert(0, str(current_dir))
             
-            from class_index_fixer import SafeDataLoaderWrapper
+            from converted_models.class_index_fixer import SafeDataLoaderWrapper
             
             # Get max invalid ratio from config or use default (0.1% for production)
             max_invalid_ratio = self.config.get('dataset', {}).get('max_invalid_class_ratio', 0.001)
@@ -521,9 +521,7 @@ class UnifiedYOLOTrainer:
         
         # Wrap dataloaders with fixed collate function to handle target format
         try:
-            import sys
-            sys.path.append(str(Path(__file__).parent.parent / "tmp"))
-            from fixed_yolo_nas_collate import wrap_dataloader_with_fixed_collate
+            from converted_models.fixed_yolo_nas_collate import wrap_dataloader_with_fixed_collate
             
             train_loader = wrap_dataloader_with_fixed_collate(train_loader, num_classes)
             val_loader = wrap_dataloader_with_fixed_collate(val_loader, num_classes)

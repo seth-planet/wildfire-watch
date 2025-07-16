@@ -1,7 +1,7 @@
 # Base requirements with pinned versions
 paho-mqtt==1.6.1
 python-dotenv==1.0.0
-numpy==1.24.3
+numpy==2.0.2
 pyyaml==6.0.1
 pytest-xdist==3.6.1
 onvif-zeep==0.2.12

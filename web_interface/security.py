@@ -30,8 +30,9 @@ from .models import APIResponse
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.safe_logging import SafeLoggingMixin, safe_log
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class LANOnlyMiddleware(BaseHTTPMiddleware, SafeLoggingMixin):
@@ -314,7 +315,7 @@ class AuditLogger(SafeLoggingMixin):
         """Initialize audit logger."""
         self.config = get_config()
         self.enabled = self.config.audit_log_enabled
-        self.audit_logger = logging.getLogger('audit')
+        self.audit_logger = get_logger('audit')
         self.logger = logger  # Set logger for SafeLoggingMixin (for warnings)
         
         # Setup audit log handler if enabled

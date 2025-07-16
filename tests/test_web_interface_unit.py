@@ -57,8 +57,8 @@ class TestModels:
         assert not fresh_service.is_stale
         
         # Stale service (3 minutes old)
-        old_time = datetime.utcnow()
-        old_time = old_time.replace(minute=old_time.minute - 3)
+        from datetime import timedelta
+        old_time = datetime.utcnow() - timedelta(minutes=3)
         stale_service = ServiceHealth(
             name="test_service",
             status=ServiceStatus.HEALTHY,

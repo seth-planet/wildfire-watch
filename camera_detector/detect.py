@@ -440,7 +440,17 @@ class CameraDetector(MQTTService, ThreadSafeService, SafeLoggingMixin):
             self._safe_log('info', f"Discovery cycle completed in {duration:.1f}s")
             
         except Exception as e:
-            self._safe_log('error', f"Discovery cycle error: {e}", exc_info=True)
+            # Check if error is due to shutdown
+            error_msg = str(e).lower()
+            if any(shutdown_indicator in error_msg for shutdown_indicator in [
+                "closed file", 
+                "interpreter shutdown",
+                "i/o operation on closed file",
+                "cannot schedule new futures"
+            ]):
+                self._safe_log('debug', f"Discovery cycle stopped due to shutdown: {e}")
+            else:
+                self._safe_log('error', f"Discovery cycle error: {e}", exc_info=True)
             
     def _health_check_cycle(self):
         """Check health of known cameras."""
@@ -522,7 +532,17 @@ class CameraDetector(MQTTService, ThreadSafeService, SafeLoggingMixin):
         
         # Run discovery methods in parallel
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            # Check if we're shutting down before using executor
+            if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+                self._safe_log('debug', "Skipping discovery - shutdown in progress")
+                return
+                
+            # Use existing thread executor instead of creating new one
+            with self._executor_lock:
+                if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+                    return
+                    
+                executor = self._thread_executor
                 futures = {}
                 
                 # Check shutdown before submitting tasks
@@ -535,21 +555,31 @@ class CameraDetector(MQTTService, ThreadSafeService, SafeLoggingMixin):
                     futures['mdns'] = executor.submit(self._discover_mdns_cameras)
                 if self.config.network_scan_enabled:
                     futures['network'] = executor.submit(self._discover_network_cameras)
-                    
-                # Collect results
-                for method, future in futures.items():
-                    try:
-                        # Check shutdown before waiting for result
-                        if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
-                            self._safe_log('debug', f"Cancelling {method} discovery - shutdown in progress")
-                            future.cancel()
-                            continue
-                            
-                        cameras = future.result(timeout=self.config.discovery_timeout)
-                        discovered_cameras.extend(cameras)
-                        self._safe_log('info', f"{method} discovery found {len(cameras)} cameras")
-                    except Exception as e:
+                
+                # Track active futures
+                self._active_futures.update(futures.values())
+                
+            # Collect results outside the lock
+            for method, future in futures.items():
+                try:
+                    # Check shutdown before waiting for result
+                    if hasattr(self, '_shutdown_event') and self._shutdown_event.is_set():
+                        self._safe_log('debug', f"Cancelling {method} discovery - shutdown in progress")
+                        future.cancel()
+                        continue
+                        
+                    cameras = future.result(timeout=self.config.discovery_timeout)
+                    discovered_cameras.extend(cameras)
+                    self._safe_log('info', f"{method} discovery found {len(cameras)} cameras")
+                except Exception as e:
+                    if "interpreter shutdown" in str(e) or "cannot schedule new futures" in str(e):
+                        self._safe_log('debug', f"{method} discovery cancelled due to shutdown")
+                    else:
                         self._safe_log('error', f"{method} discovery failed: {e}")
+                finally:
+                    # Remove from active futures
+                    with self._executor_lock:
+                        self._active_futures.discard(future)
         except RuntimeError as e:
             # Handle "cannot schedule new futures after interpreter shutdown"
             self._safe_log('debug', f"Discovery executor error (likely during shutdown): {e}")
@@ -751,31 +781,55 @@ class CameraDetector(MQTTService, ThreadSafeService, SafeLoggingMixin):
         """Clean shutdown of service."""
         self._safe_log('info', "Shutting down Camera Detector")
         
-        # Set shutdown event first
+        # Set shutdown event first (this is inherited from ThreadSafeService)
         if hasattr(self, '_shutdown_event'):
             self._shutdown_event.set()
         
-        # Stop background tasks
+        # Stop background tasks first
         if hasattr(self, 'discovery_task'):
-            self.discovery_task.stop()
+            self.discovery_task.stop(timeout=2.0)
         if hasattr(self, 'health_check_task'):
-            self.health_check_task.stop()
+            self.health_check_task.stop(timeout=2.0)
         if hasattr(self, 'mac_tracking_task'):
-            self.mac_tracking_task.stop()
+            self.mac_tracking_task.stop(timeout=2.0)
             
         # Stop health reporting
         if hasattr(self, 'health_reporter'):
             self.health_reporter.stop_health_reporting()
             
-        # Shutdown executors
+        # Cancel any active futures before shutting down executors
+        if hasattr(self, '_active_futures') and hasattr(self, '_executor_lock'):
+            with self._executor_lock:
+                for future in list(self._active_futures):
+                    try:
+                        future.cancel()
+                    except Exception:
+                        pass
+                self._active_futures.clear()
+        
+        # Shutdown executors with proper error handling
         if hasattr(self, '_thread_executor'):
-            self._thread_executor.shutdown(wait=False)
+            try:
+                self._thread_executor.shutdown(wait=True, cancel_futures=True)
+            except Exception as e:
+                self._safe_log('debug', f"Thread executor shutdown error: {e}")
+                
         if hasattr(self, '_process_executor'):
-            self._process_executor.shutdown(wait=False)
+            try:
+                self._process_executor.shutdown(wait=True, cancel_futures=True)
+            except Exception as e:
+                self._safe_log('debug', f"Process executor shutdown error: {e}")
+        
+        # Shutdown base services (order matters: ThreadSafeService first to stop threads)
+        try:
+            ThreadSafeService.shutdown(self)
+        except Exception as e:
+            self._safe_log('debug', f"ThreadSafeService shutdown error: {e}")
             
-        # Shutdown base services
-        ThreadSafeService.shutdown(self)
-        MQTTService.shutdown(self)
+        try:
+            MQTTService.shutdown(self)
+        except Exception as e:
+            self._safe_log('debug', f"MQTTService shutdown error: {e}")
         
         self._safe_log('info', "Camera Detector shutdown complete")
         

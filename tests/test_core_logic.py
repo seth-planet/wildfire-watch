@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'fire_consensus'))
 sys.path.insert(0, str(Path(__file__).parent))
 
 # Import test helpers
-from helpers import mqtt_test_environment, MqttMessageListener
+from test_utils.helpers import mqtt_test_environment, MqttMessageListener
 
 # Import consensus classes
 from consensus import Detection, CameraState, FireConsensusConfig, FireConsensus

@@ -64,6 +64,13 @@ test_*.py
 *_temp.py
 *_debug.py
 simple_*.py
+*.bak
+*.tmp
+*.temp
+*.old
+*~
+conversion_log.txt
+git_add_recommendations.md
 
 # Documentation (temporary)
 *_PLAN.md
@@ -72,6 +79,13 @@ simple_*.py
 *_STATUS.md
 *_GUIDE.md
 *_CHECKLIST.md
+*_ANALYSIS.md
+docs/*_summary.md
+docs/*_report.md
+output/*_summary.md
+output/*_report.md
+tests/*_summary.md
+tests/*_report.md
 
 # Model files
 *.onnx
@@ -84,6 +98,12 @@ simple_*.py
 wildfire_calibration_data.tar.gz
 converted_models/output/
 hailo_qat_output/
+converted_models/frigate_model_cache/
+
+# Utility module demos and examples
+utils/demo_*.py
+utils/*_example.py
+utils/README_*.md
 
 # Certificates (keep structure, ignore contents)
 certs/*.crt

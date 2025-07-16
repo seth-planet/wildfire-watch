@@ -72,9 +72,9 @@ from utils.model_naming import (
     determine_model_size_for_hardware, list_available_models
 )
 from utils.safe_logging import SafeLoggingMixin
+from utils.logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
+logger = setup_logging("hardware_detector")
 
 class HardwareDetector(SafeLoggingMixin):
     """Detects available hardware acceleration for AI inference and video decoding.

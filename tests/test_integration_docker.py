@@ -14,12 +14,8 @@ import paho.mqtt.client as mqtt
 from typing import Dict, List, Optional
 
 # Import parallel test utilities
-try:
-    from helpers import ParallelTestContext, DockerContainerManager
-    from topic_namespace import create_namespaced_client
-except ImportError:
-    from tests.helpers import ParallelTestContext, DockerContainerManager
-    from tests.topic_namespace import create_namespaced_client
+from test_utils.helpers import ParallelTestContext, DockerContainerManager
+from test_utils.topic_namespace import create_namespaced_client
 
 class DockerIntegrationTest:
     """Test integration with Docker containers"""
@@ -104,7 +100,11 @@ class DockerIntegrationTest:
             pass
             
         # Create mosquitto config that listens on all interfaces
-        mosquitto_config = "listener 1883 0.0.0.0\nallow_anonymous true\n"
+        mosquitto_config = """listener 1883 0.0.0.0
+allow_anonymous true
+log_type all
+log_dest stdout
+"""
         
         # Create and start container with custom config using dynamic port
         container = self.docker_client.containers.run(

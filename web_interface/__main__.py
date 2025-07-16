@@ -6,16 +6,13 @@ import logging
 import os
 import sys
 
-# Import safe logging
+# Import logging utilities
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.safe_logging import safe_log
+from utils.logging_config import setup_logging
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Set up standardized logging
+logger = setup_logging("web_interface", format_string="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # Print to stderr to ensure visibility
 print("web_interface.__main__ module loaded", file=sys.stderr)

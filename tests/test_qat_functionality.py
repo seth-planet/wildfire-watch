@@ -15,6 +15,7 @@ import tempfile
 import shutil
 import json
 import sys
+import os
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock, call
 import torch
@@ -50,7 +51,7 @@ def get_complete_test_config(output_dir='/tmp', qat_enabled=True, qat_start_epoc
             'calibration_batches': 100
         },
         'dataset': {
-            'data_dir': '/tmp/dataset',
+            'data_dir': os.path.join(tempfile.gettempdir(), "dataset"),
             'train_images_dir': 'images/train',
             'train_labels_dir': 'labels/train',
             'val_images_dir': 'images/val',
@@ -152,7 +153,7 @@ class QATCallbackTests(unittest.TestCase):
         # Without QAT
         converter_no_qat = EnhancedModelConverter(
             model_path='dummy.pt',
-            output_dir='/tmp/no_qat',
+            output_dir=os.path.join(tempfile.gettempdir(), "no_qat"),
             calibration_data='.',
             qat_enabled=False
         )
@@ -160,7 +161,7 @@ class QATCallbackTests(unittest.TestCase):
         # With QAT
         converter_qat = EnhancedModelConverter(
             model_path='dummy.pt',
-            output_dir='/tmp/qat',
+            output_dir=os.path.join(tempfile.gettempdir(), "qat"),
             calibration_data='.',
             qat_enabled=True
         )
@@ -323,7 +324,7 @@ class QATIntegrationTests(unittest.TestCase):
                 'calibration_batches': 100
             },
             'experiment_name': 'qat_test',
-            'output_dir': '/tmp/qat_test'
+            'output_dir': os.path.join(tempfile.gettempdir(), "qat_test")
         })
         
         # Verify QAT configuration is set

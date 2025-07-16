@@ -1,0 +1,4 @@
+fire
+smoke
+person
+vehicle

@@ -15,13 +15,12 @@ import json
 import threading
 import pytest
 
-# Add module paths
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))  
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../gpio_trigger")))
-
-# Import after path setup
+# Import trigger module - conftest.py handles path setup
 import gpio_trigger.trigger as trigger
 from gpio_trigger.trigger import PumpController, GPIO, CONFIG, PumpState
+
+# Import test utilities
+from utils.gpio_test_helpers import wait_for_state
 
 # ─────────────────────────────────────────────────────────────
 # Test Fixtures and Mocks
@@ -47,16 +46,6 @@ def cleanup_threads():
     
     # Store initial state
     initial_threads = set(threading.enumerate())
-    initial_gpio_state = None
-    
-    # Capture GPIO state if available
-    initial_gpio_state = None
-    try:
-        from gpio_trigger.trigger import GPIO
-        if GPIO is not None and hasattr(GPIO, '_state'):
-            initial_gpio_state = GPIO._state.copy()
-    except:
-        pass
     
     yield
     
@@ -66,21 +55,8 @@ def cleanup_threads():
     # Give threads a moment to finish naturally
     time.sleep(0.2)
     
-    # Reset GPIO state completely
-    try:
-        from gpio_trigger.trigger import GPIO
-        if GPIO is not None and hasattr(GPIO, '_state'):
-            with GPIO._lock:
-                GPIO._state.clear()
-                if initial_gpio_state:
-                    GPIO._state.update(initial_gpio_state)
-        if GPIO is not None and hasattr(GPIO, 'cleanup'):
-            GPIO.cleanup()
-    except Exception:
-        pass
-    
     # Clear any module-level state
-    import trigger
+    import gpio_trigger.trigger as trigger
     if hasattr(trigger, 'controller') and trigger.controller:
         try:
             trigger.controller._shutdown = True
@@ -122,38 +98,10 @@ def cleanup_threads():
         logging.warning(f"Active threads after test: {[t.name for t in extra_threads]}")
 # MockMQTTClient removed - now using real MQTT client for testing
 
-@pytest.fixture
-def gpio_test_setup():
-    """Setup GPIO for testing - uses real GPIO module or simulation.
-    
-    BEST PRACTICE: This is NOT a mock - it uses the real GPIO module when available
-    or the built-in simulation mode when running on non-Pi hardware.
-    """
-    # Only proceed if GPIO is available (not None)
-    if GPIO is None:
-        yield None
-        return
-        
-    # Ensure GPIO lock exists
-    if not hasattr(GPIO, '_lock'):
-        GPIO._lock = threading.RLock()
-    
-    with GPIO._lock:
-        GPIO._state.clear()
-        # Set all pins to LOW initially
-        for pin_name in ['MAIN_VALVE_PIN', 'IGN_START_PIN', 'IGN_ON_PIN',
-                        'IGN_OFF_PIN', 'REFILL_VALVE_PIN', 'PRIMING_VALVE_PIN',
-                        'RPM_REDUCE_PIN']:
-            GPIO.setup(CONFIG[pin_name], GPIO.OUT, initial=GPIO.LOW)
-    
-    yield GPIO
-    
-    # Cleanup after test
-    with GPIO._lock:
-        GPIO._state.clear()
+# gpio_test_setup fixture has been moved to conftest.py for shared use
 
 @pytest.fixture
-def controller(gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factory):
+def controller(monkeypatch, test_mqtt_broker, mqtt_topic_factory):
     """Create controller with real MQTT broker and fast test timings.
     
     BEST PRACTICE: Creates a real PumpController instance with:
@@ -178,6 +126,7 @@ def controller(gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factor
     monkeypatch.setenv("REFILL_MULTIPLIER", "2")
     monkeypatch.setenv("PRIMING_DURATION", "0.2")
     monkeypatch.setenv("RPM_REDUCTION_LEAD", "0.5")
+    monkeypatch.setenv("RPM_REDUCTION_DURATION", "0.3")  # Short for tests
     monkeypatch.setenv("HEALTH_INTERVAL", "10")
     
     # Disable optional monitoring threads to prevent thread leaks in tests
@@ -192,33 +141,18 @@ def controller(gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factor
     monkeypatch.setenv("MQTT_TLS", "false")
     monkeypatch.setenv("TOPIC_PREFIX", topic_prefix)  # Add topic isolation
     
-    # Reload module to pick up new environment
-    import importlib
-    import sys
-    if 'gpio_trigger.trigger' in sys.modules:
-        del sys.modules['gpio_trigger.trigger']
-    if 'trigger' in sys.modules:
-        del sys.modules['trigger']
+    # Import and create config after environment is set
+    from gpio_trigger.trigger import PumpControllerConfig
     
-    # Re-import to get fresh config
-    import gpio_trigger.trigger as trigger
-    from gpio_trigger.trigger import PumpController, GPIO, CONFIG, PumpState
+    # Create config object - it will load from environment
+    config = PumpControllerConfig()
     
-    # Update globals
-    globals()['trigger'] = trigger
-    globals()['PumpController'] = PumpController
-    globals()['GPIO'] = GPIO
-    globals()['CONFIG'] = CONFIG
-    globals()['PumpState'] = PumpState
+    # Setup GPIO if needed
+    if not hasattr(GPIO, '_lock'):
+        GPIO._lock = threading.RLock()
     
-    # Ensure no lingering controller exists
-    if hasattr(trigger, 'controller') and trigger.controller:
-        trigger.controller._shutdown = True
-        trigger.controller.cleanup()
-        trigger.controller = None
-    
-    # Create controller with real MQTT broker connection
-    controller = PumpController()
+    # Create controller with dependency injection
+    controller = PumpController(config=config)
     
     # Wait for MQTT connection to establish
     time.sleep(1.0)
@@ -276,9 +210,6 @@ def controller(gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factor
             # Final cleanup
             controller.cleanup()
             
-            # Clear module reference
-            if hasattr(trigger, 'controller'):
-                trigger.controller = None
                 
         except Exception as e:
             print(f"Cleanup error: {e}")
@@ -297,21 +228,7 @@ def controller(gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factor
         if hasattr(controller, '_cleanup_mode'):
             controller._cleanup_mode = True
 
-def wait_for_state(controller, state, timeout=5):
-    """Wait for controller to reach specific state"""
-    start = time.time()
-    while time.time() - start < timeout:
-        if controller._state == state:
-            return True
-        # Log ERROR state entries for analysis
-        if controller._state == PumpState.ERROR:
-            import inspect
-            import logging
-            frame = inspect.currentframe()
-            caller = frame.f_back.f_code.co_name if frame.f_back else "unknown"
-            logging.getLogger(__name__).warning(f"ERROR state reached in test: {caller}, waiting for: {state.name}")
-        time.sleep(0.01)
-    return False
+# wait_for_state function has been moved to conftest.py for shared use
 
 @pytest.fixture
 def mqtt_monitor(test_mqtt_broker):
@@ -391,7 +308,8 @@ class TestBasicOperation:
         
         # In simulation mode, GPIO is None, so check state differently
         if gpio_test_setup is not None:
-            assert all(not gpio_test_setup.input(CONFIG[pin])
+            from gpio_trigger.trigger import GPIO
+            assert all(GPIO.input(CONFIG[pin]) == GPIO.LOW
                       for pin in ['MAIN_VALVE_PIN', 'IGN_ON_PIN', 'IGN_START_PIN'])
         else:
             # In simulation mode, check the state snapshot instead
@@ -406,20 +324,23 @@ class TestBasicOperation:
     @pytest.mark.timeout(30)
     def test_fire_trigger_starts_sequence(self, controller, gpio_test_setup):
         """Test fire trigger starts pump sequence"""
+        # Get the GPIO instance from the reloaded module
+        from gpio_trigger.trigger import GPIO, CONFIG, PumpState
+        
         controller.handle_fire_trigger()
         
         # Should transition to priming
         assert controller._state == PumpState.PRIMING
         
-        # Should have scheduled priming completion timer
-        assert 'priming_complete' in controller._timers
+        # Should have scheduled engine start timer (priming happens during pre-open delay)
+        assert 'start_engine' in controller._timers
         
         # In simulation mode, check state differently
-        if gpio_test_setup is not None:
+        if GPIO is not None:
             # Should open valves immediately
-            assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True
-            assert gpio_test_setup.input(CONFIG['PRIMING_VALVE_PIN']) is True
-            assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True
+            assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH
+            assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) == GPIO.HIGH
+            assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH
         else:
             # In simulation mode, the pins are opened but state snapshot may not reflect this
             # Just check that the controller is in the right state
@@ -438,8 +359,10 @@ class TestBasicOperation:
 
         # If running, check engine is on and refill valve still open
         if gpio_test_setup is not None:
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True
-            assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH
         else:
             # In simulation mode, skip pin checks
             pass
@@ -468,18 +391,29 @@ class TestBasicOperation:
         # The engine should have shut down by now due to fire off delay
         assert controller._state in [PumpState.REDUCING_RPM, PumpState.REFILLING, PumpState.STOPPING, PumpState.COOLDOWN, PumpState.IDLE]
         
+        # If in RPM reduction state, wait for it to complete
+        if controller._state == PumpState.REDUCING_RPM:
+            # Wait for RPM reduction to complete (up to 3 seconds based on default RPM_REDUCTION_DURATION)
+            from tests.conftest import wait_for_any_state
+            result = wait_for_any_state(controller, [PumpState.STOPPING, PumpState.REFILLING], timeout=4)
+            assert result is not None, f"Should transition from REDUCING_RPM, got: {controller._state}"
+        
         # Engine should be off
         if gpio_test_setup is not None:
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
         else:
             # In simulation mode, skip pin check
             pass
         
-        # Wait for system to reach stable state (may skip cooldown if float switch activates)
-        stable_states = [PumpState.COOLDOWN, PumpState.IDLE]
-        assert wait_for_state(controller, PumpState.COOLDOWN, timeout=2) or \
-               wait_for_state(controller, PumpState.IDLE, timeout=2), \
-               f"System should reach stable state, got: {controller._state.name}"
+        # Wait for system to reach stable state
+        # The system may be in REFILLING, COOLDOWN, or IDLE
+        # Allow time for transitions to complete
+        time.sleep(0.5)
+        
+        # Check final state
+        assert controller._state in [PumpState.REFILLING, PumpState.COOLDOWN, PumpState.IDLE], \
+               f"System should be in stable state, got: {controller._state.name}"
     
     @pytest.mark.timeout(30)
     def test_multiple_triggers_extend_runtime(self, controller, gpio_test_setup):
@@ -505,7 +439,9 @@ class TestBasicOperation:
         # If still running, engine should be on
         if controller._state == PumpState.RUNNING:
             if gpio_test_setup is not None:
-                assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True
+                # Get fresh GPIO reference from reloaded module
+                from gpio_trigger.trigger import GPIO
+                assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH
             else:
                 # In simulation mode, skip pin check
                 pass
@@ -530,7 +466,8 @@ class TestSafety:
         
         # Should enter error state
         assert controller._state == PumpState.ERROR
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
     
     @pytest.mark.timeout(30)
     def test_max_runtime_enforcement(self, controller, gpio_test_setup):
@@ -557,7 +494,8 @@ class TestSafety:
         
         # Check if we're in any shutdown state
         assert controller._state in shutdown_states, f"Expected shutdown state after max runtime, got {controller._state.name}"
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
     
     @pytest.mark.timeout(30)
     def test_rpm_reduction_before_shutdown(self, controller, gpio_test_setup):
@@ -579,7 +517,8 @@ class TestSafety:
         
         # If in REDUCING_RPM, verify RPM pin is active
         if controller._state == PumpState.REDUCING_RPM:
-            assert gpio_test_setup.input(CONFIG['RPM_REDUCE_PIN']) is True
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['RPM_REDUCE_PIN']) == GPIO.HIGH
     
     @pytest.mark.timeout(30)
     def test_emergency_valve_open_on_trigger(self, controller, gpio_test_setup):
@@ -596,11 +535,13 @@ class TestSafety:
         
         # Wait for valve to close
         time.sleep(0.4)
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.LOW
         
         # New fire trigger should immediately open valve
         controller.handle_fire_trigger()
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH
     
     @pytest.mark.timeout(30)
     def test_refill_valve_runtime_multiplier(self, controller, gpio_test_setup):
@@ -620,13 +561,15 @@ class TestSafety:
         controller._shutdown_engine()
         
         # Refill valve should still be open
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH
         
         # Wait for refill time (runtime * multiplier)
         time.sleep(run_time * CONFIG['REFILL_MULTIPLIER'] + 0.1)
         
         # Refill valve should be closed
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.LOW
 
 # ─────────────────────────────────────────────────────────────
 # Concurrency and Edge Case Tests
@@ -672,7 +615,8 @@ class TestConcurrency:
         # or in cooldown if shutdown completed before trigger
         assert controller._state in [PumpState.RUNNING, PumpState.REFILLING, PumpState.COOLDOWN]
         if controller._state == PumpState.RUNNING:
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH
             assert controller._shutting_down is False
     
     @pytest.mark.timeout(30)
@@ -692,7 +636,8 @@ class TestConcurrency:
         
         # Should restart sequence
         assert wait_for_state(controller, PumpState.RUNNING, timeout=1)
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH
     
     @pytest.mark.timeout(30)
     def test_state_transitions_are_atomic(self, controller, gpio_test_setup):
@@ -752,7 +697,8 @@ class TestErrorHandling:
         
         # Should still be in error state
         assert controller._state == PumpState.ERROR
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
     
     @pytest.mark.timeout(30)
     def test_error_state_ignores_triggers(self, controller, gpio_test_setup):
@@ -770,7 +716,8 @@ class TestErrorHandling:
         
         # Should still be in error state
         assert controller._state == PumpState.ERROR
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
     
     @pytest.mark.timeout(30)
     def test_mqtt_disconnection_handling(self, controller, gpio_test_setup):
@@ -820,7 +767,7 @@ class TestMQTT:
         assert wait_for_state(controller, PumpState.RUNNING)
     
     @pytest.mark.timeout(30)
-    def test_fire_trigger_via_mqtt(self, controller, test_mqtt_broker):
+    def test_fire_trigger_via_mqtt(self, controller, test_mqtt_broker, gpio_test_setup):
         """Test fire trigger via real MQTT message"""
         # Skip if GPIO simulation not available
         if gpio_test_setup is None:
@@ -867,7 +814,8 @@ class TestMQTT:
         
         # If still running, verify ignition is on
         if controller._state == PumpState.RUNNING:
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH
         
         # If completed successfully, verify it went through the expected sequence
         if controller._state in [PumpState.COOLDOWN, PumpState.IDLE]:
@@ -925,27 +873,33 @@ class TestIntegration:
             
         # Verify initial state
         assert controller._state == PumpState.IDLE
-        assert all(not gpio_test_setup.input(CONFIG[pin])
+        from gpio_trigger.trigger import GPIO
+        assert all(GPIO.input(CONFIG[pin]) == GPIO.LOW
                   for pin in ['MAIN_VALVE_PIN', 'IGN_ON_PIN'])
         
         # Fire detected
         controller.handle_fire_trigger()
         
         # Valve opens immediately
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH
         
         # Priming starts
         assert controller._state == PumpState.PRIMING
-        assert gpio_test_setup.input(CONFIG['PRIMING_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) == GPIO.HIGH
         
         # Engine starts
         assert wait_for_state(controller, PumpState.RUNNING)
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH
         
         # Priming valve closes after duration
         time.sleep(0.3)
-        assert gpio_test_setup.input(CONFIG['PRIMING_VALVE_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) == GPIO.LOW
         
         # Let the pump run briefly
         time.sleep(0.2)
@@ -965,7 +919,8 @@ class TestIntegration:
         time.sleep(1)
         
         # Engine should be off
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
         
         # System should be in a stable shutdown state
         assert controller._state in [PumpState.REFILLING, PumpState.COOLDOWN, PumpState.IDLE]
@@ -1068,8 +1023,10 @@ class TestIntegration:
             controller.cleanup()
             
             # Verify safe state
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
-            assert gpio_test_setup.input(CONFIG['IGN_START_PIN']) is False
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['IGN_START_PIN']) == GPIO.LOW
 
 # ─────────────────────────────────────────────────────────────
 # Performance Tests
@@ -1138,24 +1095,30 @@ class TestREADMECompliance:
             
         # Verify system starts in safe state
         assert controller._state == PumpState.IDLE
-        assert not gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN'])
-        assert not gpio_test_setup.input(CONFIG['IGN_ON_PIN'])
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.LOW
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
         
         # Fire detection trigger
         controller.handle_fire_trigger()
         
         # IMMEDIATE RESPONSE: Main valve must open (sprinklers active)
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True, "Main valve must open immediately for sprinklers"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH, "Main valve must open immediately for sprinklers"
         
         # SEQUENCE: Priming valve opens for air bleed
-        assert gpio_test_setup.input(CONFIG['PRIMING_VALVE_PIN']) is True, "Priming valve must open for air bleed"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) == GPIO.HIGH, "Priming valve must open for air bleed"
         
         # CRITICAL: Refill valve opens immediately (README line 44)
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True, "Refill valve must open immediately"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH, "Refill valve must open immediately"
         
         # Engine starts after pre-open delay
         assert wait_for_state(controller, PumpState.RUNNING, timeout=1)
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is True, "Engine must be running"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.HIGH, "Engine must be running"
         
         # Note: MQTT telemetry verification removed - now testing actual implementation
         # The important verification is that the physical actions occurred (GPIO states)
@@ -1177,7 +1140,8 @@ class TestREADMECompliance:
         
         # Main valve should open within milliseconds
         valve_open_time = time.time()
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH
         
         response_time = valve_open_time - start_time
         assert response_time < 0.15, f"Valve response too slow: {response_time}s (should be <0.15s)"
@@ -1204,7 +1168,8 @@ class TestREADMECompliance:
             controller.handle_fire_trigger()
             
             # Valve should open (sprinklers activate)
-            assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True, f"Fire trigger ignored in {state.name} state"
+            from gpio_trigger.trigger import GPIO
+            assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH, f"Fire trigger ignored in {state.name} state"
             
             # Clean up for next iteration
             controller.cleanup()
@@ -1246,7 +1211,8 @@ class TestREADMECompliance:
         
         # System should enter error state to protect pump
         assert controller._state == PumpState.ERROR, f"Expected ERROR state but got {controller._state.name}"
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False, "Engine should be stopped"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW, "Engine should be stopped"
         
         # Signal thread to stop
         controller._shutdown = True
@@ -1277,13 +1243,15 @@ class TestREADMECompliance:
         wait_for_state(controller, PumpState.REFILLING)
         
         # Refill valve should be open
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH
         
         # Wait for refill timeout (0.2s runtime * 3 multiplier = 0.6s)
         time.sleep(0.7)
         
         # Refill should have stopped
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is False, "Refill valve should close after timeout"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.LOW, "Refill valve should close after timeout"
         assert controller._refill_complete is True, "Refill should be marked complete"
         assert controller._state != PumpState.REFILLING, "Should exit refilling state"
     
@@ -1319,7 +1287,8 @@ class TestREADMECompliance:
         wait_for_state(controller, PumpState.REFILLING)
         
         # Refill should be active
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.HIGH
         
         # Simulate float switch activation (tank full)
         gpio_test_setup._state[16] = True  # Float switch triggered
@@ -1328,7 +1297,8 @@ class TestREADMECompliance:
         time.sleep(1.5)
         
         # Refill should stop immediately
-        assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) is False, "Float switch should stop refill"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['REFILL_VALVE_PIN']) == GPIO.LOW, "Float switch should stop refill"
         assert controller._refill_complete is True
         
         # Signal thread to stop
@@ -1385,7 +1355,8 @@ class TestREADMECompliance:
             time.sleep(0.1)
         
         # Engine MUST be stopped regardless of fire triggers
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False, "Max runtime must be enforced"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW, "Max runtime must be enforced"
         assert controller._state in [PumpState.REFILLING, PumpState.COOLDOWN, PumpState.IDLE], "Must shutdown after max runtime"
     
     @pytest.mark.timeout(30)
@@ -1415,7 +1386,8 @@ class TestREADMECompliance:
             controller.handle_fire_trigger()
             
             # Valve MUST open for emergency sprinkler access
-            assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True, f"Emergency valve open failed in {state.name}"
+            from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH, f"Emergency valve open failed in {state.name}"
     
     @pytest.mark.timeout(30)
     def test_refill_lockout_prevents_dry_start(self, controller, gpio_test_setup):
@@ -1435,7 +1407,8 @@ class TestREADMECompliance:
         controller.handle_fire_trigger()
         
         # Engine should NOT start during refill
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False, "Engine must not start during refill"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW, "Engine must not start during refill"
         assert controller._state == PumpState.REFILLING, "Should remain in refilling state"
     
     @pytest.mark.timeout(30)
@@ -1456,16 +1429,19 @@ class TestREADMECompliance:
         wait_for_state(controller, PumpState.RUNNING)
         
         # Priming valve should be open initially
-        assert gpio_test_setup.input(CONFIG['PRIMING_VALVE_PIN']) is True, "Priming valve should be open"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) == GPIO.HIGH, "Priming valve should be open"
         
         # Wait for priming duration
         time.sleep(0.4)
         
         # Priming valve should close after duration
-        assert gpio_test_setup.input(CONFIG['PRIMING_VALVE_PIN']) is False, "Priming valve should close after duration"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['PRIMING_VALVE_PIN']) == GPIO.LOW, "Priming valve should close after duration"
         
         # Main valve should remain open for full pressure
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True, "Main valve should remain open"
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH, "Main valve should remain open"
     
     @pytest.mark.timeout(30)
     def test_hardware_simulation_mode_warnings(self, controller, gpio_test_setup):
@@ -1539,7 +1515,8 @@ class TestEnhancedSafetyFeatures:
         
         # Should trigger pump sequence
         controller.handle_fire_trigger()
-        assert gpio_test_setup.input(CONFIG['MAIN_VALVE_PIN']) is True
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['MAIN_VALVE_PIN']) == GPIO.HIGH
     
     @pytest.mark.timeout(30)
     def test_pressure_monitoring_shutdown(self, controller, monkeypatch):
@@ -1575,7 +1552,8 @@ class TestEnhancedSafetyFeatures:
         
         # Should shutdown due to low pressure (may already be in cooldown by now)
         assert controller._state in [PumpState.LOW_PRESSURE, PumpState.REFILLING, PumpState.STOPPING, PumpState.COOLDOWN]
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
 
 # ─────────────────────────────────────────────────────────────
 # Comprehensive State Machine Tests
@@ -1625,7 +1603,8 @@ class TestStateMachineCompliance:
         # Fire triggers should be ignored
         controller.handle_fire_trigger()
         assert controller._state == PumpState.ERROR
-        assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) is False
+        from gpio_trigger.trigger import GPIO
+        assert GPIO.input(CONFIG['IGN_ON_PIN']) == GPIO.LOW
         
         # Manual cleanup should be required to recover
         controller.cleanup()

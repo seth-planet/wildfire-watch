@@ -1431,6 +1431,9 @@ try:
     converter.inference_input_type = tf.uint8
     converter.inference_output_type = tf.uint8
     
+    # Force UINT8 quantization for Frigate compatibility
+    converter.target_spec.supported_types = [tf.uint8]
+    
     # Advanced settings for better quantization
     converter.experimental_new_converter = True
     converter.experimental_new_quantizer = True  # Better quantization algorithm

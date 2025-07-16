@@ -16,10 +16,10 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 # Import test utilities
 try:
-    from .hailo_test_utils import VideoDownloader, HailoDevice
+    from .test_utils.hailo_test_utils import VideoDownloader, HailoDevice
 except ImportError:
     # Running as script, not module
-    from hailo_test_utils import VideoDownloader, HailoDevice
+    from test_utils.hailo_test_utils import VideoDownloader, HailoDevice
 
 try:
     from hailo_platform import (

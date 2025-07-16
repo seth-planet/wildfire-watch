@@ -71,9 +71,9 @@ from typing import Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from utils.command_runner import run_command, CommandError
 from utils.safe_logging import SafeLoggingMixin
+from utils.logging_config import setup_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-logger = logging.getLogger(__name__)
+logger = setup_logging("storage_manager")
 
 # Import USB manager functionality
 from usb_manager import USBStorageManager

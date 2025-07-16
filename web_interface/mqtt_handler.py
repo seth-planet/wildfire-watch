@@ -17,9 +17,10 @@ from utils.mqtt_service import MQTTService
 from utils.health_reporter import ServiceHealthReporter
 
 from .config import get_config
-from .models import MQTTEvent, SystemStatus, ServiceHealth, GPIOState
+from .models import MQTTEvent, SystemStatus, ServiceHealth, GPIOState, EventType
+from utils.logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class MQTTHandler(MQTTService):
@@ -106,12 +107,13 @@ class MQTTHandler(MQTTService):
                 self._safe_log('debug', f"Rate limit exceeded for topic: {topic}")
                 return
                 
-            # Create event object
+            # Create event object - convert string to EventType enum
+            event_type_str = self._categorize_event(topic)
             event = MQTTEvent(
                 timestamp=datetime.utcnow(),
                 topic=topic,
                 payload=payload,
-                event_type=self._categorize_event(topic)
+                event_type=EventType(event_type_str)
             )
             
             # Add to buffer
@@ -174,6 +176,10 @@ class MQTTHandler(MQTTService):
         Returns:
             Event category
         """
+        # Remove topic prefix if present
+        if hasattr(self, '_topic_prefix') and self._topic_prefix and topic.startswith(self._topic_prefix):
+            topic = topic[len(self._topic_prefix):].lstrip('/')
+        
         if topic.startswith('fire/'):
             return 'fire'
         elif topic.startswith('gpio/'):

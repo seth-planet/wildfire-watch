@@ -23,7 +23,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 sys.path.append(str(Path(__file__).parent))
 
 try:
-    from hailo_test_utils import VideoDownloader, HailoDevice
+    from test_utils.hailo_test_utils import VideoDownloader, HailoDevice
 except ImportError:
     print("Warning: hailo_test_utils not found")
     
@@ -159,7 +159,7 @@ class DockerE2ETest:
         container = self.docker_client.containers.run(
             "eclipse-mosquitto:2.0",
             name="test-mqtt",
-            ports={'1883/tcp': 1883},
+            ports={'1883/tcp': None},
             detach=True,
             remove=False,
             command=["mosquitto", "-c", "/mosquitto-no-auth.conf"]
@@ -296,7 +296,7 @@ class DockerE2ETest:
         container = self.docker_client.containers.run(
             "ghcr.io/blakeblackshear/frigate:stable-hailo8l",
             name="test-frigate",
-            ports={'5000/tcp': 5000, '8554/tcp': 8554},
+            ports={'5000/tcp': None, '8554/tcp': 8554},
             volumes=volumes,
             devices=['/dev/hailo0:/dev/hailo0:rwm'],
             privileged=True,

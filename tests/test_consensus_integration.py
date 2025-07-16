@@ -15,11 +15,8 @@ from typing import List, Dict, Any
 from unittest import mock
 import paho.mqtt.client as mqtt
 
-# Add consensus module to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../fire_consensus")))
-
-# Import after path setup
-from consensus import FireConsensus, Detection, CameraState, FireConsensusConfig
+# Note: We'll import FireConsensus dynamically in fixtures after env vars are set
+# This prevents ConnectionRefusedError from using default localhost:1883
 
 logger = logging.getLogger(__name__)
 
@@ -66,18 +63,22 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'false')
     monkeypatch.setenv('COOLDOWN_PERIOD', '60')
     
-    # Create consensus service
-    consensus = FireConsensus()
+    # Ensure broker is running before creating consensus
+    assert test_mqtt_broker.is_running(), "MQTT broker not running"
+    logger.info(f"MQTT broker running on {test_mqtt_broker.host}:{test_mqtt_broker.port}")
     
-    # Wait for MQTT connection with verification
-    start_time = time.time()
-    connected = False
-    while time.time() - start_time < 10:
-        if hasattr(consensus, "_mqtt_connected") and consensus._mqtt_connected:
-            connected = True
-            time.sleep(1.0)  # Give extra time for subscriptions
-            break
-        time.sleep(0.1)
+    # Import FireConsensus after environment variables are set
+    # This ensures the configuration picks up the test broker settings
+    from fire_consensus.consensus import FireConsensus
+    
+    # Create consensus service with auto_connect=False to prevent immediate connection
+    consensus = FireConsensus(auto_connect=False)
+    
+    # Now initialize the MQTT connection after environment is set up
+    consensus._initialize_mqtt_connection()
+    
+    # Wait for MQTT connection using the proper method
+    connected = consensus.wait_for_connection(timeout=10.0)
     
     if not connected:
         logger.warning(f"Consensus service may not be connected (prefix: {prefix})")
@@ -117,53 +118,29 @@ def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
     monkeypatch.setenv('COOLDOWN_PERIOD', '5')
     
+    # Ensure broker is running before creating consensus
+    assert test_mqtt_broker.is_running(), "MQTT broker not running"
+    logger.info(f"MQTT broker running on {test_mqtt_broker.host}:{test_mqtt_broker.port}")
+    
+    # Import FireConsensus after environment variables are set
+    from fire_consensus.consensus import FireConsensus
+    
     # Create consensus with unique service name to avoid conflicts
-    consensus = FireConsensus()
+    consensus = FireConsensus(auto_connect=False)
     
-    # Wait for MQTT connection with better verification
-    start_time = time.time()
-    connected = False
-    connection_verified = False
+    # Now initialize the MQTT connection after environment is set up
+    consensus._initialize_mqtt_connection()
     
-    # First wait for basic connection
-    while time.time() - start_time < 10:
-        if hasattr(consensus, "_mqtt_connected") and consensus._mqtt_connected:
-            connected = True
-            break
-        time.sleep(0.1)
-    
-    # Then verify the connection is working
-    if connected:
-        verify_topic = f"{prefix}/test/verify"
-        verify_event = threading.Event()
-        
-        # Subscribe to verify topic
-        def verify_callback(client, userdata, msg):
-            if verify_topic in msg.topic:
-                verify_event.set()
-        
-        # Create a temporary client to verify
-        verify_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"verify_{unique_suffix}")
-        verify_client.on_message = verify_callback
-        verify_client.connect(test_mqtt_broker.host, test_mqtt_broker.port)
-        verify_client.subscribe(verify_topic)
-        verify_client.loop_start()
-        
-        # Try to publish through consensus
-        try:
-            if hasattr(consensus, 'publish_message'):
-                consensus.publish_message(f"test/verify", {"test": "connection"})
-                connection_verified = verify_event.wait(timeout=2)
-        except:
-            pass
-        
-        verify_client.loop_stop()
-        verify_client.disconnect()
+    # Wait for MQTT connection using the proper method
+    connected = consensus.wait_for_connection(timeout=10.0)
+    connection_verified = connected
     
     if not connection_verified:
-        logger.warning(f"Consensus service may not be fully connected to MQTT (prefix: {prefix})")
+        logger.warning(f"Consensus service not connected to MQTT (prefix: {prefix})")
     else:
-        logger.info(f"Consensus service connected and verified (prefix: {prefix})")
+        logger.info(f"Consensus service connected successfully (prefix: {prefix})")
+        # Give a bit of time for subscriptions to complete
+        time.sleep(0.5)
     
     yield consensus, prefix
     
@@ -637,9 +614,9 @@ class TestZoneBasedActivation:
         
         # Import after environment setup
         import importlib
-        if 'consensus' in sys.modules:
-            del sys.modules['consensus']
-        from consensus import FireConsensus
+        if 'fire_consensus.consensus' in sys.modules:
+            del sys.modules['fire_consensus.consensus']
+        from fire_consensus.consensus import FireConsensus
         
         # Create MQTT subscriber to capture trigger messages
         received_messages = []
@@ -660,10 +637,15 @@ class TestZoneBasedActivation:
         time.sleep(0.5)
         
         # Create consensus instance
-        consensus = FireConsensus()
+        consensus = FireConsensus(auto_connect=False)
+        
+        # Initialize connection after environment is set
+        consensus._initialize_mqtt_connection()
         
         # Wait for consensus to connect
-        time.sleep(1.0)
+        connected = consensus.wait_for_connection(timeout=5.0)
+        if not connected:
+            raise RuntimeError("Failed to connect consensus to MQTT broker")
         
         # Simulate fire detections from multiple cameras
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_zone_publisher")
@@ -720,9 +702,9 @@ class TestZoneBasedActivation:
         
         # Import after environment setup
         import importlib
-        if 'consensus' in sys.modules:
-            del sys.modules['consensus']
-        from consensus import FireConsensus
+        if 'fire_consensus.consensus' in sys.modules:
+            del sys.modules['fire_consensus.consensus']
+        from fire_consensus.consensus import FireConsensus
         
         # Create MQTT subscriber
         received_messages = []
@@ -743,10 +725,15 @@ class TestZoneBasedActivation:
         time.sleep(0.5)
         
         # Create consensus instance
-        consensus = FireConsensus()
+        consensus = FireConsensus(auto_connect=False)
+        
+        # Initialize connection after environment is set
+        consensus._initialize_mqtt_connection()
         
         # Wait for consensus to connect
-        time.sleep(1.0)
+        connected = consensus.wait_for_connection(timeout=5.0)
+        if not connected:
+            raise RuntimeError("Failed to connect consensus to MQTT broker")
         
         # Send detection to trigger
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_nozone_publisher")
@@ -801,9 +788,9 @@ class TestSingleCameraMode:
         
         # Import after environment setup
         import importlib
-        if 'consensus' in sys.modules:
-            del sys.modules['consensus']
-        from consensus import FireConsensus
+        if 'fire_consensus.consensus' in sys.modules:
+            del sys.modules['fire_consensus.consensus']
+        from fire_consensus.consensus import FireConsensus
         
         # Set up MQTT monitoring
         received_triggers = []
@@ -823,8 +810,13 @@ class TestSingleCameraMode:
         time.sleep(0.5)
         
         # Create consensus instance
-        consensus = FireConsensus()
-        time.sleep(1.0)
+        consensus = FireConsensus(auto_connect=False)
+        consensus._initialize_mqtt_connection()
+        
+        # Wait for connection
+        connected = consensus.wait_for_connection(timeout=5.0)
+        if not connected:
+            raise RuntimeError("Failed to connect consensus to MQTT broker")
         
         # Send detection from single camera
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_single_publisher")
@@ -872,9 +864,9 @@ class TestSingleCameraMode:
         
         # Import after environment setup
         import importlib
-        if 'consensus' in sys.modules:
-            del sys.modules['consensus']
-        from consensus import FireConsensus
+        if 'fire_consensus.consensus' in sys.modules:
+            del sys.modules['fire_consensus.consensus']
+        from fire_consensus.consensus import FireConsensus
         
         # Set up MQTT monitoring
         received_triggers = []
@@ -892,8 +884,13 @@ class TestSingleCameraMode:
         time.sleep(0.5)
         
         # Create consensus instance
-        consensus = FireConsensus()
-        time.sleep(1.0)
+        consensus = FireConsensus(auto_connect=False)
+        consensus._initialize_mqtt_connection()
+        
+        # Wait for connection
+        connected = consensus.wait_for_connection(timeout=5.0)
+        if not connected:
+            raise RuntimeError("Failed to connect consensus to MQTT broker")
         
         # Send detection from single camera
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_multi_publisher")

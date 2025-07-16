@@ -18,7 +18,7 @@ def pytest_configure(config):
 def pytest_runtest_teardown(item, nextitem):
     """Clean up after each test if marked as cleanup_critical."""
     if item.get_closest_marker("cleanup_critical"):
-        from process_cleanup import ProcessCleaner
+        from test_utils.process_cleanup import ProcessCleaner
         cleaner = ProcessCleaner()
         results = cleaner.cleanup_all()
         if sum(results.values()) > 0:
@@ -26,7 +26,7 @@ def pytest_runtest_teardown(item, nextitem):
 
 def pytest_sessionfinish(session, exitstatus):
     """Perform final cleanup at session end."""
-    from process_cleanup import ProcessCleaner
+    from test_utils.process_cleanup import ProcessCleaner
     
     logger.info("Performing final session cleanup...")
     cleaner = ProcessCleaner()
@@ -64,7 +64,7 @@ def resource_monitor(request):
                       f"+{process_increase} processes, +{memory_increase/1024/1024:.1f}MB")
         
         # Trigger cleanup for resource-heavy tests
-        from process_cleanup import ProcessCleaner
+        from test_utils.process_cleanup import ProcessCleaner
         cleaner = ProcessCleaner()
         cleaner.cleanup_mosquitto_processes()
         cleaner.cleanup_docker_containers()

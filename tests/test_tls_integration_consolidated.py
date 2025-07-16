@@ -22,7 +22,7 @@ from paho.mqtt.enums import CallbackAPIVersion
 PROJECT_ROOT = Path(__file__).parent.parent
 CERT_DIR = PROJECT_ROOT / "certs"
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
-MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_PORT = int(os.getenv("MQTT_PORT", "0"))
 MQTT_TLS_PORT = int(os.getenv("MQTT_TLS_PORT", "8883"))
 
 

@@ -319,8 +319,18 @@ class TestSuperGradientsIntegration(unittest.TestCase):
             
             # Check if SafeDataLoaderWrapper is fixing invalid indices
             if len(targets) > 0 and targets.dim() == 2 and targets.shape[1] > 1:
-                class_indices = targets[:, 1]
-                # All indices should be valid now
+                # Determine which column has class indices based on format
+                if targets.shape[1] == 6:
+                    # Format: [batch_idx, x1, y1, x2, y2, class_id]
+                    class_indices = targets[:, 5]
+                elif targets.shape[1] == 5:
+                    # Format: [x1, y1, x2, y2, class_id]
+                    class_indices = targets[:, 4]
+                else:
+                    # Fallback
+                    class_indices = targets[:, 1]
+                
+                # All indices should be valid now (clamped by SafeDataLoaderWrapper)
                 self.assertTrue((class_indices >= 0).all())
                 self.assertTrue((class_indices < 32).all())
             
@@ -429,8 +439,18 @@ class TestSuperGradientsIntegration(unittest.TestCase):
         for images, targets in wrapped:
             batch_count += 1
             # Verify class indices are valid
-            if len(targets) > 0:
-                class_indices = targets[:, 1]
+            if len(targets) > 0 and targets.dim() == 2 and targets.shape[1] > 1:
+                # Determine which column has class indices based on format
+                if targets.shape[1] == 6:
+                    # Format: [batch_idx, x1, y1, x2, y2, class_id]
+                    class_indices = targets[:, 5]
+                elif targets.shape[1] == 5:
+                    # Format: [x1, y1, x2, y2, class_id]
+                    class_indices = targets[:, 4]
+                else:
+                    # Fallback
+                    class_indices = targets[:, 1]
+                
                 self.assertTrue((class_indices >= 0).all())
                 self.assertTrue((class_indices < 32).all())
             
@@ -484,7 +504,7 @@ class TestSuperGradientsIntegration(unittest.TestCase):
         from unified_yolo_trainer import UnifiedYOLOTrainer
         
         trainer = UnifiedYOLOTrainer()
-        trainer.config.dataset['data_dir'] = str(self.dataset_path)
+        trainer.config['dataset']['data_dir'] = str(self.dataset_path)
         
         # Auto-detect classes
         class_info = trainer.auto_detect_classes()

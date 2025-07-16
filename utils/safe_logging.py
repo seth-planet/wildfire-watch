@@ -13,12 +13,109 @@ to provide a single source of truth for all safe logging functionality.
 import logging
 import sys
 import threading
-from typing import Optional, Dict
+import weakref
+from typing import Optional, Dict, Set, Callable
 
 
 # ============================================================================
 # Core Safe Logging Functionality (Production & Tests)
 # ============================================================================
+
+# Thread-local storage to prevent recursive logging during shutdown
+_thread_local = threading.local()
+
+
+def _is_handler_usable(handler: logging.Handler) -> bool:
+    """Check if a logging handler is usable and not closed.
+    
+    Args:
+        handler: The logging handler to check
+        
+    Returns:
+        True if the handler can be safely used, False otherwise
+    """
+    try:
+        # StreamHandler and FileHandler
+        if hasattr(handler, 'stream'):
+            stream = getattr(handler, 'stream', None)
+            if stream is None:
+                return False
+            if hasattr(stream, 'closed') and stream.closed:
+                return False
+            # Check if stream is writable
+            if hasattr(stream, 'writable') and not stream.writable():
+                return False
+            # Check for specific stream types
+            if stream in (sys.stdout, sys.stderr):
+                # Always consider stdout/stderr usable unless explicitly closed
+                if hasattr(stream, 'closed') and stream.closed:
+                    return False
+            return True
+            
+        # SocketHandler
+        elif hasattr(handler, 'sock'):
+            sock = getattr(handler, 'sock', None)
+            if sock is None:
+                return False
+            # Check if socket is closed
+            try:
+                # This will fail if socket is closed
+                sock.getpeername()
+                return True
+            except:
+                return False
+                
+        # SMTPHandler
+        elif hasattr(handler, 'mailhost'):
+            # SMTP handlers are generally stateless, consider usable
+            return True
+            
+        # SysLogHandler
+        elif hasattr(handler, 'socket'):
+            socket = getattr(handler, 'socket', None)
+            if socket is None:
+                # Unix socket syslog, consider usable
+                return True
+            # Network syslog, check socket
+            try:
+                socket.getpeername()
+                return True
+            except:
+                return False
+                
+        # QueueHandler
+        elif hasattr(handler, 'queue'):
+            queue = getattr(handler, 'queue', None)
+            if queue is None:
+                return False
+            # Check if queue is full (non-blocking check)
+            try:
+                return not queue.full()
+            except:
+                return True  # If we can't check, assume usable
+                
+        # MemoryHandler
+        elif hasattr(handler, 'buffer'):
+            # Memory handlers are generally always usable
+            return True
+            
+        # NullHandler
+        elif isinstance(handler, logging.NullHandler):
+            return True
+            
+        # HTTPHandler
+        elif hasattr(handler, 'host'):
+            # HTTP handlers are stateless, consider usable
+            return True
+            
+        # Unknown handler type - assume usable if it has emit method
+        else:
+            return hasattr(handler, 'emit') and callable(handler.emit)
+            
+    except Exception:
+        # If any check fails, consider handler unusable
+        return False
+
 
 def safe_log(logger: Optional[logging.Logger], level: str, message: str, 
              exc_info: bool = False) -> None:
@@ -34,28 +131,44 @@ def safe_log(logger: Optional[logging.Logger], level: str, message: str,
         message: Message to log
         exc_info: Whether to include exception information
     """
+    # Prevent recursive logging attempts during shutdown
+    if getattr(_thread_local, 'in_safe_log', False):
+        return
+        
+    _thread_local.in_safe_log = True
+    
     try:
-        # Check if logger exists and has handlers
-        if not logger or not hasattr(logger, 'handlers') or not logger.handlers:
+        # Check if logger exists and is not None
+        if not logger:
             return
             
-        # Check if logger is disabled
+        # Verify logger is still a valid Logger instance
+        if not isinstance(logger, logging.Logger):
+            return
+            
+        # Check if logger has been disabled
         if hasattr(logger, 'disabled') and logger.disabled:
             return
             
-        # Check if we have at least one usable handler
+        # Check if logging level would actually log this message
+        numeric_level = getattr(logging, level.upper(), logging.INFO)
+        if not logger.isEnabledFor(numeric_level):
+            return
+            
+        # Check if logger has handlers and they're not closed
+        if not hasattr(logger, 'handlers') or not logger.handlers:
+            return
+            
+        # Check each handler to ensure it's not closed
         usable_handler_found = False
         for handler in logger.handlers:
-            if hasattr(handler, 'stream'):
-                # StreamHandler and FileHandler
-                stream = getattr(handler, 'stream', None)
-                if stream and hasattr(stream, 'closed') and not stream.closed:
+            try:
+                if _is_handler_usable(handler):
                     usable_handler_found = True
                     break
-            else:
-                # Non-stream handlers (SocketHandler, QueueHandler, etc.) are assumed usable
-                usable_handler_found = True
-                break
+            except Exception:
+                # Handler check failed, skip this handler
+                continue
                 
         if not usable_handler_found:
             return
@@ -67,9 +180,15 @@ def safe_log(logger: Optional[logging.Logger], level: str, message: str,
             
     except (ValueError, AttributeError, OSError, RuntimeError, KeyError):
         # Silently ignore all logging errors during shutdown
-        # RuntimeError can occur if dict changes during iteration
-        # KeyError can occur if logger dict is modified during shutdown
+        # ValueError: I/O operation on closed file
+        # RuntimeError: dictionary changed size during iteration
+        # KeyError: logger might have been removed from logging registry
         pass
+    except Exception:
+        # Catch any other unexpected exceptions during logging
+        pass
+    finally:
+        _thread_local.in_safe_log = False
 
 
 class SafeLoggingMixin:
@@ -131,13 +250,161 @@ def check_logger_health(logger: Optional[logging.Logger]) -> bool:
     if not hasattr(logger, 'handlers') or not logger.handlers:
         return False
         
-    # Check if any handler is closed
+    # Check if any handler is usable
     for handler in logger.handlers:
-        if hasattr(handler, 'stream') and hasattr(handler.stream, 'closed'):
-            if handler.stream.closed:
-                return False
+        try:
+            if _is_handler_usable(handler):
+                return True
+        except Exception:
+            continue
                 
-    return True
+    return False
+
+
+class LoggerGuard:
+    """Context manager for safe logger state management.
+    
+    This context manager stores the state of a logger on entry and restores
+    it on exit, ensuring that any modifications during the context are
+    properly cleaned up.
+    
+    Example:
+        with LoggerGuard('my_logger') as logger:
+            # Use logger safely
+            logger.info('Test message')
+        # Logger state is restored here
+    """
+    
+    def __init__(self, logger_name: str):
+        """Initialize the guard with a logger name.
+        
+        Args:
+            logger_name: Name of the logger to guard
+        """
+        self.logger_name = logger_name
+        self.logger = None
+        self.original_handlers = []
+        self.original_level = None
+        self.original_propagate = None
+        self.original_disabled = None
+        
+    def __enter__(self) -> logging.Logger:
+        """Enter the context and store logger state.
+        
+        Returns:
+            The logger instance
+        """
+        self.logger = logging.getLogger(self.logger_name)
+        
+        # Store original state
+        self.original_handlers = self.logger.handlers.copy()
+        self.original_level = self.logger.level
+        self.original_propagate = self.logger.propagate
+        self.original_disabled = getattr(self.logger, 'disabled', False)
+        
+        return self.logger
+        
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit the context and restore logger state.
+        
+        Args:
+            exc_type: Exception type if an exception occurred
+            exc_val: Exception value if an exception occurred
+            exc_tb: Exception traceback if an exception occurred
+        """
+        if self.logger is None:
+            return
+            
+        try:
+            # Remove any handlers added during the context
+            for handler in self.logger.handlers[:]:
+                if handler not in self.original_handlers:
+                    try:
+                        self.logger.removeHandler(handler)
+                        if hasattr(handler, 'close'):
+                            handler.close()
+                    except Exception:
+                        pass
+            
+            # Restore original handlers
+            self.logger.handlers.clear()
+            for handler in self.original_handlers:
+                try:
+                    self.logger.addHandler(handler)
+                except Exception:
+                    pass
+            
+            # Restore other properties
+            self.logger.setLevel(self.original_level)
+            self.logger.propagate = self.original_propagate
+            if hasattr(self.logger, 'disabled'):
+                self.logger.disabled = self.original_disabled
+                
+        except Exception:
+            # Silently ignore any errors during restoration
+            pass
+
+
+# Global registry for cleanup callbacks
+_cleanup_registry: Set[weakref.ref] = set()
+_cleanup_lock = threading.Lock()
+
+
+def register_logger_for_cleanup(logger: logging.Logger, cleanup_callback: Optional[Callable] = None):
+    """Register a logger for cleanup during shutdown.
+    
+    Args:
+        logger: Logger to register
+        cleanup_callback: Optional callback to call during cleanup
+    """
+    with _cleanup_lock:
+        # Create weak reference to avoid keeping logger alive
+        weak_logger = weakref.ref(logger, lambda ref: _cleanup_registry.discard(ref))
+        _cleanup_registry.add(weak_logger)
+        
+        # Store cleanup callback if provided
+        if cleanup_callback:
+            # Store callback in logger itself (which weak ref points to)
+            logger._cleanup_callback = cleanup_callback
+
+
+def cleanup_all_registered_loggers():
+    """Clean up all registered loggers.
+    
+    This should be called during test teardown or service shutdown.
+    """
+    with _cleanup_lock:
+        # Copy set to avoid modification during iteration
+        refs = list(_cleanup_registry)
+        
+        for weak_logger in refs:
+            logger = weak_logger()
+            if logger is not None:
+                try:
+                    # Call custom cleanup callback if provided
+                    if hasattr(logger, '_cleanup_callback'):
+                        logger._cleanup_callback(logger)
+                    
+                    # Standard cleanup
+                    for handler in logger.handlers[:]:
+                        try:
+                            logger.removeHandler(handler)
+                            if hasattr(handler, 'close'):
+                                handler.close()
+                        except Exception:
+                            pass
+                            
+                    # Clear handlers
+                    logger.handlers.clear()
+                    
+                    # Disable logger
+                    logger.disabled = True
+                    
+                except Exception:
+                    pass
+        
+        # Clear registry
+        _cleanup_registry.clear()
 
 
 # ============================================================================

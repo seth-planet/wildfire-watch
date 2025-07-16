@@ -30,8 +30,6 @@ COPY gpio_trigger /app/gpio_trigger
 # Copy debug scripts
 COPY scripts/debug_mqtt_connection.py /scripts/
 COPY scripts/container_connectivity_test.py /scripts/
-COPY gpio_trigger/test_entrypoint.sh /test_entrypoint.sh
-RUN chmod +x /test_entrypoint.sh
 
 # Add root and app to Python path so modules can be imported
 ENV PYTHONPATH=/:/app

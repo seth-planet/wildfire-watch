@@ -21,8 +21,8 @@ import shutil
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from tests.conftest import has_tensorrt, has_camera_on_network
-from tests.mqtt_test_broker import MQTTTestBroker as TestMQTTBroker
-from tests.helpers import DockerContainerManager, ParallelTestContext
+from tests.test_utils.mqtt_test_broker import MQTTTestBroker as TestMQTTBroker
+from tests.test_utils.helpers import DockerContainerManager, ParallelTestContext
 
 
 class TestTensorRTGPU:

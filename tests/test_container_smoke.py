@@ -10,10 +10,7 @@ import docker
 import pytest
 from pathlib import Path
 
-# Add modules to path for testing
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../gpio_trigger")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../fire_consensus")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../camera_detector")))
+# Module imports handled by conftest.py
 
 
 class TestContainerSmoke:
@@ -77,11 +74,21 @@ class TestContainerSmoke:
     def test_frigate_base_image(self, docker_client):
         """Test Frigate base image is available"""
         try:
-            # Pull base image if needed
-            docker_client.images.pull("ghcr.io/blakeblackshear/frigate:stable")
-            assert True, "Frigate base image available"
+            # Check if image exists locally first
+            try:
+                docker_client.images.get("ghcr.io/blakeblackshear/frigate:stable")
+                print("Frigate base image available locally")
+            except docker.errors.ImageNotFound:
+                # Try to pull it
+                print("Frigate image not found locally, attempting to pull...")
+                try:
+                    docker_client.images.pull("ghcr.io/blakeblackshear/frigate:stable")
+                    print("Frigate base image pulled successfully")
+                except Exception as pull_error:
+                    print(f"Could not pull Frigate image: {pull_error}")
+                    pytest.skip(f"Could not access Frigate base image: {pull_error}")
         except docker.errors.APIError as e:
-            pytest.skip(f"Could not pull Frigate base image: {e}")
+            pytest.skip(f"Could not access Frigate base image: {e}")
 
 
 class TestServiceEnvironment:

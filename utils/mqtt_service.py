@@ -18,7 +18,7 @@ from typing import Optional, Callable, Dict, Any, List
 import paho.mqtt.client as mqtt
 
 from .config_base import SharedMQTTConfig
-from .safe_logging import SafeLoggingMixin
+from .safe_logging import SafeLoggingMixin, register_logger_for_cleanup
 
 
 class MQTTService(SafeLoggingMixin):
@@ -44,6 +44,9 @@ class MQTTService(SafeLoggingMixin):
         self.service_name = service_name
         self.config = config
         self.logger = logging.getLogger(service_name)
+        
+        # Register logger for cleanup
+        register_logger_for_cleanup(self.logger)
         
         # MQTT state
         self._mqtt_client: Optional[mqtt.Client] = None

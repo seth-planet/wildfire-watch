@@ -29,12 +29,17 @@ import numpy as np
 from dotenv import load_dotenv
 
 # Import base classes
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add parent directory to path if not already there
+parent_dir = os.path.join(os.path.dirname(__file__), '..')
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+    
 from utils.mqtt_service import MQTTService
 from utils.health_reporter import HealthReporter
 from utils.thread_manager import ThreadSafeService, SafeTimerManager
 from utils.config_base import ConfigBase, ConfigSchema
 from utils.safe_logging import SafeLoggingMixin
+from utils.logging_config import setup_logging
 
 load_dotenv()
 
@@ -280,7 +285,7 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
     4. Using SafeTimerManager for timer management
     """
     
-    def __init__(self):
+    def __init__(self, auto_connect=True):
         # Load configuration
         self.config = FireConsensusConfig()
         
@@ -294,6 +299,7 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
         self.trigger_count = 0
         self.consensus_events = deque(maxlen=1000)
         self.lock = threading.RLock()
+        self.health_reporter = None  # Initialize to None, will be set in _initialize_mqtt_connection
         
         # Setup MQTT with subscriptions
         subscriptions = [
@@ -323,6 +329,17 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
         
         self._safe_log('info', f"Fire Consensus configured: {self.config.service_id}")
         
+        # Only connect to MQTT if auto_connect is True (default behavior)
+        # This allows tests to create the service without immediate connection
+        if auto_connect:
+            self._initialize_mqtt_connection()
+            
+    def _initialize_mqtt_connection(self):
+        """Initialize MQTT connection and health reporting.
+        
+        This is separated from __init__ to allow tests to set up environment
+        variables before connection is attempted.
+        """
         # Connect to MQTT before creating health reporter
         # This ensures MQTT is ready for health messages
         try:
@@ -709,7 +726,7 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
         self._safe_log('info', "Shutting down Fire Consensus")
         
         # Stop health reporting
-        if hasattr(self, 'health_reporter'):
+        if hasattr(self, 'health_reporter') and self.health_reporter is not None:
             self.health_reporter.stop_health_reporting()
             
         # Cancel all timers
@@ -729,23 +746,20 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
 
 def main():
     """Main entry point for fire consensus service."""
-    # Setup logging
-    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
-    logging.basicConfig(
-        level=getattr(logging, log_level, logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    )
+    # Setup logging using standardized configuration
+    logger = setup_logging("fire_consensus")
     
     try:
+        # Create with auto_connect=True (default) for normal operation
         consensus = FireConsensus()
         
         # Wait for shutdown
         consensus.wait_for_shutdown()
         
     except KeyboardInterrupt:
-        logging.info("Received interrupt signal")
+        logger.info("Received interrupt signal")
     except Exception as e:
-        logging.error(f"Fatal error: {e}", exc_info=True)
+        logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
         if 'consensus' in locals():
