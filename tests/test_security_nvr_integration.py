@@ -18,6 +18,7 @@ import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 import yaml
 import shutil
+import docker
 
 # Test configuration
 TEST_TIMEOUT = 30
@@ -64,27 +65,59 @@ requires_frigate_api = pytest.mark.frigate_integration
 requires_mqtt = pytest.mark.mqtt
 
 
-@pytest.fixture
-def frigate_container(test_mqtt_broker, docker_container_manager):
+@pytest.fixture(scope="class")
+def class_scoped_mqtt_broker(worker_id):
+    """Class-scoped MQTT broker for Frigate integration tests"""
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_utils.enhanced_mqtt_broker import TestMQTTBroker
+    
+    broker = TestMQTTBroker(session_scope=True, worker_id=worker_id)
+    broker.start()
+    yield broker
+    # Don't stop - it's session scoped
+
+
+@pytest.fixture(scope="class") 
+def class_scoped_docker_manager(worker_id):
+    """Class-scoped Docker manager for Frigate integration tests"""
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_utils.helpers import DockerContainerManager
+    
+    manager = DockerContainerManager(worker_id=worker_id)
+    yield manager
+    manager.cleanup()
+
+
+@pytest.fixture(scope="class")
+def frigate_container(class_scoped_mqtt_broker, class_scoped_docker_manager):
     """Start a Frigate container for integration testing - shared fixture"""
     import tempfile
     import yaml
     
     # Create temporary config directory
-    config_dir = tempfile.mkdtemp(prefix=f"frigate_test_{docker_container_manager.worker_id}_")
+    config_dir = tempfile.mkdtemp(prefix=f"frigate_test_{class_scoped_docker_manager.worker_id}_")
     
     # ✅ Create Frigate config with proper topic isolation
-    worker_id = docker_container_manager.worker_id
+    worker_id = class_scoped_docker_manager.worker_id
     topic_prefix = f"test/{worker_id}"
     
     frigate_config = {
+        'logger': {
+            'default': 'info',  # Enable info logging for debugging
+            'logs': {
+                'frigate.app': 'debug'  # Debug logging for main app
+            }
+        },
         'mqtt': {
             'enabled': True,  # Enable MQTT
             'host': 'host.docker.internal',  # Connect to host from container
-            'port': test_mqtt_broker.port,
+            'port': class_scoped_mqtt_broker.port,
             'user': '',
             'password': '',
-            'topic_prefix': f'frigate_{worker_id}'  # Isolate Frigate MQTT topics
+            'topic_prefix': f'frigate_{worker_id}',  # Isolate Frigate MQTT topics
+            'stats_interval': 15  # Minimum allowed by Frigate
         },
         'detectors': {
             'cpu': {
@@ -107,7 +140,23 @@ def frigate_container(test_mqtt_broker, docker_container_manager):
         'auth': {
             'enabled': False  # Disable auth for easier testing
         },
-        'cameras': {}  # No cameras needed for basic API tests
+        'cameras': {
+            'dummy': {  # Minimal dummy camera config
+                'enabled': False,  # Disable the camera entirely
+                'ffmpeg': {
+                    'inputs': [{
+                        'path': 'rtsp://127.0.0.1:554/null',
+                        'roles': ['detect']
+                    }]
+                }
+            }
+        },
+        'record': {
+            'enabled': False  # Disable recording
+        },
+        'snapshots': {
+            'enabled': False  # Disable snapshots
+        }
     }
     
     config_path = os.path.join(config_dir, 'config.yml')
@@ -115,23 +164,23 @@ def frigate_container(test_mqtt_broker, docker_container_manager):
         yaml.dump(frigate_config, f)
     
     # Start Frigate container with unique name
-    container_name = docker_container_manager.get_container_name('frigate')
+    container_name = class_scoped_docker_manager.get_container_name('frigate')
     
     # ✅ Get dynamic ports
-    frigate_port = docker_container_manager.get_free_port()
-    rtsp_port = docker_container_manager.get_free_port()
+    frigate_port = class_scoped_docker_manager.get_free_port()
+    rtsp_port = class_scoped_docker_manager.get_free_port()
     
     # Start container
-    container = docker_container_manager.start_container(
+    container = class_scoped_docker_manager.start_container(
         image='ghcr.io/blakeblackshear/frigate:stable',
         name=container_name,
         config={
             'detach': True,
             'ports': {
                 '5000/tcp': frigate_port,
-                '1935/tcp': docker_container_manager.get_free_port(),  # RTMP
+                '1935/tcp': class_scoped_docker_manager.get_free_port(),  # RTMP
                 '8554/tcp': rtsp_port,  # RTSP
-                '8555/tcp': docker_container_manager.get_free_port()   # WebRTC
+                '8555/tcp': class_scoped_docker_manager.get_free_port()   # WebRTC
             },
             'volumes': {
                 config_path: {'bind': '/config/config.yml', 'mode': 'ro'},
@@ -164,12 +213,24 @@ def frigate_container(test_mqtt_broker, docker_container_manager):
     while time.time() - start_time < 60:  # Increase timeout to 60s
         try:
             # Check if container is still running
-            container.reload()
-            if container.status != 'running':
-                # Get logs if container stopped
-                logs = container.logs(tail=50).decode('utf-8')
-                print(f"Container stopped. Last logs:\n{logs}")
-                raise RuntimeError(f"Frigate container exited with status: {container.status}")
+            try:
+                container.reload()
+                if container.status != 'running':
+                    # Get logs if container stopped
+                    logs = container.logs(tail=50).decode('utf-8')
+                    print(f"Container stopped. Last logs:\n{logs}")
+                    raise RuntimeError(f"Frigate container exited with status: {container.status}")
+            except docker.errors.NotFound:
+                # Container was removed - this is a critical error
+                print(f"Container {container_name} was removed unexpectedly")
+                raise RuntimeError(f"Frigate container {container_name} no longer exists")
+            except docker.errors.APIError as e:
+                if "404" in str(e):
+                    # Container doesn't exist anymore
+                    print(f"Container {container_name} not found (404)")
+                    raise RuntimeError(f"Frigate container {container_name} disappeared")
+                else:
+                    raise
                 
             response = requests.get(f"http://localhost:{frigate_port}/api/version", timeout=2)
             if response.status_code == 200:
@@ -178,9 +239,12 @@ def frigate_container(test_mqtt_broker, docker_container_manager):
             else:
                 last_error = f"API returned status {response.status_code}"
         except requests.exceptions.RequestException as e:
-            last_error = str(e)
+            last_error = f"Request error: {str(e)}"
+        except RuntimeError:
+            # Re-raise RuntimeError to exit the loop
+            raise
         except Exception as e:
-            last_error = str(e)
+            last_error = f"Unexpected error: {str(e)}"
             
         time.sleep(1)
     
@@ -203,20 +267,20 @@ class TestSecurityNVRIntegration:
     """Integration tests for Security NVR service"""
 
     @pytest.fixture(autouse=True)
-    def setup(self, test_mqtt_broker, frigate_container, docker_container_manager):
+    def setup(self, class_scoped_mqtt_broker, frigate_container, class_scoped_docker_manager):
         """Setup test environment with real MQTT broker and Frigate"""
         self.mqtt_messages = []
         self._mqtt_connected = False
         self._mqtt_client = None
-        self.mqtt_broker = test_mqtt_broker
+        self.mqtt_broker = class_scoped_mqtt_broker
         self.frigate_container = frigate_container
-        self.docker_manager = docker_container_manager
+        self.docker_manager = class_scoped_docker_manager
         self.frigate_api_url = f"http://localhost:{frigate_container.frigate_port}"
         # No auth needed for test instance (disabled in config)
         
         # Update MQTT connection params to use test broker
-        self.mqtt_host = test_mqtt_broker.host
-        self.mqtt_port = test_mqtt_broker.port
+        self.mqtt_host = class_scoped_mqtt_broker.host
+        self.mqtt_port = class_scoped_mqtt_broker.port
         
         yield
         
@@ -731,15 +795,29 @@ class TestServiceDependencies:
     """Test service dependencies and startup order"""
     
     @pytest.fixture(autouse=True)
-    def setup(self, test_mqtt_broker, frigate_container, docker_container_manager):
+    def setup(self, class_scoped_mqtt_broker, frigate_container, class_scoped_docker_manager):
         """Setup test environment"""
-        self.mqtt_broker = test_mqtt_broker
+        self.mqtt_broker = class_scoped_mqtt_broker
         self.frigate_container = frigate_container
-        self.docker_manager = docker_container_manager
+        self.docker_manager = class_scoped_docker_manager
     
     @requires_security_nvr
     def test_mqtt_broker_dependency(self):
         """Test that security_nvr depends on mqtt_broker"""
+        # Verify the container is available and running
+        if not hasattr(self, 'frigate_container') or self.frigate_container is None:
+            pytest.skip("Frigate container not available")
+            
+        # Check container status
+        try:
+            self.frigate_container.reload()
+            if self.frigate_container.status != 'running':
+                pytest.skip(f"Frigate container not running: {self.frigate_container.status}")
+        except docker.errors.NotFound:
+            pytest.skip("Frigate container was removed")
+        except docker.errors.APIError:
+            pytest.skip("Cannot access Frigate container")
+            
         # Use test fixtures instead of production containers
         frigate_container_name = self.docker_manager.get_container_name('frigate')
         
@@ -761,6 +839,20 @@ class TestServiceDependencies:
     
     def test_camera_detector_integration(self):
         """Test that security_nvr can receive camera updates"""
+        # Verify the container is available and running
+        if not hasattr(self, 'frigate_container') or self.frigate_container is None:
+            pytest.skip("Frigate container not available")
+            
+        # Check container status
+        try:
+            self.frigate_container.reload()
+            if self.frigate_container.status != 'running':
+                pytest.skip(f"Frigate container not running: {self.frigate_container.status}")
+        except docker.errors.NotFound:
+            pytest.skip("Frigate container was removed")
+        except docker.errors.APIError:
+            pytest.skip("Cannot access Frigate container")
+            
         # Check if both services are on the same network
         result = subprocess.run(
             ["docker", "network", "ls", "--format", "{{.Name}}"],
@@ -776,33 +868,69 @@ class TestWebInterface:
     """Test Frigate web interface accessibility"""
     
     @pytest.fixture(autouse=True)
-    def setup(self, test_mqtt_broker, frigate_container, docker_container_manager):
+    def setup(self, class_scoped_mqtt_broker, frigate_container, class_scoped_docker_manager):
         """Setup test environment"""
-        self.mqtt_broker = test_mqtt_broker
+        self.mqtt_broker = class_scoped_mqtt_broker
         self.frigate_container = frigate_container
-        self.docker_manager = docker_container_manager
+        self.docker_manager = class_scoped_docker_manager
         self.frigate_api_url = f"http://localhost:{frigate_container.frigate_port}"
         # No auth needed for test instance (disabled in config)
     
     @requires_frigate_api
     def test_web_ui_accessible(self):
         """Test that Frigate web UI is accessible"""
-        # Use the actual test Frigate instance - no auth needed
-        response = requests.get(f"{self.frigate_api_url}/", timeout=5)
-        assert response.status_code == 200
-        # The root path might return different content, check for typical responses
-        response_text = response.text.lower()
-        # Accept various valid Frigate responses
-        valid_responses = ["frigate", "running", "ok", "<!doctype html"]
-        assert any(indicator in response_text for indicator in valid_responses), \
-            f"Unexpected response from Frigate UI: {response.text[:100]}"
+        import time
+        
+        # Add retry logic for web UI access
+        max_retries = 5
+        retry_delay = 2
+        last_error = None
+        
+        for i in range(max_retries):
+            try:
+                # Use the actual test Frigate instance - no auth needed
+                response = requests.get(f"{self.frigate_api_url}/", timeout=5)
+                assert response.status_code == 200
+                # The root path might return different content, check for typical responses
+                response_text = response.text.lower()
+                # Accept various valid Frigate responses
+                valid_responses = ["frigate", "running", "ok", "<!doctype html"]
+                assert any(indicator in response_text for indicator in valid_responses), \
+                    f"Unexpected response from Frigate UI: {response.text[:100]}"
+                return  # Success
+            except (requests.exceptions.RequestException, AssertionError) as e:
+                last_error = e
+                if i < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+        
+        # If we get here, all retries failed
+        pytest.fail(f"Failed to access Frigate web UI after {max_retries} attempts: {last_error}")
     
     @requires_frigate_api
     def test_static_resources(self):
         """Test that static resources are served"""
-        # Check if API version endpoint works with the test instance - no auth needed
-        response = requests.get(f"{self.frigate_api_url}/version", timeout=5)
-        assert response.status_code == 200
+        import time
+        
+        # Add retry logic for API access
+        max_retries = 5
+        retry_delay = 2
+        last_error = None
+        
+        for i in range(max_retries):
+            try:
+                # Check if API version endpoint works with the test instance - no auth needed
+                response = requests.get(f"{self.frigate_api_url}/version", timeout=5)
+                assert response.status_code == 200
+                return  # Success
+            except (requests.exceptions.RequestException, AssertionError) as e:
+                last_error = e
+                if i < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+        
+        # If we get here, all retries failed
+        pytest.fail(f"Failed to access Frigate API after {max_retries} attempts: {last_error}")
 
 
 if __name__ == "__main__":

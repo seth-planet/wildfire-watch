@@ -7,7 +7,7 @@ Tests individual components in isolation, mocking only external dependencies.
 import pytest
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
 
@@ -51,14 +51,14 @@ class TestModels:
         fresh_service = ServiceHealth(
             name="test_service",
             status=ServiceStatus.HEALTHY,
-            last_seen=datetime.utcnow(),
+            last_seen=datetime.now(timezone.utc).replace(tzinfo=None),
             uptime=1.5
         )
         assert not fresh_service.is_stale
         
         # Stale service (3 minutes old)
         from datetime import timedelta
-        old_time = datetime.utcnow() - timedelta(minutes=3)
+        old_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=3)
         stale_service = ServiceHealth(
             name="test_service",
             status=ServiceStatus.HEALTHY,
@@ -257,7 +257,7 @@ class TestMQTTHandler:
             # Add more events than buffer size
             for i in range(10):
                 event = MQTTEvent(
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc).replace(tzinfo=None),
                     topic=f"test/topic{i}",
                     payload={"count": i},
                     event_type=EventType.OTHER

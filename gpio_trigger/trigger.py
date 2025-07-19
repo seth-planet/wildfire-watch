@@ -254,151 +254,6 @@ class PumpControllerConfig(ConfigBase):
                 setattr(self, pin_name, None)
 
 
-# Legacy CONFIG dictionary for backward compatibility
-# This will be removed in a future version
-class LazyConfigDict(dict):
-    """Lazy-loading configuration dictionary.
-    
-    Delays loading of configuration values until first access,
-    allowing tests to set environment variables before values are read.
-    """
-    def __init__(self):
-        super().__init__()
-        self._loaded = False
-    
-    def _load_config(self):
-        """Load configuration from environment variables."""
-        if self._loaded:
-            return
-            
-        self._loaded = True
-        self.update({
-            'MQTT_BROKER': os.getenv('MQTT_BROKER', 'mqtt_broker'),
-            'MQTT_PORT': int(os.getenv('MQTT_PORT', '1883')),
-            'MQTT_TLS': os.getenv('MQTT_TLS', 'false').lower() == 'true',
-            'TLS_CA_PATH': os.getenv('TLS_CA_PATH', '/mnt/data/certs/ca.crt'),
-    
-            # Topic prefix support for test isolation
-            'TOPIC_PREFIX': os.getenv('MQTT_TOPIC_PREFIX', ''),
-            
-            # GPIO Pins - Control
-            'MAIN_VALVE_PIN': int(os.getenv('MAIN_VALVE_PIN', '18')),
-            'IGN_START_PIN': int(os.getenv('IGNITION_START_PIN', '23')),
-            'IGN_ON_PIN': int(os.getenv('IGNITION_ON_PIN', '24')),
-            'IGN_OFF_PIN': int(os.getenv('IGNITION_OFF_PIN', '25')),
-            'REFILL_VALVE_PIN': int(os.getenv('REFILL_VALVE_PIN', '22')),
-            'PRIMING_VALVE_PIN': int(os.getenv('PRIMING_VALVE_PIN', '26')),
-            'RPM_REDUCE_PIN': int(os.getenv('RPM_REDUCE_PIN', '27')),
-            
-            # GPIO Pins - Monitoring (Optional)
-            'RESERVOIR_FLOAT_PIN': int(os.getenv('RESERVOIR_FLOAT_PIN', '16')) if os.getenv('RESERVOIR_FLOAT_PIN') else None,
-            'LINE_PRESSURE_PIN': int(os.getenv('LINE_PRESSURE_PIN', '20')) if os.getenv('LINE_PRESSURE_PIN') else None,
-            
-            # Timing Configuration
-            'PRE_OPEN_DELAY': float(os.getenv('VALVE_PRE_OPEN_DELAY', '2')),
-            'IGNITION_START_DURATION': float(os.getenv('IGNITION_START_DURATION', '5')),
-            'FIRE_OFF_DELAY': float(os.getenv('FIRE_OFF_DELAY', '1800')),
-            'VALVE_CLOSE_DELAY': float(os.getenv('VALVE_CLOSE_DELAY', '600')),
-            'IGNITION_OFF_DURATION': float(os.getenv('IGNITION_OFF_DURATION', '5')),
-            'MAX_ENGINE_RUNTIME': float(os.getenv('MAX_ENGINE_RUNTIME', '1800')),  # 30 minutes default
-            'REFILL_MULTIPLIER': float(os.getenv('REFILL_MULTIPLIER', '40')),
-            'PRIMING_DURATION': float(os.getenv('PRIMING_DURATION', '180')),
-            'RPM_REDUCTION_LEAD': float(os.getenv('RPM_REDUCTION_LEAD', '15')),
-            'PRESSURE_CHECK_DELAY': float(os.getenv('PRESSURE_CHECK_DELAY', '60')),  # 1 minute after priming
-            'HEALTH_INTERVAL': float(os.getenv('TELEMETRY_INTERVAL', '60')),
-            'ACTION_RETRY_INTERVAL': float(os.getenv('ACTION_RETRY_INTERVAL', '60')),
-            'COOLDOWN_DURATION': float(os.getenv('COOLDOWN_DURATION', '60')),  # 60 seconds default
-            
-            # Safety Configuration
-            'RESERVOIR_FLOAT_ACTIVE_LOW': os.getenv('RESERVOIR_FLOAT_ACTIVE_LOW', 'true').lower() == 'true',
-            'LINE_PRESSURE_ACTIVE_LOW': os.getenv('LINE_PRESSURE_ACTIVE_LOW', 'true').lower() == 'true',
-            
-            # Hardware Validation (Optional)
-            'HARDWARE_VALIDATION_ENABLED': os.getenv('HARDWARE_VALIDATION_ENABLED', 'false').lower() == 'true',
-            'RELAY_FEEDBACK_PINS': os.getenv('RELAY_FEEDBACK_PINS', '').split(',') if os.getenv('RELAY_FEEDBACK_PINS') else [],
-            'HARDWARE_CHECK_INTERVAL': float(os.getenv('HARDWARE_CHECK_INTERVAL', '30')),
-            
-            # Dry Run Protection (Always enabled for safety)
-            'MAX_DRY_RUN_TIME': float(os.getenv('MAX_DRY_RUN_TIME', '300')),  # 5 minutes default
-            'FLOW_SENSOR_PIN': int(os.getenv('FLOW_SENSOR_PIN', '')) if os.getenv('FLOW_SENSOR_PIN') else None,
-            
-            # Emergency Features (Optional)
-            'EMERGENCY_BUTTON_PIN': int(os.getenv('EMERGENCY_BUTTON_PIN', '')) if os.getenv('EMERGENCY_BUTTON_PIN') else None,
-            'EMERGENCY_BUTTON_ACTIVE_LOW': os.getenv('EMERGENCY_BUTTON_ACTIVE_LOW', 'true').lower() == 'true',
-            
-            # Status Reporting
-            'ENHANCED_STATUS_ENABLED': os.getenv('ENHANCED_STATUS_ENABLED', 'true').lower() == 'true',
-            'SIMULATION_MODE_WARNINGS': os.getenv('SIMULATION_MODE_WARNINGS', 'true').lower() == 'true',
-        })
-        
-        # Apply topic prefix to MQTT topics
-        prefix = self.get('TOPIC_PREFIX', '')
-        if prefix:
-            self['TRIGGER_TOPIC'] = f"{prefix}/{os.getenv('TRIGGER_TOPIC', 'fire/trigger')}"
-            self['EMERGENCY_TOPIC'] = f"{prefix}/{os.getenv('EMERGENCY_TOPIC', 'fire/emergency')}"
-            self['TELEMETRY_TOPIC'] = f"{prefix}/{os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry')}"
-        else:
-            self['TRIGGER_TOPIC'] = os.getenv('TRIGGER_TOPIC', 'fire/trigger')
-            self['EMERGENCY_TOPIC'] = os.getenv('EMERGENCY_TOPIC', 'fire/emergency')
-            self['TELEMETRY_TOPIC'] = os.getenv('TELEMETRY_TOPIC', 'system/trigger_telemetry')
-    
-    def __getitem__(self, key):
-        """Load configuration on first access."""
-        if not self._loaded:
-            self._load_config()
-        return super().__getitem__(key)
-    
-    def __contains__(self, key):
-        """Load configuration before checking membership."""
-        if not self._loaded:
-            self._load_config()
-        return super().__contains__(key)
-    
-    def get(self, key, default=None):
-        """Load configuration before getting value."""
-        if not self._loaded:
-            self._load_config()
-        return super().get(key, default)
-    
-    def keys(self):
-        """Load configuration before returning keys."""
-        if not self._loaded:
-            self._load_config()
-        return super().keys()
-    
-    def values(self):
-        """Load configuration before returning values."""
-        if not self._loaded:
-            self._load_config()
-        return super().values()
-    
-    def items(self):
-        """Load configuration before returning items."""
-        if not self._loaded:
-            self._load_config()
-        return super().items()
-    
-    def copy(self):
-        """Load configuration before copying."""
-        if not self._loaded:
-            self._load_config()
-        return super().copy()
-    
-    def update(self, *args, **kwargs):
-        """Allow updates (for tests) even if not loaded."""
-        if not self._loaded:
-            self._load_config()
-        return super().update(*args, **kwargs)
-    
-    def reload(self):
-        """Force reload configuration from environment."""
-        self._loaded = False
-        self._load_config()
-
-# Create the lazy CONFIG instance
-CONFIG = LazyConfigDict()
-
-# Topic configuration will be handled in _load_config to maintain lazy loading
 
 # ─────────────────────────────────────────────────────────────
 # Logging Setup
@@ -427,7 +282,7 @@ try:
     GPIO_AVAILABLE = True
 except (ImportError, RuntimeError):
     GPIO_AVAILABLE = False
-    if CONFIG['SIMULATION_MODE_WARNINGS']:
+    if os.getenv('SIMULATION_MODE_WARNINGS', 'true').lower() == 'true':
         logger.critical("⚠️  HARDWARE SIMULATION MODE ACTIVE ⚠️")
         logger.critical("⚠️  GPIO CONTROL IS SIMULATED - NO PHYSICAL HARDWARE CONTROL ⚠️")
         logger.critical("⚠️  PUMP AND VALVES WILL NOT OPERATE IN WILDFIRE EMERGENCY ⚠️")
@@ -594,52 +449,6 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         
         # Use provided config or create default
         self.config = config or PumpControllerConfig()
-        
-        # Legacy support - create dictionary with uppercase keys matching old CONFIG
-        self.cfg = {
-            'MQTT_BROKER': self.config.mqtt_broker,
-            'MQTT_PORT': self.config.mqtt_port,
-            'MQTT_TLS': self.config.mqtt_tls,
-            'TLS_CA_PATH': self.config.tls_ca_path,
-            'TOPIC_PREFIX': self.config.topic_prefix,
-            'TRIGGER_TOPIC': self.config.trigger_topic,
-            'EMERGENCY_TOPIC': self.config.emergency_topic,
-            'TELEMETRY_TOPIC': self.config.telemetry_topic,
-            'MAIN_VALVE_PIN': self.config.main_valve_pin,
-            'IGN_START_PIN': self.config.ign_start_pin,
-            'IGN_ON_PIN': self.config.ign_on_pin,
-            'IGN_OFF_PIN': self.config.ign_off_pin,
-            'REFILL_VALVE_PIN': self.config.refill_valve_pin,
-            'PRIMING_VALVE_PIN': self.config.priming_valve_pin,
-            'RPM_REDUCE_PIN': self.config.rpm_reduce_pin,
-            'RESERVOIR_FLOAT_PIN': self.config.reservoir_float_pin,
-            'LINE_PRESSURE_PIN': self.config.line_pressure_pin,
-            'FLOW_SENSOR_PIN': self.config.flow_sensor_pin,
-            'EMERGENCY_BUTTON_PIN': self.config.emergency_button_pin,
-            'PRE_OPEN_DELAY': self.config.pre_open_delay,
-            'IGNITION_START_DURATION': self.config.ignition_start_duration,
-            'FIRE_OFF_DELAY': self.config.fire_off_delay,
-            'VALVE_CLOSE_DELAY': self.config.valve_close_delay,
-            'IGNITION_OFF_DURATION': self.config.ignition_off_duration,
-            'MAX_ENGINE_RUNTIME': self.config.max_engine_runtime,
-            'REFILL_MULTIPLIER': self.config.refill_multiplier,
-            'PRIMING_DURATION': self.config.priming_duration,
-            'RPM_REDUCTION_LEAD': self.config.rpm_reduction_lead,
-            'RPM_REDUCTION_DURATION': self.config.rpm_reduction_duration,
-            'PRESSURE_CHECK_DELAY': self.config.pressure_check_delay,
-            'HEALTH_INTERVAL': self.config.health_interval,
-            'ACTION_RETRY_INTERVAL': self.config.action_retry_interval,
-            'COOLDOWN_DURATION': self.config.cooldown_duration,
-            'RESERVOIR_FLOAT_ACTIVE_LOW': self.config.reservoir_float_active_low,
-            'LINE_PRESSURE_ACTIVE_LOW': self.config.line_pressure_active_low,
-            'EMERGENCY_BUTTON_ACTIVE_LOW': self.config.emergency_button_active_low,
-            'HARDWARE_VALIDATION_ENABLED': self.config.hardware_validation_enabled,
-            'RELAY_FEEDBACK_PINS': self.config.relay_feedback_pins,
-            'HARDWARE_CHECK_INTERVAL': self.config.hardware_check_interval,
-            'MAX_DRY_RUN_TIME': self.config.max_dry_run_time,
-            'ENHANCED_STATUS_ENABLED': self.config.enhanced_status_enabled,
-            'SIMULATION_MODE_WARNINGS': self.config.simulation_mode_warnings,
-        }
         self._lock = threading.RLock()
         self._auto_connect = auto_connect
         
@@ -706,7 +515,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._start_monitoring_tasks()
             
             # Start health monitoring
-            self._schedule_timer('health', self._publish_health, self.cfg['HEALTH_INTERVAL'])
+            self._schedule_timer('health', self._publish_health, self.config.health_interval)
         else:
             # Initialize client but don't connect
             self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, clean_session=True)
@@ -730,7 +539,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._start_monitoring_tasks()
             
             # Start health monitoring
-            self._schedule_timer('health', self._publish_health, self.cfg['HEALTH_INTERVAL'])
+            self._schedule_timer('health', self._publish_health, self.config.health_interval)
             
             self._mqtt_connected = True
     
@@ -838,39 +647,39 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         }
         
         for pin_name, initial_state in output_pins.items():
-            pin = self.cfg[pin_name]
+            pin = getattr(self.config, pin_name.lower())
             GPIO.setup(pin, GPIO.OUT, initial=initial_state)
             logger.debug(f"Initialized {pin_name} (pin {pin}) to {initial_state}")
         
         # Input pins (optional monitoring)
-        if self.cfg['RESERVOIR_FLOAT_PIN']:
-            pull = GPIO.PUD_DOWN if self.cfg['RESERVOIR_FLOAT_ACTIVE_LOW'] else GPIO.PUD_UP
-            GPIO.setup(self.cfg['RESERVOIR_FLOAT_PIN'], GPIO.IN, pull_up_down=pull)
-            logger.info(f"Reservoir float switch on pin {self.cfg['RESERVOIR_FLOAT_PIN']}")
+        if self.config.reservoir_float_pin:
+            pull = GPIO.PUD_DOWN if self.config.reservoir_float_active_low else GPIO.PUD_UP
+            GPIO.setup(self.config.reservoir_float_pin, GPIO.IN, pull_up_down=pull)
+            logger.info(f"Reservoir float switch on pin {self.config.reservoir_float_pin}")
         
-        if self.cfg['LINE_PRESSURE_PIN']:
-            pull = GPIO.PUD_DOWN if self.cfg['LINE_PRESSURE_ACTIVE_LOW'] else GPIO.PUD_UP
-            GPIO.setup(self.cfg['LINE_PRESSURE_PIN'], GPIO.IN, pull_up_down=pull)
-            logger.info(f"Line pressure switch on pin {self.cfg['LINE_PRESSURE_PIN']}")
+        if self.config.line_pressure_pin:
+            pull = GPIO.PUD_DOWN if self.config.line_pressure_active_low else GPIO.PUD_UP
+            GPIO.setup(self.config.line_pressure_pin, GPIO.IN, pull_up_down=pull)
+            logger.info(f"Line pressure switch on pin {self.config.line_pressure_pin}")
         
         # Optional hardware validation pins
-        if self.cfg['RELAY_FEEDBACK_PINS']:
-            for i, pin_str in enumerate(self.cfg['RELAY_FEEDBACK_PINS']):
+        if self.config.relay_feedback_pins:
+            for i, pin_str in enumerate(self.config.relay_feedback_pins):
                 if pin_str.strip():
                     pin = int(pin_str.strip())
                     GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
                     logger.info(f"Relay feedback pin {i+1} configured on pin {pin}")
         
         # Optional flow sensor pin
-        if self.cfg['FLOW_SENSOR_PIN']:
-            GPIO.setup(self.cfg['FLOW_SENSOR_PIN'], GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-            logger.info(f"Water flow sensor on pin {self.cfg['FLOW_SENSOR_PIN']}")
+        if self.config.flow_sensor_pin:
+            GPIO.setup(self.config.flow_sensor_pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            logger.info(f"Water flow sensor on pin {self.config.flow_sensor_pin}")
         
         # Optional emergency button pin
-        if self.cfg['EMERGENCY_BUTTON_PIN']:
-            pull = GPIO.PUD_UP if self.cfg['EMERGENCY_BUTTON_ACTIVE_LOW'] else GPIO.PUD_DOWN
-            GPIO.setup(self.cfg['EMERGENCY_BUTTON_PIN'], GPIO.IN, pull_up_down=pull)
-            logger.info(f"Emergency button on pin {self.cfg['EMERGENCY_BUTTON_PIN']}")
+        if self.config.emergency_button_pin:
+            pull = GPIO.PUD_UP if self.config.emergency_button_active_low else GPIO.PUD_DOWN
+            GPIO.setup(self.config.emergency_button_pin, GPIO.IN, pull_up_down=pull)
+            logger.info(f"Emergency button on pin {self.config.emergency_button_pin}")
     
     def _setup_mqtt(self):
         """Setup MQTT client with TLS if configured"""
@@ -882,17 +691,17 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         self.client.on_disconnect = self._on_disconnect
         
         # Configure TLS if enabled
-        if self.cfg['MQTT_TLS']:
+        if self.config.mqtt_tls:
             import ssl
             self.client.tls_set(
-                ca_certs=self.cfg['TLS_CA_PATH'],
+                ca_certs=self.config.tls_ca_path,
                 cert_reqs=ssl.CERT_REQUIRED,
                 tls_version=ssl.PROTOCOL_TLS
             )
             logger.info("MQTT TLS enabled")
         
         # Set LWT
-        lwt_topic = f"{self.cfg['TELEMETRY_TOPIC']}/{socket.gethostname()}/lwt"
+        lwt_topic = f"{self.config.telemetry_topic}/{socket.gethostname()}/lwt"
         lwt_payload = json.dumps({
             'host': socket.gethostname(),
             'status': 'offline',
@@ -912,10 +721,10 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             
         while not self._shutdown and retry_count < max_retries:
             try:
-                port = 8883 if self.cfg['MQTT_TLS'] else self.cfg['MQTT_PORT']
-                self.client.connect(self.cfg['MQTT_BROKER'], port, keepalive=60)
+                port = 8883 if self.config.mqtt_tls else self.config.mqtt_port
+                self.client.connect(self.config.mqtt_broker, port, keepalive=60)
                 self.client.loop_start()
-                logger.info(f"MQTT client connected to {self.cfg['MQTT_BROKER']}:{port}")
+                logger.info(f"MQTT client connected to {self.config.mqtt_broker}:{port}")
                 break
             except Exception as e:
                 retry_count += 1
@@ -936,11 +745,11 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         with self._lock:
             snapshot = {
                 'state': self._state.name,
-                'engine_on': GPIO.input(self.cfg['IGN_ON_PIN']),
-                'main_valve': GPIO.input(self.cfg['MAIN_VALVE_PIN']),
-                'refill_valve': GPIO.input(self.cfg['REFILL_VALVE_PIN']),
-                'priming_valve': GPIO.input(self.cfg['PRIMING_VALVE_PIN']),
-                'rpm_reduced': GPIO.input(self.cfg['RPM_REDUCE_PIN']),
+                'engine_on': GPIO.input(self.config.ign_on_pin),
+                'main_valve': GPIO.input(self.config.main_valve_pin),
+                'refill_valve': GPIO.input(self.config.refill_valve_pin),
+                'priming_valve': GPIO.input(self.config.priming_valve_pin),
+                'rpm_reduced': GPIO.input(self.config.rpm_reduce_pin),
                 'total_runtime': self._total_runtime,
                 'current_runtime': self._current_runtime,
                 'shutting_down': self._shutting_down,
@@ -949,10 +758,10 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             }
             
             # Add monitoring status if available
-            if self.cfg['RESERVOIR_FLOAT_PIN']:
+            if self.config.reservoir_float_pin:
                 snapshot['reservoir_full'] = self._is_reservoir_full()
             
-            if self.cfg['LINE_PRESSURE_PIN']:
+            if self.config.line_pressure_pin:
                 snapshot['line_pressure_ok'] = self._is_line_pressure_ok()
             
             return snapshot
@@ -974,7 +783,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         
         try:
             self.client.publish(
-                self.cfg['TELEMETRY_TOPIC'],
+                self.config.telemetry_topic,
                 json.dumps(payload),
                 qos=1
             )
@@ -1011,7 +820,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         # Use SafeGPIO if available
         if self.gpio:
             try:
-                pin = self.cfg[f'{pin_name}_PIN']
+                pin = getattr(self.config, f'{pin_name.lower()}_pin')
                 result = self.gpio.safe_write(pin, state, pin_name=pin_name, retries=max_retries)
                 
                 if result:
@@ -1064,7 +873,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 return False
         
         # Fallback to original implementation if SafeGPIO not available
-        pin = self.cfg[f'{pin_name}_PIN']
+        pin = getattr(self.config, f'{pin_name.lower()}_pin')
         retry_delays = [0.1, 0.5, 2.0]  # Progressive delays
         
         for attempt in range(max_retries):
@@ -1114,24 +923,24 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
     
     def _is_reservoir_full(self) -> bool:
         """Check if reservoir is full (float switch)"""
-        if not self.cfg['RESERVOIR_FLOAT_PIN']:
+        if not self.config.reservoir_float_pin:
             return True  # Assume full if no sensor
         
-        state = GPIO.input(self.cfg['RESERVOIR_FLOAT_PIN'])
+        state = GPIO.input(self.config.reservoir_float_pin)
         # Active low means LOW = full, HIGH = not full
-        if self.cfg['RESERVOIR_FLOAT_ACTIVE_LOW']:
+        if self.config.reservoir_float_active_low:
             return not state
         else:
             return state
     
     def _is_line_pressure_ok(self) -> bool:
         """Check if line pressure is adequate"""
-        if not self.cfg['LINE_PRESSURE_PIN']:
+        if not self.config.line_pressure_pin:
             return True  # Assume OK if no sensor
         
-        state = GPIO.input(self.cfg['LINE_PRESSURE_PIN'])
+        state = GPIO.input(self.config.line_pressure_pin)
         # Active low means LOW = pressure OK, HIGH = low pressure
-        if self.cfg['LINE_PRESSURE_ACTIVE_LOW']:
+        if self.config.line_pressure_active_low:
             return not state
         else:
             return state
@@ -1231,12 +1040,12 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
     def _start_monitoring_tasks(self):
         """Start background monitoring tasks"""
         # Monitor reservoir level during refill
-        if self.cfg['RESERVOIR_FLOAT_PIN']:
+        if self.config.reservoir_float_pin:
             threading.Thread(target=self._monitor_reservoir_level, daemon=True).start()
         
         # Start hardware validation monitoring if enabled
-        if self.cfg['HARDWARE_VALIDATION_ENABLED']:
-            self._schedule_timer('hardware_check', self._validate_hardware, self.cfg['HARDWARE_CHECK_INTERVAL'])
+        if self.config.hardware_validation_enabled:
+            self._schedule_timer('hardware_check', self._validate_hardware, self.config.hardware_check_interval)
         
         # Start dry run protection monitoring (always enabled for safety)
         dry_run_thread = threading.Thread(target=self._monitor_dry_run_protection, daemon=True)
@@ -1244,7 +1053,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         self._background_threads.append(dry_run_thread)
         
         # Start emergency button monitoring if configured
-        if self.cfg['EMERGENCY_BUTTON_PIN']:
+        if self.config.emergency_button_pin:
             emergency_thread = threading.Thread(target=self._monitor_emergency_button, daemon=True)
             emergency_thread.start()
             self._background_threads.append(emergency_thread)
@@ -1260,7 +1069,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                             self._set_pin('REFILL_VALVE', False)
                             self._refill_complete = True
                             if self._state == PumpState.REFILLING:
-                                self._state = PumpState.IDLE
+                                self._enter_idle()
                             self._publish_event('refill_complete_float_switch')
                             self._cancel_timer('close_refill_valve')
             except Exception as e:
@@ -1276,10 +1085,10 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         """MQTT connection callback"""
         if rc == 0:
             client.subscribe([
-                (self.cfg['TRIGGER_TOPIC'], 0),
-                (self.cfg['EMERGENCY_TOPIC'], 0)
+                (self.config.trigger_topic, 0),
+                (self.config.emergency_topic, 0)
             ])
-            logger.info(f"Subscribed to {self.cfg['TRIGGER_TOPIC']} and {self.cfg['EMERGENCY_TOPIC']}")
+            logger.info(f"Subscribed to {self.config.trigger_topic} and {self.config.emergency_topic}")
             self._publish_event('mqtt_connected')
         else:
             logger.error(f"MQTT connection failed with code {rc}")
@@ -1296,10 +1105,10 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
     def _on_message(self, client, userdata, msg):
         """MQTT message callback"""
         try:
-            if msg.topic == self.cfg['TRIGGER_TOPIC']:
+            if msg.topic == self.config.trigger_topic:
                 logger.info(f"Received fire trigger on {msg.topic}")
                 self.handle_fire_trigger()
-            elif msg.topic == self.cfg['EMERGENCY_TOPIC']:
+            elif msg.topic == self.config.emergency_topic:
                 logger.warning(f"Received emergency command on {msg.topic}")
                 self.handle_emergency_command(msg.payload.decode())
         except Exception as e:
@@ -1344,7 +1153,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 return
             
             # Always ensure main valve is open when fire detected
-            if not GPIO.input(self.cfg['MAIN_VALVE_PIN']):
+            if not GPIO.input(self.config.main_valve_pin):
                 self._set_pin('MAIN_VALVE', True)
                 self._publish_event('emergency_valve_open')
             
@@ -1357,7 +1166,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 self._start_pump_sequence()
             elif self._state in [PumpState.RUNNING, PumpState.PRIMING, PumpState.STARTING]:
                 # Already running or starting, just reset shutdown timer
-                self._schedule_timer('fire_off_monitor', self._check_fire_off, self.cfg['FIRE_OFF_DELAY'])
+                self._schedule_timer('fire_off_monitor', self._check_fire_off, self.config.fire_off_delay)
                 logger.info("Fire trigger received while pump active, reset shutdown timer")
             elif self._state in [PumpState.REDUCING_RPM, PumpState.STOPPING]:
                 # Cancel shutdown if in shutdown sequence
@@ -1443,13 +1252,13 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         if self.gpio:
             # Build pin configuration for emergency shutdown
             pin_config = {
-                'IGN_START': self.cfg['IGN_START_PIN'],
-                'IGN_ON': self.cfg['IGN_ON_PIN'],
-                'IGN_OFF': self.cfg['IGN_OFF_PIN'],
-                'MAIN_VALVE': self.cfg['MAIN_VALVE_PIN'],
-                'REFILL_VALVE': self.cfg['REFILL_VALVE_PIN'],
-                'PRIMING_VALVE': self.cfg['PRIMING_VALVE_PIN'],
-                'RPM_REDUCE': self.cfg['RPM_REDUCE_PIN'],
+                'IGN_START': self.config.ign_start_pin,
+                'IGN_ON': self.config.ign_on_pin,
+                'IGN_OFF': self.config.ign_off_pin,
+                'MAIN_VALVE': self.config.main_valve_pin,
+                'REFILL_VALVE': self.config.refill_valve_pin,
+                'PRIMING_VALVE': self.config.priming_valve_pin,
+                'RPM_REDUCE': self.config.rpm_reduce_pin,
             }
             
             # Execute emergency shutdown
@@ -1480,7 +1289,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         
         # Set to cooldown state
         self._state = PumpState.COOLDOWN
-        self._schedule_timer('cooldown_complete', self._enter_idle, self.cfg['COOLDOWN_DURATION'])
+        self._schedule_timer('cooldown_complete', self._enter_idle, self.config.cooldown_duration)
         
         self._publish_event('emergency_stop')
     
@@ -1543,17 +1352,17 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 self._publish_event('refill_valve_opened_immediately')
             
             # Schedule engine start after pre-open delay
-            self._schedule_timer('start_engine', self._start_engine, self.cfg['PRE_OPEN_DELAY'])
+            self._schedule_timer('start_engine', self._start_engine, self.config.pre_open_delay)
             
             # Schedule fire-off monitor
-            self._schedule_timer('fire_off_monitor', self._check_fire_off, self.cfg['FIRE_OFF_DELAY'])
+            self._schedule_timer('fire_off_monitor', self._check_fire_off, self.config.fire_off_delay)
     
     def _emergency_valve_open(self) -> bool:
         """Emergency valve opening procedures when normal methods fail"""
         logger.warning("Attempting emergency valve opening procedures")
         
         # Try direct GPIO manipulation with different timing
-        pin = self.cfg['MAIN_VALVE_PIN']
+        pin = self.config.main_valve_pin
         try:
             # Method 1: Multiple rapid pulses
             for _ in range(5):
@@ -1593,7 +1402,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 return
             
             # Safety check: Ensure main valve is open
-            if not GPIO.input(self.cfg['MAIN_VALVE_PIN']):
+            if not GPIO.input(self.config.main_valve_pin):
                 self._enter_error_state("Main valve not open - aborting engine start")
                 return
             
@@ -1610,7 +1419,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 self._publish_event('ignition_start_degraded')
             
             # Hold ignition start for configured duration
-            time.sleep(self.cfg['IGNITION_START_DURATION'])
+            time.sleep(self.config.ignition_start_duration)
             
             # Release ignition start
             self._set_pin('IGN_START', False)
@@ -1636,16 +1445,16 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._schedule_timer(
                 'close_priming',
                 lambda: self._close_priming_valve(),
-                self.cfg['PRIMING_DURATION']
+                self.config.priming_duration
             )
             
             # Schedule RPM reduction
-            rpm_reduction_time = self.cfg['MAX_ENGINE_RUNTIME'] - self.cfg['RPM_REDUCTION_LEAD']
+            rpm_reduction_time = self.config.max_engine_runtime - self.config.rpm_reduction_lead
             if rpm_reduction_time > 0:
                 self._schedule_timer('rpm_reduction', self._reduce_rpm, rpm_reduction_time)
             
             # Schedule max runtime shutdown
-            self._schedule_timer('max_runtime', self._shutdown_engine, self.cfg['MAX_ENGINE_RUNTIME'])
+            self._schedule_timer('max_runtime', self._shutdown_engine, self.config.max_engine_runtime)
     
     def _emergency_ignition_start(self) -> bool:
         """Emergency ignition procedures when normal start fails"""
@@ -1658,7 +1467,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 
                 # Longer crank time
                 self._set_pin('IGN_START', True, max_retries=1)
-                time.sleep(self.cfg['IGNITION_START_DURATION'] * 2)
+                time.sleep(self.config.ignition_start_duration * 2)
                 self._set_pin('IGN_START', False, max_retries=1)
                 
                 time.sleep(0.5)  # Rest between attempts
@@ -1667,7 +1476,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                 if self._set_pin('IGN_ON', True, max_retries=1):
                     # Verify ignition is actually on
                     time.sleep(0.2)
-                    if GPIO.input(self.cfg['IGN_ON_PIN']):
+                    if GPIO.input(self.config.ign_on_pin):
                         logger.info("Emergency ignition successful")
                         self._publish_event('emergency_ignition_success')
                         return True
@@ -1691,11 +1500,11 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._publish_event('priming_complete')
             
             # Schedule pressure check if monitoring is enabled
-            if self.cfg['LINE_PRESSURE_PIN']:
+            if self.config.line_pressure_pin:
                 self._schedule_timer(
                     'pressure_check',
                     self._check_line_pressure,
-                    self.cfg['PRESSURE_CHECK_DELAY']
+                    self.config.pressure_check_delay
                 )
     
     def _check_line_pressure(self):
@@ -1727,7 +1536,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         with self._lock:
             time_since_trigger = time.time() - self._last_trigger_time
             
-            if time_since_trigger >= self.cfg['FIRE_OFF_DELAY']:
+            if time_since_trigger >= self.config.fire_off_delay:
                 logger.info(f"No fire trigger for {time_since_trigger:.1f}s, initiating shutdown")
                 
                 # NEW LOGIC: Check if we need RPM reduction first
@@ -1741,7 +1550,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                     self._schedule_timer(
                         'delayed_shutdown_after_rpm', 
                         self._shutdown_engine, 
-                        self.cfg['RPM_REDUCTION_DURATION']
+                        self.config.rpm_reduction_duration
                     )
                 elif self._state == PumpState.REDUCING_RPM:
                     # Already reducing RPM, shutdown will happen via timer
@@ -1752,7 +1561,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                         self._shutdown_engine()
             else:
                 # Re-schedule check
-                remaining = self.cfg['FIRE_OFF_DELAY'] - time_since_trigger
+                remaining = self.config.fire_off_delay - time_since_trigger
                 self._schedule_timer('fire_off_monitor', self._check_fire_off, remaining)
     
     def _shutdown_engine(self):
@@ -1795,7 +1604,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._schedule_timer(
                 'ign_off_pulse',
                 lambda: self._set_pin('IGN_OFF', False),
-                self.cfg['IGNITION_OFF_DURATION']
+                self.config.ignition_off_duration
             )
             
             # Turn off engine
@@ -1806,11 +1615,11 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._schedule_timer(
                 'close_main_valve',
                 lambda: self._set_pin('MAIN_VALVE', False),
-                self.cfg['VALVE_CLOSE_DELAY']
+                self.config.valve_close_delay
             )
             
             # Calculate refill time based on runtime
-            refill_time = self._current_runtime * self.cfg['REFILL_MULTIPLIER']
+            refill_time = self._current_runtime * self.config.refill_multiplier
             
             # Start refill process (unless low pressure detected)
             if not self._low_pressure_detected:
@@ -1851,12 +1660,23 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._publish_event('cooldown_entered')
             
             # Schedule return to idle
-            self._schedule_timer('cooldown_complete', self._enter_idle, self.cfg['COOLDOWN_DURATION'])
+            self._schedule_timer('cooldown_complete', self._enter_idle, self.config.cooldown_duration)
     
     def _enter_idle(self):
         """Return to idle state"""
         with self._lock:
             self._state = PumpState.IDLE
+            
+            # Ensure all pins are in proper IDLE state
+            # This handles cases where pins were left in unexpected states
+            self._set_pin('MAIN_VALVE', False)
+            self._set_pin('IGN_ON', False)
+            self._set_pin('IGN_START', False)
+            self._set_pin('IGN_OFF', False)
+            self._set_pin('REFILL_VALVE', False)
+            self._set_pin('PRIMING_VALVE', False)
+            self._set_pin('RPM_REDUCE', False)
+            
             self._publish_event('idle_state_entered')
     
     def _cancel_shutdown(self):
@@ -1882,12 +1702,12 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._shutting_down = False
             
             # Reschedule monitors
-            self._schedule_timer('fire_off_monitor', self._check_fire_off, self.cfg['FIRE_OFF_DELAY'])
+            self._schedule_timer('fire_off_monitor', self._check_fire_off, self.config.fire_off_delay)
             
             # Reschedule max runtime if needed
             if self._engine_start_time:
                 elapsed = time.time() - self._engine_start_time
-                remaining = self.cfg['MAX_ENGINE_RUNTIME'] - elapsed
+                remaining = self.config.max_engine_runtime - elapsed
                 if remaining > 0:
                     self._schedule_timer('max_runtime', self._shutdown_engine, remaining)
             
@@ -1905,17 +1725,22 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._state = PumpState.ERROR
             self._last_error = reason
             
-            # Best effort to ensure pump is off for safety (don't recurse on failure)
+            # Best effort to ensure all pins are LOW for safety (don't recurse on failure)
             try:
                 # Temporarily disable error state transitions during cleanup
                 original_state = self._state
-                self._set_pin('IGN_ON', False)
-                self._set_pin('IGN_START', False)
+                
+                # Turn off all pins for safety - ERROR state requires all pins LOW
+                logger.info("Setting all pins to LOW for ERROR state safety")
+                for pin_name in ['IGN_ON', 'IGN_START', 'IGN_OFF', 'MAIN_VALVE', 
+                                'REFILL_VALVE', 'PRIMING_VALVE', 'RPM_REDUCE']:
+                    logger.debug(f"Setting {pin_name} to LOW")
+                    self._set_pin(pin_name, False)
+                
                 self._state = original_state  # Ensure we stay in ERROR
+                logger.info("All pins set to LOW in ERROR state")
             except Exception as e:
                 logger.error(f"Failed to turn off pins during error state entry: {e}")
-            
-            # Keep valves in current state
             
             self._publish_event('error_state_entered', {'reason': reason})
             
@@ -1923,11 +1748,11 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._cancel_all_timers()
             
             # Keep health monitoring active
-            self._schedule_timer('health', self._publish_health, self.cfg['HEALTH_INTERVAL'])
+            self._schedule_timer('health', self._publish_health, self.config.health_interval)
     
     def _validate_hardware(self):
         """Validate hardware state and detect failures (optional)"""
-        if not self.cfg['HARDWARE_VALIDATION_ENABLED']:
+        if not self.config.hardware_validation_enabled:
             return
         
         current_time = time.time()
@@ -1935,8 +1760,8 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         
         try:
             # Check relay feedback pins if configured
-            if self.cfg['RELAY_FEEDBACK_PINS']:
-                for i, pin_str in enumerate(self.cfg['RELAY_FEEDBACK_PINS']):
+            if self.config.relay_feedback_pins:
+                for i, pin_str in enumerate(self.config.relay_feedback_pins):
                     if pin_str.strip():
                         pin = int(pin_str.strip())
                         feedback_state = GPIO.input(pin)
@@ -1954,7 +1779,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                             self._hardware_status[f'relay_{i+1}'] = 'OK'
             
             # Check simulation mode status
-            if not GPIO_AVAILABLE and self.cfg['SIMULATION_MODE_WARNINGS']:
+            if not GPIO_AVAILABLE and self.config.simulation_mode_warnings:
                 self._publish_event('simulation_mode_warning', {
                     'message': 'System running in simulation mode - no physical hardware control'
                 })
@@ -1964,15 +1789,15 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._hardware_failures += 1
         
         # Reschedule next check
-        self._schedule_timer('hardware_check', self._validate_hardware, self.cfg['HARDWARE_CHECK_INTERVAL'])
+        self._schedule_timer('hardware_check', self._validate_hardware, self.config.hardware_check_interval)
     
     def _get_expected_relay_state(self, relay_index: int) -> bool:
         """Get expected state for relay based on current system state"""
         # This is a simplified example - actual implementation would depend on hardware wiring
         if relay_index == 0:  # Assuming relay 0 is main valve
-            return GPIO.input(self.cfg['MAIN_VALVE_PIN'])
+            return GPIO.input(self.config.main_valve_pin)
         elif relay_index == 1:  # Assuming relay 1 is ignition
-            return GPIO.input(self.cfg['IGN_ON_PIN'])
+            return GPIO.input(self.config.ign_on_pin)
         return False  # Default to off for unknown relays
     
     def _monitor_dry_run_protection(self):
@@ -1984,45 +1809,45 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                     
                     # Check if pump is running
                     pump_running = (self._state == PumpState.RUNNING and 
-                                  GPIO.input(self.cfg['IGN_ON_PIN']))
+                                  GPIO.input(self.config.ign_on_pin))
                     
                     if pump_running:
                         # Initialize pump start time if not set
                         if self._pump_start_time is None:
                             self._pump_start_time = current_time
                             self._water_flow_detected = False
-                            logger.debug(f"Dry run monitor: pump start time set, flow sensor: {self.cfg['FLOW_SENSOR_PIN']}")
+                            logger.debug(f"Dry run monitor: pump start time set, flow sensor: {self.config.flow_sensor_pin}")
                         
                         # Check for water flow if sensor is available
-                        if self.cfg['FLOW_SENSOR_PIN']:
-                            flow_detected = GPIO.input(self.cfg['FLOW_SENSOR_PIN'])
+                        if self.config.flow_sensor_pin:
+                            flow_detected = GPIO.input(self.config.flow_sensor_pin)
                             if flow_detected:
                                 self._water_flow_detected = True
                         else:
                             # If no flow sensor, check line pressure as proxy
-                            if self.cfg['LINE_PRESSURE_PIN']:
+                            if self.config.line_pressure_pin:
                                 pressure_ok = self._is_line_pressure_ok()
                                 if pressure_ok:
                                     self._water_flow_detected = True
                             else:
                                 # No sensors available - assume water flow after priming period
-                                if current_time - self._pump_start_time > self.cfg['PRIMING_DURATION']:
+                                if current_time - self._pump_start_time > self.config.priming_duration:
                                     self._water_flow_detected = True
                         
                         # Check dry run time limit
                         dry_run_time = current_time - self._pump_start_time
                         
                         
-                        if dry_run_time > self.cfg['MAX_DRY_RUN_TIME'] and not self._water_flow_detected:
+                        if dry_run_time > self.config.max_dry_run_time and not self._water_flow_detected:
                             logger.critical(f"DRY RUN PROTECTION: Pump running {dry_run_time:.1f}s without water flow!")
                             self._publish_event('dry_run_protection_triggered', {
                                 'dry_run_time': dry_run_time,
-                                'max_allowed': self.cfg['MAX_DRY_RUN_TIME']
+                                'max_allowed': self.config.max_dry_run_time
                             })
                             self._enter_error_state(f"Dry run protection: {dry_run_time:.1f}s without water flow")
                             # Exit the monitor loop after entering error state
                             return
-                        elif dry_run_time > self.cfg['MAX_DRY_RUN_TIME'] * 0.8 and not self._water_flow_detected:
+                        elif dry_run_time > self.config.max_dry_run_time * 0.8 and not self._water_flow_detected:
                             # Warning at 80% of limit
                             self._dry_run_warnings += 1
                             if self._dry_run_warnings % 5 == 1:  # Log every 5th warning to avoid spam
@@ -2049,9 +1874,9 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         
         while not self._shutdown:
             try:
-                if self.cfg['EMERGENCY_BUTTON_PIN']:
-                    current_state = GPIO.input(self.cfg['EMERGENCY_BUTTON_PIN'])
-                    active_state = not current_state if self.cfg['EMERGENCY_BUTTON_ACTIVE_LOW'] else current_state
+                if self.config.emergency_button_pin:
+                    current_state = GPIO.input(self.config.emergency_button_pin)
+                    active_state = not current_state if self.config.emergency_button_active_low else current_state
                     
                     # Detect button press (transition to active)
                     if last_state is not None and not last_state and active_state:
@@ -2088,12 +1913,12 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             }
             
             # Enhanced status reporting
-            if self.cfg['ENHANCED_STATUS_ENABLED']:
+            if self.config.enhanced_status_enabled:
                 # Hardware status
                 health_data['hardware'] = {
                     'gpio_available': GPIO_AVAILABLE,
                     'simulation_mode': not GPIO_AVAILABLE,
-                    'validation_enabled': self.cfg['HARDWARE_VALIDATION_ENABLED'],
+                    'validation_enabled': self.config.hardware_validation_enabled,
                     'last_hardware_check': self._last_hardware_check,
                     'hardware_failures': self._hardware_failures,
                     'hardware_status': self._hardware_status.copy(),
@@ -2105,21 +1930,21 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                     'pump_running': self._pump_start_time is not None,
                     'water_flow_detected': self._water_flow_detected,
                     'dry_run_warnings': self._dry_run_warnings,
-                    'max_dry_run_time': self.cfg['MAX_DRY_RUN_TIME'],
+                    'max_dry_run_time': self.config.max_dry_run_time,
                 }
                 if self._pump_start_time:
                     health_data['dry_run_protection']['current_runtime'] = time.time() - self._pump_start_time
                 
                 # Safety feature status
                 health_data['safety_features'] = {
-                    'emergency_button_available': self.cfg['EMERGENCY_BUTTON_PIN'] is not None,
-                    'flow_sensor_available': self.cfg['FLOW_SENSOR_PIN'] is not None,
-                    'reservoir_sensor_available': self.cfg['RESERVOIR_FLOAT_PIN'] is not None,
-                    'pressure_sensor_available': self.cfg['LINE_PRESSURE_PIN'] is not None,
+                    'emergency_button_available': self.config.emergency_button_pin is not None,
+                    'flow_sensor_available': self.config.flow_sensor_pin is not None,
+                    'reservoir_sensor_available': self.config.reservoir_float_pin is not None,
+                    'pressure_sensor_available': self.config.line_pressure_pin is not None,
                 }
                 
                 # Critical warnings for simulation mode
-                if not GPIO_AVAILABLE and self.cfg['SIMULATION_MODE_WARNINGS']:
+                if not GPIO_AVAILABLE and self.config.simulation_mode_warnings:
                     health_data['critical_warnings'] = [
                         'SIMULATION_MODE_ACTIVE',
                         'NO_PHYSICAL_HARDWARE_CONTROL',
@@ -2127,10 +1952,10 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                     ]
             
             # Add sensor states if available
-            if self.cfg['RESERVOIR_FLOAT_PIN']:
+            if self.config.reservoir_float_pin:
                 health_data['reservoir_full'] = self._is_reservoir_full()
             
-            if self.cfg['LINE_PRESSURE_PIN']:
+            if self.config.line_pressure_pin:
                 health_data['line_pressure_ok'] = self._is_line_pressure_ok()
             
             # Include pin states for diagnostics
@@ -2139,7 +1964,7 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             self._publish_event('health_report', health_data)
             
             # Reschedule
-            self._schedule_timer('health', self._publish_health, self.cfg['HEALTH_INTERVAL'])
+            self._schedule_timer('health', self._publish_health, self.config.health_interval)
     
     def cleanup(self):
         """Clean shutdown of controller"""

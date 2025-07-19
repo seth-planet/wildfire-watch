@@ -21,7 +21,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import from test utils and conftest
-from gpio_trigger.trigger import PumpController, PumpState, CONFIG
+from gpio_trigger.trigger import PumpController, PumpState
 # Import wait_for_state from gpio_test_helpers
 from utils.gpio_test_helpers import wait_for_state
 
@@ -71,7 +71,7 @@ class TestRPMReduction:
     """Test motor RPM reduction before shutdown with real components."""
     
     @pytest.fixture
-    def rpm_controller(self, gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factory):
+    def rpm_controller(self, gpio_test_setup, test_mqtt_broker, mqtt_topic_factory, pump_controller_factory):
         """Create controller configured for RPM reduction testing.
         
         BEST PRACTICE: Real PumpController with real MQTT and GPIO.
@@ -83,55 +83,26 @@ class TestRPMReduction:
         full_topic = mqtt_topic_factory("dummy")
         topic_prefix = full_topic.rsplit('/', 1)[0]
         
-        # Configure for RPM reduction testing
-        monkeypatch.setenv("MAX_ENGINE_RUNTIME", "30")  # 30 seconds
-        monkeypatch.setenv("RPM_REDUCE_PIN", "27")
-        monkeypatch.setenv("RPM_REDUCTION_DURATION", "3.0")  # How long RPM reduction lasts
-        monkeypatch.setenv("PRIMING_DURATION", "0.5")
-        monkeypatch.setenv("IGNITION_START_DURATION", "0.5")  # Increased for reliable testing
-        monkeypatch.setenv("ENGINE_STOP_DURATION", "0.5")
-        monkeypatch.setenv("HEALTH_INTERVAL", "10")
-        
-        # Disable optional sensors to simplify testing
-        monkeypatch.setenv("RESERVOIR_FLOAT_PIN", "")  # Empty string to disable
-        monkeypatch.setenv("LINE_PRESSURE_PIN", "")   # Empty string to disable
-        monkeypatch.setenv("FLOW_SENSOR_PIN", "")     # Empty string to disable
-        monkeypatch.setenv("EMERGENCY_BUTTON_PIN", "") # Empty string to disable
-        
-        # Configure MQTT for testing
-        monkeypatch.setenv("MQTT_BROKER", conn_params['host'])
-        monkeypatch.setenv("MQTT_PORT", str(conn_params['port']))
-        monkeypatch.setenv("MQTT_TLS", "false")
-        monkeypatch.setenv("TOPIC_PREFIX", topic_prefix)
-        
-        # Build test environment dict
-        test_env = {
-            'MQTT_BROKER': conn_params['host'],
-            'MQTT_PORT': str(conn_params['port']),
-            'MQTT_TLS': 'false',
-            'TOPIC_PREFIX': topic_prefix,
-            'MAX_ENGINE_RUNTIME': '30',
-            'RPM_REDUCTION_DURATION': '3',
-            'RPM_REDUCTION_LEAD': '10',
-            'PRIMING_DURATION': '0.2',
-            'IGNITION_START_DURATION': '0.2',
-            'REFILL_MULTIPLIER': '2',
-            # Disable optional sensors
-            'RESERVOIR_FLOAT_PIN': '',
-            'LINE_PRESSURE_PIN': '',
-            'FLOW_SENSOR_PIN': '',
-            'EMERGENCY_BUTTON_PIN': ''
-        }
-        
-        # Import and create config after environment is set
-        from gpio_trigger.trigger import PumpControllerConfig
-        
-        # Create config object - it will load from environment
-        config = PumpControllerConfig()
-        
-        # Create controller with dependency injection
-        controller = PumpController(config=config, auto_connect=False)
-        # Connect after environment is set up
+        # Create controller with factory
+        controller = pump_controller_factory(
+            mqtt_broker=conn_params['host'],
+            mqtt_port=conn_params['port'],
+            topic_prefix=topic_prefix,
+            max_engine_runtime=30,  # 30 seconds
+            rpm_reduce_pin=27,
+            rpm_reduction_duration=3.0,  # How long RPM reduction lasts
+            rpm_reduction_lead=10,
+            priming_duration=0.5,
+            ignition_start_duration=0.5,  # Increased for reliable testing
+            engine_stop_duration=0.5,
+            health_interval=10,
+            refill_multiplier=2,
+            # Disable optional sensors to simplify testing
+            reservoir_float_pin=0,  # 0 to disable
+            line_pressure_pin=0,   # 0 to disable
+            flow_sensor_pin=0,     # 0 to disable
+            emergency_button_pin=0  # 0 to disable
+        )
         controller.connect()
         
         yield controller
@@ -169,7 +140,7 @@ class TestRPMReduction:
         from gpio_trigger.trigger import GPIO as controller_gpio
         
         # RPM reduce pin should be LOW initially
-        rpm_reduce_pin = rpm_controller.cfg['RPM_REDUCE_PIN']
+        rpm_reduce_pin = rpm_controller.config.rpm_reduce_pin
         assert controller_gpio.input(rpm_reduce_pin) == controller_gpio.LOW
         
         # Manually trigger RPM reduction first (proper shutdown sequence)
@@ -183,7 +154,7 @@ class TestRPMReduction:
         assert controller_gpio.input(rpm_reduce_pin) == controller_gpio.HIGH
         
         # Engine should still be running during RPM reduction
-        assert controller_gpio.input(rpm_controller.cfg['IGN_ON_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(rpm_controller.config.ign_on_pin) == controller_gpio.HIGH
     
     @pytest.mark.timeout(30)
     def test_rpm_reduction_duration(self, rpm_controller, gpio_test_setup):
@@ -212,7 +183,7 @@ class TestRPMReduction:
         
         # RPM reduce pin should be active
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.HIGH
         
         # Wait for RPM reduction to complete (transitions through STOPPING to REFILLING)
         # Use wait_for_any_state since STOPPING might transition quickly
@@ -231,7 +202,7 @@ class TestRPMReduction:
             time.sleep(0.1)
         
         # RPM reduce pin should be deactivated
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.LOW
     
     @pytest.mark.timeout(30)
     def test_fire_trigger_during_rpm_reduction_cancels_shutdown(self, rpm_controller, gpio_test_setup):
@@ -258,23 +229,20 @@ class TestRPMReduction:
         # Should cancel shutdown and return to running
         assert rpm_controller._state == PumpState.RUNNING
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.LOW
-        assert controller_gpio.input(rpm_controller.cfg['IGN_ON_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.ign_on_pin) == controller_gpio.HIGH
     
     @pytest.mark.timeout(30)
-    def test_max_runtime_with_rpm_reduction(self, rpm_controller, gpio_test_setup, monkeypatch):
+    def test_max_runtime_with_rpm_reduction(self, rpm_controller, gpio_test_setup):
         """Test RPM reduction occurs even at max runtime."""
         if gpio_test_setup is None:
             pytest.skip("GPIO simulation not available")
             
         # Set very short max runtime for testing
-        monkeypatch.setenv("MAX_ENGINE_RUNTIME", "5")  # 5 seconds
-        monkeypatch.setenv("RPM_REDUCTION_LEAD", "2")  # RPM reduction starts 2 seconds before max runtime
-        monkeypatch.setenv("RPM_REDUCTION_DURATION", "1.0")  # 1 second RPM reduction
         # Update the controller's config directly for this test
-        rpm_controller.cfg['MAX_ENGINE_RUNTIME'] = 5
-        rpm_controller.cfg['RPM_REDUCTION_LEAD'] = 2
-        rpm_controller.cfg['RPM_REDUCTION_DURATION'] = 1.0
+        rpm_controller.config.max_engine_runtime = 5
+        rpm_controller.config.rpm_reduction_lead = 2
+        rpm_controller.config.rpm_reduction_duration = 1.0
         
         # Start pump
         rpm_controller.handle_fire_trigger()
@@ -285,10 +253,10 @@ class TestRPMReduction:
         rpm_controller._cancel_timer('max_runtime')
         
         # Reschedule with new timings
-        rpm_reduction_time = rpm_controller.cfg['MAX_ENGINE_RUNTIME'] - rpm_controller.cfg['RPM_REDUCTION_LEAD']
+        rpm_reduction_time = rpm_controller.config.max_engine_runtime - rpm_controller.config.rpm_reduction_lead
         if rpm_reduction_time > 0:
             rpm_controller._schedule_timer('rpm_reduction', rpm_controller._reduce_rpm, rpm_reduction_time)
-        rpm_controller._schedule_timer('max_runtime', rpm_controller._shutdown_engine, rpm_controller.cfg['MAX_ENGINE_RUNTIME'])
+        rpm_controller._schedule_timer('max_runtime', rpm_controller._shutdown_engine, rpm_controller.config.max_engine_runtime)
         
         # Wait for max runtime to trigger shutdown (5 seconds)
         # The controller should automatically start RPM reduction when max runtime is reached
@@ -296,7 +264,7 @@ class TestRPMReduction:
         
         # Verify RPM reduction is active
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.HIGH
         
         # Wait for shutdown (STOPPING transitions quickly to REFILLING)
         # Need to wait for the full RPM reduction duration (1s) plus transition time
@@ -307,7 +275,7 @@ class TestRPMReduction:
         # Engine should stop after max runtime
         time.sleep(0.5)
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['IGN_ON_PIN']) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.ign_on_pin) == controller_gpio.LOW
     
     @pytest.mark.timeout(30)
     def test_rpm_reduction_pin_configuration(self, rpm_controller, gpio_test_setup):
@@ -316,7 +284,7 @@ class TestRPMReduction:
             pytest.skip("GPIO simulation not available")
             
         # Verify RPM reduce pin is configured
-        rpm_pin = rpm_controller.cfg['RPM_REDUCE_PIN']
+        rpm_pin = rpm_controller.config.rpm_reduce_pin
         
         # Pin should be set up as output and initially LOW
         controller_gpio = get_controller_gpio()
@@ -350,7 +318,7 @@ class TestRPMReduction:
         # Wait for RPM reduction
         assert wait_for_state(rpm_controller, PumpState.REDUCING_RPM, timeout=3)
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.HIGH
         
         # Force error state
         rpm_controller._enter_error_state("Test error during RPM reduction")
@@ -361,7 +329,7 @@ class TestRPMReduction:
         # Error state only deactivates engine pins for safety, not RPM reduction
         # RPM reduction pin may still be HIGH (this is the actual behavior)
         # Only the engine pins are guaranteed to be deactivated
-        assert controller_gpio.input(rpm_controller.cfg['IGN_ON_PIN']) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.ign_on_pin) == controller_gpio.LOW
     
     @pytest.mark.timeout(30)
     def test_cleanup_during_rpm_reduction(self, rpm_controller, gpio_test_setup):
@@ -384,103 +352,57 @@ class TestRPMReduction:
         
         # All outputs should be deactivated
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.LOW
-        assert controller_gpio.input(rpm_controller.cfg['IGN_ON_PIN']) == controller_gpio.LOW
-        assert controller_gpio.input(rpm_controller.cfg['MAIN_VALVE_PIN']) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.ign_on_pin) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.main_valve_pin) == controller_gpio.LOW
 
 
 class TestRPMReductionIntegration:
     """Test RPM reduction integration with other features."""
     
     @pytest.fixture
-    def rpm_controller(self, gpio_test_setup, monkeypatch, test_mqtt_broker, mqtt_topic_factory):
+    def rpm_controller(self, gpio_test_setup, test_mqtt_broker, mqtt_topic_factory, pump_controller_factory):
         """Create controller configured for RPM reduction testing.
         
         BEST PRACTICE: Real PumpController with real MQTT and GPIO.
         """
-        # Get connection parameters from the test broker FIRST
+        # Get connection parameters from the test broker
         conn_params = test_mqtt_broker.get_connection_params()
         
-        # Set all environment variables BEFORE importing/creating anything
-        test_env = {
-            "MQTT_BROKER": str(conn_params['host']),  # Note: it's MQTT_BROKER not MQTT_HOST
-            "MQTT_PORT": str(conn_params['port']),
-            "TOPIC_PREFIX": mqtt_topic_factory("dummy").rsplit('/', 1)[0],  # Note: it's TOPIC_PREFIX not MQTT_TOPIC_PREFIX
-            "MAX_ENGINE_RUNTIME": "30",
-            "RPM_REDUCE_PIN": "27",
-            "RPM_REDUCTION_DURATION": "3.0",
-            "PRIMING_DURATION": "0.5",  # Short priming duration for tests
-            "IGNITION_START_DURATION": "0.5",  # Short start duration for tests
-            "COOLDOWN_DURATION": "1.0",
-            "LOW_PRESSURE_COOLDOWN": "0",
-            "ENGINE_STOP_DURATION": "0.5",
-            "DRY_RUN_PROTECTION": "true",
-            "RESERVOIR_FLOAT_PIN": "",  # Empty string to disable
-            "EMERGENCY_BUTTON_PIN": "", # Empty string to disable
-        }
+        # Get unique topic prefix for test isolation
+        full_topic = mqtt_topic_factory("dummy")
+        topic_prefix = full_topic.rsplit('/', 1)[0]
         
-        # Apply all environment variables
-        for key, value in test_env.items():
-            monkeypatch.setenv(key, value)
+        # Create controller with factory
+        controller = pump_controller_factory(
+            mqtt_broker=conn_params['host'],
+            mqtt_port=conn_params['port'],
+            topic_prefix=topic_prefix,
+            max_engine_runtime=30,
+            rpm_reduce_pin=27,
+            rpm_reduction_duration=3.0,
+            priming_duration=0.5,  # Short priming duration for tests
+            ignition_start_duration=0.5,  # Short start duration for tests
+            cooldown_duration=1.0,
+            low_pressure_cooldown=0,
+            engine_stop_duration=0.5,
+            dry_run_protection=True,
+            reservoir_float_pin=0,  # 0 to disable
+            emergency_button_pin=0  # 0 to disable
+        )
+        controller.connect()
         
-        # Save original environ values
-        import os
-        original_env = {}
-        for key in test_env:
-            original_env[key] = os.environ.get(key)
+        # Wait for connection to be established
+        time.sleep(1.0)
+        assert controller.client.is_connected(), "Controller failed to connect to MQTT"
         
-        # Set actual os.environ values (needed because ConfigBase uses os.getenv directly)
-        os.environ.update(test_env)
+        yield controller
         
+        # Cleanup
         try:
-            # Create controller - it will load config from environment
-            # Set environment for test broker connection
-
-            conn_params = test_mqtt_broker.get_connection_params()
-
-            full_topic = mqtt_topic_factory("dummy")
-
-            topic_prefix = full_topic.rsplit('/', 1)[0]
-
-            
-
-            os.environ['MQTT_BROKER'] = conn_params['host']
-
-            os.environ['MQTT_PORT'] = str(conn_params['port'])
-
-            os.environ['MQTT_TLS'] = 'false'
-
-            os.environ['MQTT_TOPIC_PREFIX'] = topic_prefix
-
-            
-
-            # Update CONFIG using helper  
-            update_gpio_config_for_tests(test_env, conn_params, topic_prefix)
-            
-            # Create controller with auto_connect=False
-            controller = PumpController(auto_connect=False)
-            controller.connect()
-            
-            # Wait for connection to be established
-            time.sleep(1.0)
-            assert controller.client.is_connected(), "Controller failed to connect to MQTT"
-        finally:
-            # Restore original environment values
-            for key, value in original_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
-        
-        try:
-            
-            yield controller
-        finally:
-            # Cleanup
-            try:
-                controller.cleanup()
-            except:
-                pass
+            controller.cleanup()
+        except:
+            pass
     
     @pytest.mark.timeout(30)
     def test_rpm_reduction_during_shutdown(self, rpm_controller, gpio_test_setup):
@@ -490,7 +412,7 @@ class TestRPMReductionIntegration:
             
         # Check initial state
         print(f"Initial state: {rpm_controller._state}, refill_complete: {rpm_controller._refill_complete}")
-        print(f"Priming duration: {rpm_controller.cfg['PRIMING_DURATION']}")
+        print(f"Priming duration: {rpm_controller.config.priming_duration}")
         
         # Start pump
         rpm_controller.handle_fire_trigger()
@@ -517,7 +439,7 @@ class TestRPMReductionIntegration:
         
         # Verify RPM reduction pin was activated
         controller_gpio = get_controller_gpio()
-        assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.HIGH
         
         # Schedule shutdown after RPM reduction (this is what happens in normal operation)
         import threading
@@ -537,10 +459,10 @@ class TestRPMReductionIntegration:
         # It might still be HIGH during STOPPING but should be LOW by REFILLING
         controller_gpio = get_controller_gpio()
         if rpm_controller._state == PumpState.REFILLING:
-            assert controller_gpio.input(rpm_controller.cfg['RPM_REDUCE_PIN']) == controller_gpio.LOW
+            assert controller_gpio.input(rpm_controller.config.rpm_reduce_pin) == controller_gpio.LOW
         
         # Engine should be off
-        assert controller_gpio.input(rpm_controller.cfg['IGN_ON_PIN']) == controller_gpio.LOW
+        assert controller_gpio.input(rpm_controller.config.ign_on_pin) == controller_gpio.LOW
         
         print("✓ RPM reduction test completed successfully")
     
@@ -567,7 +489,7 @@ class TestRPMReductionIntegration:
         subscriber = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_rpm_telemetry")
         
         # Subscribe to telemetry topic - use the same prefix as the controller
-        topic_prefix = rpm_controller.cfg['TOPIC_PREFIX']
+        topic_prefix = rpm_controller.config.topic_prefix
         # The controller publishes to system/trigger_telemetry
         telemetry_topic = f"{topic_prefix}/system/trigger_telemetry" if topic_prefix else "system/trigger_telemetry"
         # Use wildcard to catch all events under the prefix

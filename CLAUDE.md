@@ -304,7 +304,7 @@ cache_manager.cache_model(cache_key, result)
 4. **Minimal mocking** - Only mock external I/O (files, network, hardware)
 5. **Test real behavior** - Include edge cases and error conditions
 6. **Fix import paths** - Use `test_utils` not `utils` for test helpers
-7. **Update CONFIG after env vars** - CONFIG dictionary loads at module import time
+7. **Use pump_controller_factory** - Factory fixture handles all configuration
 8. **Use correct config keys** - IGNITION_START_DURATION not ENGINE_START_DURATION
 
 ### Integration Testing Best Practices
@@ -353,25 +353,24 @@ Services like GPIO trigger load configuration at module import time, before test
 
 1. **For GPIO Trigger Service**:
    
-   **[STABLE & IN USE] - Current Pattern:**
+   **[MIGRATION COMPLETED ✅] - Current Pattern:**
    ```python
-   from tests.test_utils.helpers import update_gpio_config_for_tests
-   update_gpio_config_for_tests(test_env, conn_params, topic_prefix)
-   controller = PumpController(auto_connect=False)
-   controller.connect()  # Connect when ready
-   ```
-   
-   **[TARGET PATTERN - IN DEVELOPMENT]:**
-   ```python
-   # create_pump_controller_with_config exists but is not yet used in tests
-   from tests.test_utils.helpers import create_pump_controller_with_config
-   controller = create_pump_controller_with_config(
-       test_env, conn_params, topic_prefix, auto_connect=False
+   # Use the pump_controller_factory fixture
+   controller = pump_controller_factory(
+       mqtt_broker=conn_params['host'],
+       mqtt_port=conn_params['port'],
+       topic_prefix=topic_prefix,
+       priming_duration=0.2,
+       # other config overrides
    )
    controller.connect()  # Connect when ready
    ```
    
-   **Note**: Continue using `update_gpio_config_for_tests()` until migration is complete.
+   **Migration Status**: ✅ COMPLETED
+   - Legacy CONFIG dictionary has been removed
+   - All tests now use pump_controller_factory fixture
+   - PumpControllerConfig provides type-safe configuration
+   - See docs/GPIO_CONFIG_MIGRATION.md for details
 
 2. **For Services Using ConfigBase (fire_consensus, camera_detector)**:
    ```python
@@ -387,14 +386,9 @@ Services like GPIO trigger load configuration at module import time, before test
 3. **Key Implementation Details**:
    - **PumpController accepts config parameter**: `PumpController(config=PumpControllerConfig())`
    - **PumpControllerConfig uses ConfigBase**: Runtime loading from environment
-   - **Global CONFIG dictionary**: Still actively used in production and tests
-   - **Current test helper**: `update_gpio_config_for_tests()` [STABLE & IN USE]
-   - **Future test helper**: `create_pump_controller_with_config()` [TARGET PATTERN - IN DEVELOPMENT]
-
-4. **Migration Status**:
-   - **Current State**: All tests use `update_gpio_config_for_tests()`
-   - **Target State**: Tests will eventually use `create_pump_controller_with_config()`
-   - **Timeline**: Migration not yet scheduled - continue using current pattern
+   - **Global CONFIG dictionary**: ❌ REMOVED - no longer used
+   - **Test fixture**: `pump_controller_factory` - creates configured instances
+   - **Helper function**: `create_pump_controller_with_config()` - available for complex cases
 
 #### Best Practices Summary
 
@@ -406,20 +400,19 @@ Services like GPIO trigger load configuration at module import time, before test
 
 ### Common Test Patterns and Fixes
 
-#### CONFIG Dictionary Updates in GPIO Tests
-When testing GPIO functionality, the CONFIG dictionary is loaded at module import time. Tests must update it after setting environment variables:
+#### Configuration in GPIO Tests
+GPIO tests now use the `pump_controller_factory` fixture which handles all configuration:
 
 ```python
-# WRONG - CONFIG won't see the environment changes
-os.environ['MQTT_BROKER'] = 'test-broker'
-controller = PumpController()  # Uses old CONFIG values
-
-# CORRECT - Update CONFIG after environment changes
-os.environ['MQTT_BROKER'] = 'test-broker'
-from gpio_trigger.trigger import CONFIG
-CONFIG['MQTT_BROKER'] = os.environ['MQTT_BROKER']
-CONFIG['MQTT_PORT'] = int(os.environ.get('MQTT_PORT', '1883'))
-controller = PumpController()  # Uses updated CONFIG
+# Create controller with test configuration
+controller = pump_controller_factory(
+    mqtt_broker=conn_params['host'],
+    mqtt_port=conn_params['port'],
+    topic_prefix=topic_prefix,
+    priming_duration=0.2,
+    max_engine_runtime=60
+)
+controller.connect()  # If auto_connect=False was specified
 ```
 
 #### Test Import Paths
@@ -483,7 +476,7 @@ os.environ['RPM_REDUCTION_LEAD'] = '5'      # Time before shutdown
      
      # Controller is ready to use
      ```
-   - **Configuration**: Supports both global CONFIG and dependency injection (config parameter)
+   - **Configuration**: Uses PumpControllerConfig with dependency injection
 
 ### GPIO Testing Best Practices
 **Based on extensive testing experience (40+ test scenarios), follow these practices:**

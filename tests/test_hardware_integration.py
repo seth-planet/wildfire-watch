@@ -685,28 +685,38 @@ print(f"AVG_TIME: {{avg_time}}")
     
     @unittest.skipUnless(HAS_GPU, "GPU not available")
     def test_gpu_inference_speed(self):
-        """Benchmark GPU inference speed"""
+        """Benchmark GPU inference speed with YOLOv8m"""
         try:
             import torch
-            import torchvision.transforms as T
-            from PIL import Image
+            from ultralytics import YOLO
             
-            # Load a simple model
-            model = torch.hub.load('ultralytics/yolov5', 'yolov5s', pretrained=True)
-            model = model.cuda()
-            model.eval()
+            # Use YOLOv8m which is similar to production models
+            print("Loading YOLOv8m model...")
+            model = YOLO('yolov8m.pt')  # Will download if not present
             
-            # Load image
-            img = Image.open(self.test_image_path)
+            # Move model to GPU
+            if torch.cuda.is_available():
+                model.to('cuda')
             
             def inference():
-                with torch.no_grad():
-                    results = model(img)
+                # Run inference on the test image
+                results = model(self.test_image_path, verbose=False)
                 return results
             
-            avg_time = self._benchmark_inference("NVIDIA GPU", inference)
+            # Benchmark the inference
+            avg_time = self._benchmark_inference("NVIDIA GPU (YOLOv8m)", inference)
+            
+            # YOLOv8m should be reasonably fast on GPU
+            # Typical inference time: 10-30ms on modern GPUs
             self.assertLess(avg_time, 100, "GPU inference slower than expected")
             
+            # Print detection results from last inference
+            results = inference()
+            if results and len(results) > 0:
+                print(f"Detections: {len(results[0].boxes) if results[0].boxes else 0} objects")
+            
+        except ImportError as e:
+            self.skipTest(f"Ultralytics not installed: {e}")
         except Exception as e:
             self.skipTest(f"GPU inference test failed: {e}")
 

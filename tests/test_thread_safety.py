@@ -469,8 +469,12 @@ class TestRaceConditionScenarios:
 def test_thread_safety_mixin_integration():
     """Test integration of thread safety mixins"""
     from camera_detector.detect import CameraDetector
-    from camera_detector.detect_thread_safe_mixin import ThreadSafeCameraDetectorMixin
+    from camera_detector.thread_safety import (
+        ThreadSafeDict, ThreadSafeSet, ThreadSafeCounter,
+        ThreadSafeCameraRegistry, PeriodicTask
+    )
     
     # This would test the actual integration
     # For now, just verify imports work
-    assert ThreadSafeCameraDetectorMixin is not None
+    assert ThreadSafeCameraRegistry is not None
+    assert PeriodicTask is not None

@@ -5,7 +5,7 @@ This module defines Pydantic models for data structures used throughout
 the web interface, including MQTT events, system status, and service health.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
@@ -79,7 +79,7 @@ class ServiceHealth(BaseModel):
     @property
     def is_stale(self) -> bool:
         """Check if health data is stale (>2 minutes old)."""
-        return (datetime.utcnow() - self.last_seen).seconds > 120
+        return (datetime.now(timezone.utc).replace(tzinfo=None) - self.last_seen).seconds > 120
         
     def to_display_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for display."""
@@ -180,7 +180,7 @@ class DebugAction(BaseModel):
     action: str = Field(..., description="Action to perform")
     token: str = Field(..., description="Debug token for authentication")
     parameters: Dict[str, Any] = Field(default_factory=dict, description="Action parameters")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Request timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None), description="Request timestamp")
 
 
 class APIResponse(BaseModel):
@@ -188,7 +188,7 @@ class APIResponse(BaseModel):
     success: bool = Field(..., description="Whether the request succeeded")
     message: str = Field(..., description="Response message")
     data: Optional[Dict[str, Any]] = Field(None, description="Response data")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Response timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None), description="Response timestamp")
 
 
 class EventFilter(BaseModel):
@@ -207,4 +207,4 @@ class HealthCheckResponse(BaseModel):
     version: str = Field(..., description="Service version")
     mqtt_connected: bool = Field(..., description="MQTT connection status")
     uptime_seconds: float = Field(..., description="Service uptime in seconds")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Check timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc).replace(tzinfo=None), description="Check timestamp")

@@ -835,7 +835,7 @@ class TestTensorRTGPU:
         if not creds:
             return None
         
-        username, password = creds.split(':')[0].split(':')
+        username, password = creds.split(':', 1)
         
         # Try known camera IPs
         for ip in ['192.168.5.176', '192.168.5.180']:
@@ -870,12 +870,14 @@ class TestTensorRTGPU:
         engine = runtime.deserialize_cuda_engine(engine_data)
         context = engine.create_execution_context()
         
-        buffers = self._allocate_buffers(engine)
+        buffers = self._allocate_buffers(engine, context)
         
-        # Preprocess frame
-        input_shape = engine.get_binding_shape(0)
+        # Preprocess frame - use TensorRT 10 API
+        input_name = engine.get_tensor_name(0)
+        input_shape = engine.get_tensor_shape(input_name)
         if input_shape[0] == -1:
             input_shape = (1,) + tuple(input_shape[1:])
+            context.set_input_shape(input_name, input_shape)
         
         height, width = input_shape[2:4]
         
@@ -888,8 +890,10 @@ class TestTensorRTGPU:
         input_tensor = normalized.transpose(2, 0, 1)
         input_tensor = np.expand_dims(input_tensor, 0)
         
-        # Copy to buffer
-        np.copyto(buffers['host_inputs'][0], input_tensor.ravel())
+        # Copy to buffer - use new buffer structure
+        if buffers['input_names']:
+            input_name = buffers['input_names'][0]
+            buffers['tensors'][input_name][0][:] = input_tensor
         
         # Run inference
         outputs = self._do_inference(context, buffers)

@@ -26,16 +26,7 @@ MQTT_PORT = int(os.getenv("MQTT_PORT", "0"))
 MQTT_TLS_PORT = int(os.getenv("MQTT_TLS_PORT", "8883"))
 
 
-def check_mqtt_tls_available():
-    """Check if MQTT broker is running with TLS enabled"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(2)
-        result = sock.connect_ex((MQTT_HOST, MQTT_TLS_PORT))
-        sock.close()
-        return result == 0
-    except:
-        return False
+# check_mqtt_tls_available removed - using test broker fixture instead
 
 
 def check_certificates_exist():
@@ -45,10 +36,7 @@ def check_certificates_exist():
 
 
 # Skip decorators
-requires_tls = pytest.mark.skipif(
-    not check_mqtt_tls_available(),
-    reason="MQTT TLS not available - start with MQTT_TLS=true"
-)
+# requires_tls removed - using test broker fixture instead
 
 requires_certs = pytest.mark.skipif(
     not check_certificates_exist(),
@@ -113,20 +101,18 @@ class TestCertificateManagement:
 class TestMQTTBrokerTLS:
     """Test MQTT broker TLS functionality"""
     
-    @requires_tls
-    def test_tls_port_listening(self):
+    def test_tls_port_listening(self, mqtt_tls_broker):
         """Test that MQTT broker is listening on TLS port"""
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(2)
         try:
-            result = sock.connect_ex((MQTT_HOST, MQTT_TLS_PORT))
-            assert result == 0, f"MQTT TLS port {MQTT_TLS_PORT} is not accessible"
+            result = sock.connect_ex((mqtt_tls_broker.host, mqtt_tls_broker.tls_port))
+            assert result == 0, f"MQTT TLS port {mqtt_tls_broker.tls_port} is not accessible"
         finally:
             sock.close()
     
-    @requires_tls
     @requires_certs
-    def test_tls_connection_with_valid_cert(self):
+    def test_tls_connection_with_valid_cert(self, mqtt_tls_broker):
         """Test connecting to MQTT with valid certificate"""
         connected = False
         
@@ -151,7 +137,7 @@ class TestMQTTBrokerTLS:
         client.tls_insecure_set(True)  # For test certificates
         
         # Connect
-        client.connect(MQTT_HOST, MQTT_TLS_PORT, 60)
+        client.connect(mqtt_tls_broker.host, mqtt_tls_broker.tls_port, 60)
         client.loop_start()
         
         # Wait for connection
@@ -162,9 +148,8 @@ class TestMQTTBrokerTLS:
         
         assert connected, "Failed to connect with valid certificate"
     
-    @requires_tls
     @requires_certs
-    def test_tls_publish_subscribe(self):
+    def test_tls_publish_subscribe(self, mqtt_tls_broker):
         """Test publishing and subscribing over TLS"""
         received_messages = []
         
@@ -191,7 +176,7 @@ class TestMQTTBrokerTLS:
         subscriber.tls_insecure_set(True)
         
         # Connect and subscribe
-        subscriber.connect(MQTT_HOST, MQTT_TLS_PORT, 60)
+        subscriber.connect(mqtt_tls_broker.host, mqtt_tls_broker.tls_port, 60)
         subscriber.subscribe("test/tls/#")
         subscriber.loop_start()
         
@@ -210,7 +195,7 @@ class TestMQTTBrokerTLS:
         publisher.tls_insecure_set(True)
         
         # Connect and publish
-        publisher.connect(MQTT_HOST, MQTT_TLS_PORT, 60)
+        publisher.connect(mqtt_tls_broker.host, mqtt_tls_broker.tls_port, 60)
         publisher.loop_start()
         
         test_payload = {"test": "TLS message", "timestamp": time.time()}
@@ -235,8 +220,8 @@ class TestServiceTLS:
     def test_services_read_tls_config(self):
         """Test that all services read MQTT_TLS environment variable"""
         services = [
-            ("camera_detector", "detect.Config"),
-            ("fire_consensus", "consensus.Config"),
+            ("camera_detector", "detect.CameraDetectorConfig"),
+            ("fire_consensus", "consensus.FireConsensusConfig"),
             ("gpio_trigger", "trigger.CONFIG"),
         ]
         
@@ -254,18 +239,18 @@ class TestServiceTLS:
                     del sys.modules[module_name]
                 
                 if service_dir == "gpio_trigger":
-                    # GPIO trigger uses different structure
-                    import trigger
-                    import importlib
-                    importlib.reload(trigger)
-                    assert trigger.CONFIG['MQTT_TLS'] is True
+                    # GPIO trigger uses PumpControllerConfig
+                    from gpio_trigger.trigger import PumpControllerConfig
+                    config = PumpControllerConfig()
+                    assert config.mqtt_tls is True
                 else:
-                    # Other services use Config class
+                    # Other services use ConfigBase-derived classes
                     module_name, class_name = config_path.split('.')
                     module = __import__(module_name)
                     config_class = getattr(module, class_name)
                     config = config_class()
-                    assert config.MQTT_TLS is True
+                    # ConfigBase stores mqtt_tls in lowercase
+                    assert config.mqtt_tls is True
                 
                 # Clean up module cache
                 if module_name in sys.modules:
@@ -279,9 +264,8 @@ class TestServiceTLS:
             else:
                 os.environ.pop('MQTT_TLS', None)
     
-    @requires_tls
     @requires_certs
-    def test_service_tls_connection(self):
+    def test_service_tls_connection(self, mqtt_tls_broker):
         """Test that a service can connect using TLS"""
         ca_cert = str(CERT_DIR / "ca.crt")
         
@@ -306,7 +290,7 @@ class TestServiceTLS:
                 connected = True
         
         client.on_connect = on_connect
-        client.connect(MQTT_HOST, MQTT_TLS_PORT, 60)
+        client.connect(mqtt_tls_broker.host, mqtt_tls_broker.tls_port, 60)
         client.loop_start()
         
         time.sleep(2)
@@ -351,27 +335,32 @@ class TestDockerTLS:
         ]
         
         for service_name in services_requiring_certs:
-            if service_name in compose_config.services:
-                service = compose_config.services[service_name]
+            if service_name in compose_config['services']:
+                service = compose_config['services'][service_name]
                 
                 # Check volumes
                 if 'volumes' in service:
-                    volumes_str = ''
+                    cert_volume_found = False
                     for vol in service['volumes']:
                         if isinstance(vol, str):
-                            volumes_str += vol + ' '
-                        elif isinstance(vol, dict) and 'source' in vol and 'target' in vol:
-                            volumes_str += f"{vol['source']}:{vol['target']} "
+                            # Check for string volume format
+                            if 'certs' in vol and '/mnt/data/certs' in vol:
+                                cert_volume_found = True
+                                break
+                        elif isinstance(vol, dict):
+                            # Check for dictionary volume format
+                            if vol.get('source') == 'certs' and vol.get('target') == '/mnt/data/certs':
+                                cert_volume_found = True
+                                break
                     
-                    assert 'certs:/mnt/data/certs' in volumes_str, \
-                        f"{service_name} doesn't mount certificates"
+                    assert cert_volume_found, \
+                        f"{service_name} doesn't mount certificates volume"
 
 
 class TestTLSFailureModes:
     """Test TLS failure scenarios"""
     
-    @requires_tls
-    def test_invalid_certificate_rejected(self):
+    def test_invalid_certificate_rejected(self, mqtt_tls_broker):
         """Test that invalid certificates are rejected"""
         client = mqtt.Client(
             callback_api_version=CallbackAPIVersion.VERSION2,

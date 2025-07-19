@@ -20,10 +20,11 @@ from test_utils.topic_namespace import create_namespaced_client
 class DockerIntegrationTest:
     """Test integration with Docker containers"""
     
-    def __init__(self, parallel_context: ParallelTestContext, docker_manager: DockerContainerManager):
+    def __init__(self, parallel_context: ParallelTestContext, docker_manager: DockerContainerManager, mqtt_broker=None):
         self.docker_client = docker.from_env()
         self.parallel_context = parallel_context
         self.docker_manager = docker_manager
+        self.mqtt_broker = mqtt_broker
         self.containers = {}
         self.test_passed = False
         self.network = None
@@ -76,84 +77,36 @@ class DockerIntegrationTest:
             raise RuntimeError("No test network provided by fixture")
         
     def start_mqtt_container(self):
-        """Start MQTT broker container"""
-        print("Starting MQTT broker container...")
+        """Use test MQTT broker from fixture"""
+        print("Using test MQTT broker...")
         
-        # Create network if not exists
-        if not self.network:
-            self.create_test_network()
-        
-        # Check if mosquitto image exists
-        try:
-            self.docker_client.images.get("eclipse-mosquitto:latest")
-        except docker.errors.ImageNotFound:
-            print("Pulling mosquitto image...")
-            self.docker_client.images.pull("eclipse-mosquitto:latest")
-        
-        # Remove existing test container if any
-        container_name = f"mqtt-test-{self.parallel_context.worker_id}"
-        try:
-            old = self.docker_client.containers.get(container_name)
-            old.stop()
-            old.remove()
-        except docker.errors.NotFound:
-            pass
+        # Get connection parameters from test broker
+        if self.mqtt_broker:
+            conn_params = self.mqtt_broker.get_connection_params()
+            self.mqtt_port = conn_params['port']
+            self.mqtt_host = conn_params['host']
             
-        # Create mosquitto config that listens on all interfaces
-        mosquitto_config = """listener 1883 0.0.0.0
-allow_anonymous true
-log_type all
-log_dest stdout
-"""
-        
-        # Create and start container with custom config using dynamic port
-        container = self.docker_client.containers.run(
-            "eclipse-mosquitto:latest",
-            name=container_name,
-            network=self.network.name,
-            ports={'1883/tcp': None},  # Use dynamic port allocation
-            detach=True,
-            remove=False,
-            command=[
-                "sh", "-c",
-                f'echo "{mosquitto_config}" > /mosquitto/config/mosquitto.conf && '
-                'exec mosquitto -c /mosquitto/config/mosquitto.conf'
-            ]
-        )
-        
-        self.containers['mqtt'] = container
-        
-        # Get the dynamically allocated port
-        container.reload()  # Refresh container info to get port mapping
-        port_info = container.attrs['NetworkSettings']['Ports']['1883/tcp']
-        if port_info and len(port_info) > 0:
-            self.mqtt_port = int(port_info[0]['HostPort'])
+            # Test connection
+            try:
+                client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test")
+                client.connect(self.mqtt_host, self.mqtt_port, 60)
+                client.disconnect()
+                print(f"✓ MQTT broker ready on {self.mqtt_host}:{self.mqtt_port}")
+                return True
+            except Exception as e:
+                print(f"MQTT connection failed: {e}")
+                return False
         else:
-            print("ERROR: Could not get MQTT container port")
-            return False
-        
-        print(f"MQTT broker started on port {self.mqtt_port}")
-        
-        # Wait for MQTT to be ready
-        time.sleep(3)
-        
-        # Test connection
-        try:
-            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test")
-            client.connect("localhost", self.mqtt_port, 60)
-            client.disconnect()
-            print("✓ MQTT broker ready")
-            return True
-        except Exception as e:
-            print(f"MQTT connection failed: {e}")
+            print("ERROR: No test MQTT broker provided")
             return False
             
     def start_consensus_container(self):
         """Start fire consensus container"""
         print("Starting fire consensus container...")
         
-        # Get the MQTT container name that was used
-        mqtt_container_name = f"mqtt-test-{self.parallel_context.worker_id}"
+        # Get MQTT connection parameters
+        mqtt_host = self.mqtt_host if hasattr(self, 'mqtt_host') else 'localhost'
+        mqtt_port = self.mqtt_port if hasattr(self, 'mqtt_port') else 1883
         
         # Build custom consensus image for testing
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -248,10 +201,10 @@ CMD ["python3.12", "-u", "consensus.py"]
             container = self.docker_client.containers.run(
                 "wildfire-watch/fire_consensus:test",
                 name=consensus_container_name,
-                network=self.network.name,
+                network_mode='host',  # Use host network to access test broker
                 environment={
-                    'MQTT_BROKER': mqtt_container_name,  # Use the actual MQTT container name
-                    'MQTT_PORT': '1883',  # Internal port, not mapped port
+                    'MQTT_BROKER': mqtt_host,  # Use test broker host
+                    'MQTT_PORT': str(mqtt_port),  # Use test broker port
                     'CONSENSUS_THRESHOLD': '2',
                     'SINGLE_CAMERA_TRIGGER': 'false',
                     'MIN_CONFIDENCE': '0.7',
@@ -309,14 +262,14 @@ CMD ["python3.12", "-u", "consensus.py"]
                 
         monitor = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "monitor")
         monitor.on_message = on_message
-        monitor.connect("localhost", self.mqtt_port)
+        monitor.connect(self.mqtt_host, self.mqtt_port)
         monitor.subscribe("#", qos=0)  # Subscribe to all topics for debugging
         monitor.loop_start()
         
         # 6. Send camera telemetry first
         print("Sending camera telemetry...")
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "publisher")
-        publisher.connect("localhost", self.mqtt_port)
+        publisher.connect(self.mqtt_host, self.mqtt_port)
         
         # Send telemetry for two cameras
         for camera_id in ['docker_test_cam1', 'docker_test_cam2']:
@@ -399,7 +352,7 @@ CMD ["python3.12", "-u", "consensus.py"]
 @pytest.mark.slow
 @pytest.mark.docker
 @pytest.mark.integration
-def test_docker_integration(parallel_test_context, docker_container_manager):
+def test_docker_integration(parallel_test_context, docker_container_manager, test_mqtt_broker):
     """Test Docker container integration"""
     import docker
     
@@ -432,7 +385,7 @@ def test_docker_integration(parallel_test_context, docker_container_manager):
         driver="bridge"
     )
     
-    test = DockerIntegrationTest(parallel_test_context, docker_container_manager)
+    test = DockerIntegrationTest(parallel_test_context, docker_container_manager, test_mqtt_broker)
     test.network = network
     
     try:
@@ -463,7 +416,7 @@ if __name__ == "__main__":
     # Standalone execution
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from tests.helpers import ParallelTestContext, DockerContainerManager
+    from test_utils.helpers import ParallelTestContext, DockerContainerManager
     
     context = ParallelTestContext("standalone")
     manager = DockerContainerManager("standalone")

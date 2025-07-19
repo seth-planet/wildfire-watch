@@ -58,9 +58,20 @@ class MQTTService(SafeLoggingMixin):
         
         # Topic prefix for test isolation
         topic_prefix = getattr(config, 'topic_prefix', config.get('TOPIC_PREFIX', '') if hasattr(config, 'get') else '')
+        
+        # Validate prefix to prevent invalid characters
+        if topic_prefix:
+            invalid_chars = ['#', '+', '\n', '\r', '\0']
+            if any(char in topic_prefix for char in invalid_chars):
+                raise ValueError(f"Invalid characters in TOPIC_PREFIX: {topic_prefix}")
+        
         self._topic_prefix = topic_prefix
         if self._topic_prefix and not self._topic_prefix.endswith('/'):
             self._topic_prefix += '/'
+        
+        # Log the effective prefix for debugging
+        if self._topic_prefix:
+            self._safe_log('info', f"MQTT topic prefix configured: '{self._topic_prefix}'")
         
         # Callbacks
         self._on_connect_callback: Optional[Callable] = None

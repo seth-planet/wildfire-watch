@@ -62,18 +62,8 @@ class TestE2ECoralFrigate:
         """Set camera credentials for test"""
         monkeypatch.setenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
     
-    @pytest.fixture
-    def mqtt_broker(self, worker_id):
-        """Start test MQTT broker with worker isolation"""
-        broker = TestMQTTBroker(session_scope=False, worker_id=worker_id)
-        broker.start()
-        
-        # Wait for broker to be ready
-        if not broker.wait_for_ready(timeout=10):
-            pytest.fail("MQTT broker failed to start")
-            
-        yield broker
-        broker.stop()
+    # Removed test_mqtt_broker fixture - now using test_test_mqtt_broker from conftest.py
+    # This prevents port conflicts in parallel test execution
     
     @pytest.fixture(autouse=True)
     def cleanup_frigate_containers(self, worker_id):
@@ -118,7 +108,7 @@ class TestE2ECoralFrigate:
     @pytest.mark.infrastructure_dependent
     @pytest.mark.timeout(1800)  # 30 minute timeout for camera discovery
     @requires_hardware_lock("coral_tpu", timeout=1800)
-    def test_coral_frigate_fire_detection_e2e(self, mqtt_broker, temp_config_dir):
+    def test_coral_frigate_fire_detection_e2e(self, test_mqtt_broker, temp_config_dir):
         """Test complete fire detection pipeline with Coral TPU"""
         print("\n" + "="*80)
         print("E2E TEST: Coral TPU Fire Detection with Frigate (Fixed)")
@@ -186,13 +176,13 @@ class TestE2ECoralFrigate:
         # Step 4: Generate Frigate configuration
         print("\n4. Generating Frigate configuration...")
         config_path = self._generate_frigate_config_fixed(
-            temp_config_dir, model_path, coral_devices, cameras, mqtt_broker.port
+            temp_config_dir, model_path, coral_devices, cameras, test_mqtt_broker.port
         )
         print(f"✓ Config saved: {config_path}")
         
         # Step 5: Start Frigate container
         print("\n5. Starting Frigate container...")
-        container = self._start_frigate_container_fixed(temp_config_dir, mqtt_broker)
+        container = self._start_frigate_container_fixed(temp_config_dir, test_mqtt_broker)
         if container is None:
             pytest.fail("Failed to start Frigate container. Check Coral TPU access and configuration.")
         
@@ -214,7 +204,7 @@ class TestE2ECoralFrigate:
         try:
             # Step 7: Test MQTT connectivity with timeout
             print("\n7. Testing MQTT connectivity...")
-            mqtt_client = self._setup_mqtt_client(mqtt_broker.port)
+            mqtt_client = self._setup_mqtt_client(test_mqtt_broker.port)
             mqtt_messages = []
             message_event = Event()
             
@@ -478,6 +468,9 @@ except Exception as e1:
                 'client_id': 'frigate_test',
                 'stats_interval': 15  # Minimum allowed by Frigate
             },
+            'database': {
+                'path': '/config/frigate.db'  # Specify database path to avoid migration issues
+            },
             'detectors': detectors,
         }
         
@@ -562,7 +555,7 @@ except Exception as e1:
         
         return config_path
     
-    def _start_frigate_container_fixed(self, config_dir, mqtt_broker):
+    def _start_frigate_container_fixed(self, config_dir, test_mqtt_broker):
         """Start Frigate container with proper configuration"""
         client = docker.from_env()
         
@@ -595,7 +588,7 @@ except Exception as e1:
             'devices': device_mapping,
             'environment': {
                 'FRIGATE_MQTT_HOST': 'localhost',
-                'FRIGATE_MQTT_PORT': str(mqtt_broker.port),
+                'FRIGATE_MQTT_PORT': str(test_mqtt_broker.port),
                 'PYTHONPATH': '/opt/frigate',
             },
             'network_mode': 'host',  # Required for localhost MQTT access
@@ -628,8 +621,11 @@ except Exception as e1:
         start_time = time.time()
         ready_indicators = [
             "Starting Frigate",
-            "Starting detector process", 
-            "Capture process started",
+            "Recording process started",
+            "Review process started", 
+            "Starting detection process",
+            "TPU found",
+            "FastAPI started",
             "Frigate is running",
             "Loaded detector model",
             "Started Frigate"
@@ -671,19 +667,22 @@ except Exception as e1:
                         seen_indicators.add(indicator)
                         
                         # Check if fully ready
-                        if any(ready in logs for ready in ["Frigate is running", "Started Frigate"]):
+                        if any(ready in logs for ready in ["FastAPI started", "Frigate is running", "Started Frigate"]):
                             print("  ✓ Frigate startup complete")
                             time.sleep(3)  # Give it a moment to stabilize
                             return True
                 
                 # Check for Coral TPU detection
-                if "coral" in logs.lower():
+                if "coral" in logs.lower() or "tpu" in logs.lower():
                     if "edge tpu detected" in logs.lower() and "coral_detected" not in seen_indicators:
                         print("  ✓ Coral TPU detected")
                         seen_indicators.add("coral_detected")
                     elif "loading edgetpu delegate" in logs.lower() and "coral_loading" not in seen_indicators:
                         print("  ✓ Loading EdgeTPU delegate")
                         seen_indicators.add("coral_loading")
+                    elif "tpu found" in logs.lower() and "tpu_found" not in seen_indicators:
+                        print("  ✓ TPU found")
+                        seen_indicators.add("tpu_found")
                 
                 # Handle s6 init process
                 if "fix-attrs successfully started" in logs and "fix_attrs" not in seen_indicators:
@@ -705,7 +704,7 @@ except Exception as e1:
     
     def _setup_mqtt_client(self, port):
         """Setup MQTT client for testing"""
-        client = mqtt.Client(client_id='test_client')
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id='test_client')
         
         # Connect with retry logic
         max_retries = 5
@@ -726,8 +725,21 @@ except Exception as e1:
         logs = container.logs().decode()
         coral_active = False
         
-        if "edge tpu" in logs.lower():
-            coral_active = True
+        # Check for various TPU indicators
+        tpu_indicators = [
+            "edge tpu",
+            "tpu found",
+            "edgetpu",
+            "coral",
+            "attempting to load tpu",
+            "detector.coral"
+        ]
+        
+        for indicator in tpu_indicators:
+            if indicator in logs.lower():
+                coral_active = True
+                print(f"  ✓ Found TPU indicator in logs: '{indicator}'")
+                break
         
         # Check MQTT stats
         stats_msgs = [m for m in mqtt_messages if m['topic'] == 'frigate/stats']
@@ -792,7 +804,7 @@ except Exception as e1:
     @pytest.mark.infrastructure_dependent
     @pytest.mark.timeout(600)  # 10 minute timeout
     @requires_hardware_lock("coral_tpu", timeout=600)
-    def test_coral_frigate_standard_model_e2e(self, mqtt_broker, temp_config_dir):
+    def test_coral_frigate_standard_model_e2e(self, test_mqtt_broker, temp_config_dir):
         """Test Coral TPU with standard Frigate using SSD MobileNet model"""
         print("\n" + "="*80)
         print("E2E TEST: Coral TPU with Standard Frigate (SSD MobileNet)")
@@ -817,13 +829,13 @@ except Exception as e1:
         # Step 4: Generate Frigate configuration for SSD model
         print("\n4. Generating Frigate configuration...")
         config_path = self._generate_standard_frigate_config(
-            temp_config_dir, model_path, coral_devices, mqtt_broker.port
+            temp_config_dir, model_path, coral_devices, test_mqtt_broker.port
         )
         print(f"✓ Config saved: {config_path}")
         
         # Step 5: Start Frigate container
         print("\n5. Starting Frigate container...")
-        container = self._start_frigate_container_fixed(temp_config_dir, mqtt_broker)
+        container = self._start_frigate_container_fixed(temp_config_dir, test_mqtt_broker)
         if container is None:
             pytest.fail("Failed to start Frigate container")
         
@@ -885,6 +897,9 @@ except Exception as e1:
                 'topic_prefix': 'frigate',
                 'client_id': 'frigate_test_standard',
                 'stats_interval': 15
+            },
+            'database': {
+                'path': '/config/frigate.db'  # Specify database path to avoid migration issues
             },
             'detectors': detectors,
             'model': {

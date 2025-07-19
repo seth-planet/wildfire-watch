@@ -327,6 +327,29 @@ def test_mqtt_tls_broker(tmp_path):
     broker.stop()
 
 
+@pytest.fixture
+def mqtt_tls_broker(worker_id):
+    """Provide a test MQTT broker with TLS enabled using project certificates"""
+    # Import here to avoid circular dependencies
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_utils.mqtt_tls_test_broker import MQTTTLSTestBroker
+    
+    # Use the project's actual certificates
+    cert_dir = os.path.join(project_root, 'certs')
+    
+    # Create broker with worker-specific ports for parallel test safety
+    broker = MQTTTLSTestBroker(cert_dir=cert_dir)
+    broker.start()
+    
+    # Wait for TLS port to be ready
+    if not broker.wait_for_tls_ready(timeout=30):
+        raise RuntimeError("TLS broker failed to start")
+    
+    yield broker
+    
+    broker.stop()
+
+
 # ─────────────────────────────────────────────────────────────
 # Session cleanup hooks for parallel test isolation
 # ─────────────────────────────────────────────────────────────
@@ -682,45 +705,54 @@ def legacy_config_adapter():
     return _create_config
 
 
-def configure_pump_controller_for_test(test_mqtt_broker, mqtt_topic_factory):
-    """Configure PumpController CONFIG for test environment.
+@pytest.fixture
+def pump_controller_factory(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
+    """Factory fixture for creating PumpController instances with proper test configuration.
     
-    This helper function properly updates the CONFIG dictionary that PumpController
-    uses, since CONFIG is loaded at module import time before test fixtures run.
+    This fixture creates PumpController instances with dependency injection,
+    avoiding the legacy CONFIG dictionary approach.
     
-    Args:
-        test_mqtt_broker: The test MQTT broker fixture
-        mqtt_topic_factory: The MQTT topic factory fixture
-        
-    Returns:
-        dict: The updated CONFIG values for verification
+    Usage:
+        controller = pump_controller_factory()
+        # or with custom config:
+        controller = pump_controller_factory(max_engine_runtime=60)
     """
-    from gpio_trigger.trigger import CONFIG
+    from tests.test_utils.helpers import create_pump_controller_with_config
     
-    # Get connection parameters from test broker
-    conn_params = test_mqtt_broker.get_connection_params()
+    def _create_controller(**kwargs):
+        # Get connection parameters from test broker
+        conn_params = test_mqtt_broker.get_connection_params()
+        
+        # Get unique topic prefix for test isolation
+        full_topic = mqtt_topic_factory("dummy")
+        topic_prefix = full_topic.rsplit('/', 1)[0]
+        
+        # Set environment variables for the configuration
+        test_env = {
+            'MQTT_BROKER': conn_params['host'],
+            'MQTT_PORT': str(conn_params['port']),
+            'MQTT_TLS': 'false',
+            'MQTT_TOPIC_PREFIX': topic_prefix,
+        }
+        
+        # Add any custom configuration from kwargs
+        for key, value in kwargs.items():
+            env_key = key.upper()
+            test_env[env_key] = str(value)
+        
+        # Apply environment variables
+        for key, value in test_env.items():
+            monkeypatch.setenv(key, value)
+        
+        # Create and return the controller
+        return create_pump_controller_with_config(
+            test_env=test_env,
+            mqtt_conn_params=conn_params,
+            topic_prefix=topic_prefix,
+            auto_connect=kwargs.get('auto_connect', False)
+        )
     
-    # Get unique topic prefix for test isolation
-    full_topic = mqtt_topic_factory("dummy")
-    topic_prefix = full_topic.rsplit('/', 1)[0]
-    
-    # Update CONFIG directly since it's loaded at module import time
-    CONFIG['MQTT_BROKER'] = conn_params['host']
-    CONFIG['MQTT_PORT'] = conn_params['port']
-    CONFIG['MQTT_TLS'] = False
-    CONFIG['TOPIC_PREFIX'] = topic_prefix
-    
-    # Update topic paths with prefix
-    if topic_prefix:
-        CONFIG['TRIGGER_TOPIC'] = f"{topic_prefix}/fire/trigger"
-        CONFIG['EMERGENCY_TOPIC'] = f"{topic_prefix}/fire/emergency"
-        CONFIG['TELEMETRY_TOPIC'] = f"{topic_prefix}/system/trigger_telemetry"
-    
-    return {
-        'host': conn_params['host'],
-        'port': conn_params['port'],
-        'topic_prefix': topic_prefix
-    }
+    return _create_controller
 
 
 # ==============================
@@ -735,8 +767,9 @@ def gpio_test_setup():
     or the built-in simulation mode when running on non-Pi hardware.
     """
     import threading
+    import os
     # Import the current GPIO from trigger module to ensure we use the right instance
-    from gpio_trigger.trigger import GPIO, CONFIG
+    from gpio_trigger.trigger import GPIO
     
     # GPIO is now always available (real or simulated)
     # Ensure GPIO lock exists (for compatibility with older code)
@@ -751,12 +784,21 @@ def gpio_test_setup():
         if hasattr(GPIO, '_state'):
             GPIO._state.clear()
         
-        # Set all pins to LOW initially
-        for pin_name in ['MAIN_VALVE_PIN', 'IGN_START_PIN', 'IGN_ON_PIN',
-                        'IGN_OFF_PIN', 'REFILL_VALVE_PIN', 'PRIMING_VALVE_PIN',
-                        'RPM_REDUCE_PIN']:
-            if pin_name in CONFIG:
-                GPIO.setup(CONFIG[pin_name], GPIO.OUT, initial=GPIO.LOW)
+        # Set all pins to LOW initially using default pin values
+        pin_defaults = {
+            'MAIN_VALVE_PIN': 18,
+            'IGN_START_PIN': 23,
+            'IGN_ON_PIN': 24,
+            'IGN_OFF_PIN': 25,
+            'REFILL_VALVE_PIN': 22,
+            'PRIMING_VALVE_PIN': 26,
+            'RPM_REDUCE_PIN': 27,
+        }
+        
+        for pin_name, default_pin in pin_defaults.items():
+            # Get pin from environment or use default
+            pin = int(os.getenv(pin_name, str(default_pin)))
+            GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
     
     yield GPIO
     

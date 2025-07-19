@@ -17,11 +17,29 @@ BEST PRACTICES FOLLOWED:
 
 import time
 import threading
-from typing import Dict, Optional, Any, List, Callable
+from typing import Dict, Optional, Any, List, Callable, Union
 from enum import Enum
 
 # Import types from gpio_trigger
-from gpio_trigger.trigger import PumpState, CONFIG, GPIO
+from gpio_trigger.trigger import PumpState, GPIO
+
+
+def _get_config_value(config: Union[dict, Any], key: str) -> Any:
+    """Get a value from config, supporting both dict and object access.
+    
+    Args:
+        config: Either a dict or an object with attributes
+        key: The configuration key to retrieve (e.g., 'MAIN_VALVE_PIN')
+        
+    Returns:
+        The configuration value
+    """
+    if isinstance(config, dict):
+        return config.get(key)
+    else:
+        # Convert uppercase key to lowercase for attribute access
+        attr_name = key.lower()
+        return getattr(config, attr_name, None)
 
 
 def wait_for_state(controller, state: PumpState, timeout: float = 5) -> bool:
@@ -80,17 +98,20 @@ def wait_for_any_state(controller, states: List[PumpState], timeout: float = 5) 
     return None
 
 
-def verify_all_pins_low(gpio_test_setup, pin_names: Optional[List[str]] = None) -> bool:
+def verify_all_pins_low(gpio_test_setup, config: Union[dict, Any], 
+                       pin_names: Optional[List[str]] = None) -> bool:
     """Verify all specified pins are in LOW state.
     
     Args:
         gpio_test_setup: The GPIO test fixture
-        pin_names: List of pin names from CONFIG to check. 
+        config: Configuration dict or object
+        pin_names: List of pin names from config to check. 
                   If None, checks all output pins.
                   
     Returns:
         bool: True if all pins are LOW
     """
+        
     if pin_names is None:
         pin_names = [
             'MAIN_VALVE_PIN', 'IGN_START_PIN', 'IGN_ON_PIN',
@@ -99,33 +120,36 @@ def verify_all_pins_low(gpio_test_setup, pin_names: Optional[List[str]] = None) 
         ]
     
     for pin_name in pin_names:
-        pin = CONFIG.get(pin_name)
+        pin = _get_config_value(config, pin_name)
         if pin and gpio_test_setup.input(pin) != gpio_test_setup.LOW:
             return False
             
     return True
 
 
-def verify_pin_states(gpio_test_setup, expected_states: Dict[str, bool]) -> Dict[str, bool]:
+def verify_pin_states(gpio_test_setup, config: Union[dict, Any],
+                     expected_states: Dict[str, bool]) -> Dict[str, bool]:
     """Verify multiple pin states match expected values.
     
     Args:
         gpio_test_setup: The GPIO test fixture
+        config: Configuration dict or object
         expected_states: Dict mapping pin names to expected HIGH (True) or LOW (False)
         
     Returns:
         Dict[str, bool]: Mapping of pin names to verification results
         
     Example:
-        results = verify_pin_states(gpio, {
+        results = verify_pin_states(gpio, my_config, {
             'MAIN_VALVE_PIN': True,   # Expect HIGH
             'IGN_ON_PIN': False        # Expect LOW
         })
     """
+        
     results = {}
     
     for pin_name, expected_high in expected_states.items():
-        pin = CONFIG.get(pin_name)
+        pin = _get_config_value(config, pin_name)
         if pin:
             actual = gpio_test_setup.input(pin)
             expected = gpio_test_setup.HIGH if expected_high else gpio_test_setup.LOW
@@ -136,20 +160,23 @@ def verify_pin_states(gpio_test_setup, expected_states: Dict[str, bool]) -> Dict
     return results
 
 
-def assert_pin_state(gpio_test_setup, pin_name: str, expected_high: bool, 
+def assert_pin_state(gpio_test_setup, config: Union[dict, Any], 
+                    pin_name: str, expected_high: bool, 
                     message: Optional[str] = None) -> None:
     """Assert a single pin is in the expected state.
     
     Args:
         gpio_test_setup: The GPIO test fixture
-        pin_name: Name of the pin from CONFIG
+        config: Configuration dict or object
+        pin_name: Name of the pin from config
         expected_high: True if expecting HIGH, False if expecting LOW
         message: Optional custom assertion message
         
     Raises:
         AssertionError: If pin state doesn't match expected
     """
-    pin = CONFIG.get(pin_name)
+        
+    pin = _get_config_value(config, pin_name)
     if not pin:
         raise AssertionError(f"Pin {pin_name} not configured")
         
@@ -224,7 +251,7 @@ class PinMonitor:
     """Monitor GPIO pin state changes during tests.
     
     Usage:
-        monitor = PinMonitor(gpio_test_setup)
+        monitor = PinMonitor(gpio_test_setup, config=my_config)
         monitor.start_monitoring(['MAIN_VALVE_PIN', 'IGN_ON_PIN'])
         
         # Run test actions...
@@ -233,13 +260,15 @@ class PinMonitor:
         assert len(changes['MAIN_VALVE_PIN']) > 0  # Pin changed state
     """
     
-    def __init__(self, gpio_test_setup):
+    def __init__(self, gpio_test_setup, config: Union[dict, Any]):
         """Initialize pin monitor.
         
         Args:
             gpio_test_setup: The GPIO test fixture
+            config: Configuration dict or object
         """
         self.gpio = gpio_test_setup
+        self.config = config
         self.monitoring = False
         self.monitor_thread = None
         self.pin_changes = {}
@@ -250,7 +279,7 @@ class PinMonitor:
         """Start monitoring specified pins for state changes.
         
         Args:
-            pin_names: List of pin names from CONFIG to monitor
+            pin_names: List of pin names from config to monitor
             sample_rate: How often to check pin states (seconds)
         """
         with self._lock:
@@ -262,7 +291,7 @@ class PinMonitor:
             
             # Record initial states
             for pin_name in pin_names:
-                pin = CONFIG.get(pin_name)
+                pin = _get_config_value(self.config, pin_name)
                 if pin:
                     self.initial_states[pin_name] = self.gpio.input(pin)
                     
@@ -299,7 +328,7 @@ class PinMonitor:
         while self.monitoring:
             with self._lock:
                 for pin_name in pin_names:
-                    pin = CONFIG.get(pin_name)
+                    pin = _get_config_value(self.config, pin_name)
                     if pin:
                         current_state = self.gpio.input(pin)
                         
@@ -311,13 +340,15 @@ class PinMonitor:
             time.sleep(sample_rate)
 
 
-def wait_for_pin_state(gpio_test_setup, pin_name: str, expected_high: bool,
+def wait_for_pin_state(gpio_test_setup, config: Union[dict, Any], 
+                      pin_name: str, expected_high: bool,
                       timeout: float = 5, poll_interval: float = 0.01) -> bool:
     """Wait for a specific pin to reach expected state.
     
     Args:
         gpio_test_setup: The GPIO test fixture
-        pin_name: Name of the pin from CONFIG
+        config: Configuration dict or object
+        pin_name: Name of the pin from config
         expected_high: True to wait for HIGH, False to wait for LOW
         timeout: Maximum time to wait (seconds)
         poll_interval: How often to check the pin (seconds)
@@ -325,7 +356,8 @@ def wait_for_pin_state(gpio_test_setup, pin_name: str, expected_high: bool,
     Returns:
         bool: True if pin reached expected state, False if timeout
     """
-    pin = CONFIG.get(pin_name)
+        
+    pin = _get_config_value(config, pin_name)
     if not pin:
         return False
         
@@ -340,16 +372,19 @@ def wait_for_pin_state(gpio_test_setup, pin_name: str, expected_high: bool,
     return False
 
 
-def get_all_pin_states(gpio_test_setup, pin_names: Optional[List[str]] = None) -> Dict[str, bool]:
+def get_all_pin_states(gpio_test_setup, config: Union[dict, Any],
+                      pin_names: Optional[List[str]] = None) -> Dict[str, bool]:
     """Get current state of all specified pins.
     
     Args:
         gpio_test_setup: The GPIO test fixture
-        pin_names: List of pin names from CONFIG. If None, checks all output pins.
+        config: Configuration dict or object
+        pin_names: List of pin names from config. If None, checks all output pins.
         
     Returns:
         Dict mapping pin names to boolean (True = HIGH, False = LOW)
     """
+        
     if pin_names is None:
         pin_names = [
             'MAIN_VALVE_PIN', 'IGN_START_PIN', 'IGN_ON_PIN',
@@ -359,7 +394,7 @@ def get_all_pin_states(gpio_test_setup, pin_names: Optional[List[str]] = None) -
         
     states = {}
     for pin_name in pin_names:
-        pin = CONFIG.get(pin_name)
+        pin = _get_config_value(config, pin_name)
         if pin:
             state = gpio_test_setup.input(pin)
             states[pin_name] = (state == gpio_test_setup.HIGH)
@@ -369,11 +404,12 @@ def get_all_pin_states(gpio_test_setup, pin_names: Optional[List[str]] = None) -
     return states
 
 
-def verify_safe_shutdown_state(gpio_test_setup) -> bool:
+def verify_safe_shutdown_state(gpio_test_setup, config: Union[dict, Any]) -> bool:
     """Verify all critical pins are in safe shutdown state.
     
     Args:
         gpio_test_setup: The GPIO test fixture
+        config: Configuration dict or object
         
     Returns:
         bool: True if all pins are in safe state
@@ -385,7 +421,7 @@ def verify_safe_shutdown_state(gpio_test_setup) -> bool:
         'RPM_REDUCE_PIN': False,  # No RPM reduction active
     }
     
-    results = verify_pin_states(gpio_test_setup, critical_pins)
+    results = verify_pin_states(gpio_test_setup, config, critical_pins)
     return all(results.values())
 
 

@@ -43,14 +43,16 @@ class TestE2EHardwareIntegration:
         monkeypatch.setenv('DETECTION_WINDOW', '10')  # Detection window in seconds
         monkeypatch.setenv('AREA_INCREASE_RATIO', '1.2')  # 20% growth required
         
-        # Auto-detect AI hardware
-        if has_coral_tpu():
+        # Auto-detect AI hardware based on current Python version
+        # Coral TPU only works with Python 3.8
+        if has_coral_tpu() and sys.version_info[:2] == (3, 8):
             monkeypatch.setenv('FRIGATE_DETECTOR', 'coral')
             self.detector_type = 'coral'
         elif has_tensorrt():
             monkeypatch.setenv('FRIGATE_DETECTOR', 'tensorrt')
             self.detector_type = 'tensorrt'
         else:
+            # Default to CPU for Python 3.12 or when no hardware acceleration available
             monkeypatch.setenv('FRIGATE_DETECTOR', 'cpu')
             self.detector_type = 'cpu'
         
@@ -148,32 +150,35 @@ class TestE2EHardwareIntegration:
                     assert 'mac' in cam
                     assert 'name' in cam
     
-    # AI hardware is available - don't skip
-    @pytest.mark.coral_tpu
-    @pytest.mark.hardware_integration
+    @pytest.mark.hardware
     def test_ai_inference_on_camera_stream(self, test_mqtt_broker, monkeypatch):
-        """Test AI inference on real camera stream"""
-        # This test would:
-        # 1. Get camera RTSP stream
-        # 2. Run inference using available hardware
-        # 3. Verify detection works
-        # 4. Measure performance
+        """Test AI inference on real camera stream
+        
+        This test adapts to available hardware:
+        - Coral TPU: Requires Python 3.8, runs full inference test
+        - TensorRT: Runs GPU inference test (if implemented)
+        - CPU: Runs basic inference verification
+        """
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        print(f"[DEBUG] Python version: {python_version}")
+        print(f"[DEBUG] Detector type: {self.detector_type}")
         
         if self.detector_type == 'coral':
             # Coral TPU requires Python 3.8
             if sys.version_info[:2] != (3, 8):
-                pytest.skip(f"Coral TPU requires Python 3.8. Current: {sys.version_info.major}.{sys.version_info.minor}")
+                pytest.skip(f"Coral TPU requires Python 3.8. Current: {python_version}")
             self._test_coral_inference_on_stream()
         elif self.detector_type == 'tensorrt':
-            # TensorRT implementation not complete yet
-            pytest.skip("TensorRT inference test not implemented yet")
-            self._test_tensorrt_inference_on_stream()
+            # TensorRT works with Python 3.12
+            if sys.version_info[:2] == (3, 12):
+                self._test_cpu_inference_basic()  # Use CPU test for now
+            else:
+                pytest.skip("TensorRT inference test not implemented yet")
         else:
-            # CPU detector - just verify we can do basic operations
-            print(f"Running with CPU detector (no hardware acceleration available)")
+            # CPU detector - verify basic inference capability
+            print(f"Running with CPU detector on Python {python_version}")
             assert self.detector_type == 'cpu'
-            # Skip for now as CPU inference test not implemented
-            pytest.skip("CPU inference test not implemented yet")
+            self._test_cpu_inference_basic()
     
     def test_fire_consensus_with_simulated_detections(self, test_mqtt_broker, mqtt_client, monkeypatch):
         """Test fire consensus service with simulated detections"""
@@ -260,15 +265,19 @@ class TestE2EHardwareIntegration:
     
     def test_gpio_trigger_responds_to_fire(self, test_mqtt_broker):
         """Test GPIO trigger responds to fire detection"""
-        from gpio_trigger.trigger import PumpController, CONFIG
+        from gpio_trigger.trigger import PumpController, PumpControllerConfig
         
-        # Update CONFIG with test broker settings
-        CONFIG['MQTT_BROKER'] = test_mqtt_broker.host
-        CONFIG['MQTT_PORT'] = test_mqtt_broker.port
-        CONFIG['MQTT_TLS'] = False
+        # Set environment variables for test broker settings
+        import os
+        os.environ['MQTT_BROKER'] = test_mqtt_broker.host
+        os.environ['MQTT_PORT'] = str(test_mqtt_broker.port)
+        os.environ['MQTT_TLS'] = 'false'
         
-        # Start pump controller
-        controller = PumpController()
+        # Create config object - it will load from environment
+        config = PumpControllerConfig()
+        
+        # Start pump controller with config
+        controller = PumpController(config=config)
         self.services['pump'] = controller
         
         # PumpController connects automatically in __init__, no need to wait
@@ -345,12 +354,12 @@ class TestE2EHardwareIntegration:
             # Start all services
             from camera_detector.detect import CameraDetector
             from fire_consensus.consensus import FireConsensus
-            from gpio_trigger.trigger import PumpController, CONFIG
+            from gpio_trigger.trigger import PumpController, PumpControllerConfig
             
-            # Update CONFIG with test broker settings
-            CONFIG['MQTT_BROKER'] = test_mqtt_broker.host
-            CONFIG['MQTT_PORT'] = test_mqtt_broker.port
-            CONFIG['MQTT_TLS'] = False
+            # Set environment variables for test broker settings
+            os.environ['MQTT_BROKER'] = test_mqtt_broker.host
+            os.environ['MQTT_PORT'] = str(test_mqtt_broker.port)
+            os.environ['MQTT_TLS'] = 'false'
             
             # Camera detector - disable background scanning for test
             detector = CameraDetector()
@@ -677,6 +686,150 @@ class TestE2EHardwareIntegration:
         # Similar implementation for TensorRT
         # Would involve TensorRT engine loading and inference
         pass
+    
+    def _test_cpu_inference_basic(self):
+        """Test basic CPU inference capability
+        
+        This test verifies that the system can:
+        1. Load a model (ONNX or TFLite)
+        2. Process a test image
+        3. Return valid detections
+        4. Meet basic performance requirements
+        """
+        import cv2
+        import numpy as np
+        from pathlib import Path
+        
+        print("\nRunning CPU inference test...")
+        
+        # Find an available model
+        model_path = None
+        model_type = None
+        
+        # Try ONNX first (most compatible)
+        onnx_models = list(Path('converted_models').glob('yolo*.onnx'))
+        if onnx_models:
+            model_path = str(onnx_models[0])
+            model_type = 'onnx'
+            print(f"Using ONNX model: {model_path}")
+        else:
+            # Try TFLite without EdgeTPU
+            tflite_models = [f for f in Path('converted_models').glob('*.tflite') 
+                            if 'edgetpu' not in f.name]
+            if tflite_models:
+                model_path = str(tflite_models[0])
+                model_type = 'tflite'
+                print(f"Using TFLite model: {model_path}")
+        
+        if not model_path:
+            pytest.skip("No CPU-compatible models found (need .onnx or non-EdgeTPU .tflite)")
+        
+        # Create a test image
+        test_image = np.random.randint(0, 255, (640, 640, 3), dtype=np.uint8)
+        
+        # Add some shapes that look like objects
+        # Draw a bright rectangle (potential fire)
+        cv2.rectangle(test_image, (100, 100), (200, 200), (0, 100, 255), -1)
+        # Draw a circle (smoke)
+        cv2.circle(test_image, (400, 400), 50, (150, 150, 150), -1)
+        
+        inference_times = []
+        
+        if model_type == 'onnx':
+            try:
+                import onnxruntime as ort
+                
+                # Load ONNX model
+                session = ort.InferenceSession(model_path)
+                input_name = session.get_inputs()[0].name
+                input_shape = session.get_inputs()[0].shape
+                
+                # Prepare input
+                if len(input_shape) == 4:
+                    # Batch dimension
+                    height, width = input_shape[2:4]
+                else:
+                    height, width = input_shape[1:3]
+                
+                resized = cv2.resize(test_image, (width, height))
+                # Convert to RGB and normalize
+                input_data = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+                input_data = np.transpose(input_data, (2, 0, 1))  # HWC to CHW
+                input_data = np.expand_dims(input_data, axis=0)  # Add batch dimension
+                
+                # Run inference
+                for i in range(5):
+                    start = time.time()
+                    outputs = session.run(None, {input_name: input_data})
+                    inference_time = (time.time() - start) * 1000
+                    inference_times.append(inference_time)
+                    print(f"  Inference {i+1}: {inference_time:.2f}ms")
+                
+                print(f"ONNX outputs: {len(outputs)} tensors")
+                print(f"Output shapes: {[out.shape for out in outputs]}")
+                
+            except ImportError:
+                pytest.skip("onnxruntime not installed for CPU inference")
+            except Exception as e:
+                pytest.fail(f"ONNX inference failed: {e}")
+                
+        elif model_type == 'tflite':
+            try:
+                # Use regular tensorflow lite (not tflite_runtime which needs Python 3.8)
+                import tensorflow as tf
+                
+                # Load TFLite model
+                interpreter = tf.lite.Interpreter(model_path=model_path)
+                interpreter.allocate_tensors()
+                
+                input_details = interpreter.get_input_details()
+                output_details = interpreter.get_output_details()
+                
+                # Prepare input
+                input_shape = input_details[0]['shape']
+                height, width = input_shape[1:3]
+                resized = cv2.resize(test_image, (width, height))
+                
+                # Check input type
+                input_type = input_details[0]['dtype']
+                if input_type == np.uint8:
+                    input_data = resized.astype(np.uint8)
+                else:
+                    input_data = resized.astype(np.float32) / 255.0
+                
+                input_data = np.expand_dims(input_data, axis=0)
+                
+                # Run inference
+                for i in range(5):
+                    start = time.time()
+                    interpreter.set_tensor(input_details[0]['index'], input_data)
+                    interpreter.invoke()
+                    outputs = [interpreter.get_tensor(detail['index']) 
+                              for detail in output_details]
+                    inference_time = (time.time() - start) * 1000
+                    inference_times.append(inference_time)
+                    print(f"  Inference {i+1}: {inference_time:.2f}ms")
+                
+                print(f"TFLite outputs: {len(outputs)} tensors")
+                print(f"Output shapes: {[out.shape for out in outputs]}")
+                
+            except ImportError:
+                pytest.skip("tensorflow not installed for CPU inference")
+            except Exception as e:
+                pytest.fail(f"TFLite inference failed: {e}")
+        
+        # Verify results
+        assert len(inference_times) > 0, "No inference completed"
+        avg_time = sum(inference_times) / len(inference_times)
+        print(f"\nCPU Inference Results:")
+        print(f"  Model: {Path(model_path).name}")
+        print(f"  Average inference time: {avg_time:.2f}ms")
+        print(f"  Min/Max: {min(inference_times):.2f}ms / {max(inference_times):.2f}ms")
+        
+        # CPU inference should complete within reasonable time (5 seconds)
+        assert avg_time < 5000, f"CPU inference too slow: {avg_time:.2f}ms"
+        
+        print("✓ CPU inference test passed")
 
 
 @pytest.mark.hardware

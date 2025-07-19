@@ -14,6 +14,8 @@ import torch
 import time
 import argparse
 import json
+import tarfile
+import urllib.request
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 import subprocess
@@ -93,7 +95,9 @@ class UnifiedYOLOTrainer:
             'qat': {
                 'enabled': True,
                 'start_epoch': 150,
-                'calibration_batches': 100
+                'calibration_batches': 100,
+                'use_wildfire_calibration_data': True,
+                'calibration_data_url': 'https://huggingface.co/datasets/mailseth/wildfire-watch/resolve/main/wildfire_calibration_data.tar.gz?download=true'
             },
             'validation': {
                 'interval': 10,
@@ -315,7 +319,7 @@ class UnifiedYOLOTrainer:
             raise ValueError(f"Unsupported architecture: {arch}")
     
     def _create_yolo_nas_trainer(self):
-        """Create YOLO-NAS trainer using super-gradients"""
+        """Create YOLO-NAS trainer using super-gradients with optional QAT support"""
         try:
             from super_gradients import Trainer
             from super_gradients.training import models
@@ -339,15 +343,33 @@ class UnifiedYOLOTrainer:
         except ImportError as e:
             raise ImportError(f"super-gradients not available: {e}")
         
+        # Check if QAT is enabled
+        qat_enabled = self.config['qat']['enabled']
+        
         # Setup device
         device = setup_device(multi_gpu="auto", num_gpus=None)
         self.logger.info(f"Using device: {device}")
         
-        # Create trainer
-        trainer = Trainer(
-            experiment_name=self.config['experiment_name'],
-            ckpt_root_dir=str(self.output_dir / "checkpoints")
-        )
+        # Create trainer - use QATTrainer if QAT is enabled
+        if qat_enabled:
+            try:
+                from super_gradients.training.qat_trainer import QATTrainer
+                self.logger.info("Using QATTrainer for Quantization-Aware Training")
+                trainer = QATTrainer(
+                    experiment_name=self.config['experiment_name'],
+                    ckpt_root_dir=str(self.output_dir / "checkpoints")
+                )
+            except ImportError:
+                self.logger.warning("QATTrainer not available, falling back to regular Trainer")
+                trainer = Trainer(
+                    experiment_name=self.config['experiment_name'],
+                    ckpt_root_dir=str(self.output_dir / "checkpoints")
+                )
+        else:
+            trainer = Trainer(
+                experiment_name=self.config['experiment_name'],
+                ckpt_root_dir=str(self.output_dir / "checkpoints")
+            )
         
         # Create model
         arch_mapping = {
@@ -368,12 +390,17 @@ class UnifiedYOLOTrainer:
         # Create training parameters
         training_params = self._create_yolo_nas_training_params()
         
+        # Add QAT-specific parameters if enabled
+        if qat_enabled:
+            self._add_qat_params_to_training_params(training_params)
+        
         return {
             'trainer': trainer,
             'model': model,
             'train_loader': dataloaders['train'],
             'val_loader': dataloaders['val'],
-            'training_params': training_params
+            'training_params': training_params,
+            'qat_enabled': qat_enabled
         }
     
     def _create_yolo_nas_dataloaders(self):
@@ -629,6 +656,276 @@ class UnifiedYOLOTrainer:
         
         return training_params
     
+    def _add_qat_params_to_training_params(self, training_params: Dict[str, Any]):
+        """Add QAT-specific parameters to training parameters
+        
+        Args:
+            training_params: Training parameters dict to update
+        """
+        qat_config = self.config['qat']
+        
+        # Add quantization parameters
+        training_params.update({
+            # QAT-specific settings
+            'quantization_params': {
+                'selective_quantizer_params': {
+                    'calibrator_w': 'max',  # Weight calibration method
+                    'calibrator_i': 'histogram',  # Input calibration method  
+                    'per_channel': True,  # Per-channel quantization for weights
+                    'learn_amax': True,  # Learn activation ranges
+                    'skip_modules': []  # Modules to skip quantization
+                },
+                'calib_params': {
+                    'num_calib_batches': qat_config.get('calibration_batches', 100),
+                    'histogram_calib_method': 'entropy',  # entropy or percentile
+                    'percentile': 99.99,
+                    'verbose': True
+                },
+                'ptq_only': False,  # Do full QAT, not just PTQ
+            },
+            
+            # Checkpoint for QAT (start from trained FP32 model)
+            'checkpoint_params': {
+                'checkpoint_path': None,  # Will be set to FP32 checkpoint
+                'strict_load': 'no_key_matching'
+            }
+        })
+        
+        # Adjust training parameters for QAT phase
+        if qat_config.get('start_epoch', 0) > 0:
+            # This means we're doing QAT as a second phase
+            training_params['max_epochs'] = qat_config.get('qat_epochs', 50)
+            training_params['initial_lr'] = training_params['initial_lr'] * 0.1  # Reduce LR for fine-tuning
+            training_params['cosine_final_lr_ratio'] = 0.01
+            
+        self.logger.info(f"Added QAT parameters: calibration_batches={qat_config.get('calibration_batches', 100)}, "
+                        f"learn_amax=True, per_channel=True")
+    
+    def _create_qat_config(self, trainer_components: Dict[str, Any]) -> Dict[str, Any]:
+        """Create configuration dict for QATTrainer.train_from_config
+        
+        Args:
+            trainer_components: Dictionary containing trainer components
+            
+        Returns:
+            Configuration dict for QAT training
+        """
+        # Get checkpoint path for FP32 model if doing two-phase training
+        checkpoint_path = None
+        if self.config['qat']['start_epoch'] > 0:
+            # Look for existing checkpoint from FP32 training
+            experiment_name = self.config['experiment_name']
+            checkpoints_dir = self.output_dir / "checkpoints" / experiment_name
+            checkpoint_candidates = list(checkpoints_dir.glob("**/ckpt_best.pth"))
+            if checkpoint_candidates:
+                checkpoint_path = str(checkpoint_candidates[0])
+                self.logger.info(f"Using checkpoint for QAT: {checkpoint_path}")
+        
+        # Create QAT configuration
+        qat_config = {
+            'experiment_name': self.config['experiment_name'] + '_qat',
+            'ckpt_root_dir': str(self.output_dir / "checkpoints"),
+            
+            # Model and dataset
+            'arch_params': {
+                'num_classes': self.config['model']['num_classes']
+            },
+            'architecture': self.config['model']['architecture'],
+            'checkpoint_params': {
+                'checkpoint_path': checkpoint_path,
+                'strict_load': 'no_key_matching'
+            },
+            
+            # Dataset configuration
+            'dataset_params': {
+                'train_dataset_params': {
+                    'data_dir': self.config['dataset']['data_dir'],
+                    'images_dir': 'images/train',
+                    'labels_dir': 'labels/train',
+                    'classes': list(range(self.config['model']['num_classes'])),
+                },
+                'val_dataset_params': {
+                    'data_dir': self.config['dataset']['data_dir'],
+                    'images_dir': 'images/validation',
+                    'labels_dir': 'labels/validation',
+                    'classes': list(range(self.config['model']['num_classes'])),
+                },
+                'train_dataloader_params': {
+                    'batch_size': self.config['training']['batch_size'],
+                    'num_workers': self.config['training']['workers'],
+                    'shuffle': True,
+                    'drop_last': True,
+                    'pin_memory': True
+                },
+                'val_dataloader_params': {
+                    'batch_size': self.config['training']['batch_size'],
+                    'num_workers': self.config['training']['workers'],
+                    'shuffle': False,
+                    'drop_last': False,
+                    'pin_memory': True
+                }
+            },
+            
+            # Training parameters (already includes QAT params)
+            'training_hyperparams': trainer_components['training_params'],
+            
+            # QAT-specific parameters
+            'quantization_params': trainer_components['training_params'].get('quantization_params', {}),
+            
+            # Dataloader names
+            'train_dataloader': 'coco_detection_yolo_format_train',
+            'val_dataloader': 'coco_detection_yolo_format_val',
+        }
+        
+        # Add calibration dataloader if wildfire data is available
+        if self.config['qat'].get('use_wildfire_calibration_data', False):
+            calibration_dir = self._prepare_wildfire_calibration_data()
+            if calibration_dir:
+                calibration_loader = self._create_calibration_dataloader(calibration_dir)
+                if calibration_loader:
+                    qat_config['calib_dataloader'] = calibration_loader
+                    self.logger.info("Using wildfire calibration data for QAT calibration")
+                else:
+                    self.logger.warning("Failed to create calibration dataloader, using training data")
+        
+        return qat_config
+    
+    def _prepare_wildfire_calibration_data(self) -> Optional[Path]:
+        """Download and prepare wildfire calibration dataset for QAT
+        
+        Returns:
+            Path to calibration data directory or None if disabled/failed
+        """
+        qat_config = self.config['qat']
+        
+        if not qat_config.get('use_wildfire_calibration_data', False):
+            self.logger.info("Wildfire calibration data disabled, using training data for calibration")
+            return None
+            
+        # Set up calibration data directory
+        calibration_dir = self.output_dir / "calibration_data"
+        calibration_dir.mkdir(exist_ok=True)
+        
+        # Check if already downloaded
+        if (calibration_dir / "images").exists() and any((calibration_dir / "images").iterdir()):
+            self.logger.info(f"Using existing calibration data at {calibration_dir}")
+            return calibration_dir
+            
+        # Download calibration data
+        url = qat_config.get('calibration_data_url', 
+                            'https://huggingface.co/datasets/mailseth/wildfire-watch/resolve/main/wildfire_calibration_data.tar.gz?download=true')
+        
+        self.logger.info(f"Downloading wildfire calibration data from {url}")
+        tar_path = calibration_dir / "wildfire_calibration_data.tar.gz"
+        
+        try:
+            # Download with progress
+            def download_progress(block_num, block_size, total_size):
+                downloaded = block_num * block_size
+                percent = min(downloaded * 100 / total_size, 100)
+                self.logger.info(f"Download progress: {percent:.1f}%")
+            
+            urllib.request.urlretrieve(url, tar_path, reporthook=download_progress)
+            
+            # Extract tar file
+            self.logger.info("Extracting calibration data...")
+            with tarfile.open(tar_path, 'r:gz') as tar:
+                tar.extractall(calibration_dir)
+            
+            # Remove tar file to save space
+            tar_path.unlink()
+            
+            # Verify extraction
+            if not (calibration_dir / "images").exists():
+                # Try to find images directory in subdirectories
+                for subdir in calibration_dir.iterdir():
+                    if subdir.is_dir() and (subdir / "images").exists():
+                        # Move contents up one level
+                        import shutil
+                        for item in subdir.iterdir():
+                            shutil.move(str(item), str(calibration_dir / item.name))
+                        subdir.rmdir()
+                        break
+            
+            # Count images
+            image_count = len(list((calibration_dir / "images").glob("*.jpg"))) if (calibration_dir / "images").exists() else 0
+            self.logger.info(f"Calibration data ready: {image_count} images")
+            
+            if image_count == 0:
+                self.logger.warning("No images found in calibration data")
+                return None
+                
+            return calibration_dir
+            
+        except Exception as e:
+            self.logger.error(f"Failed to download/extract calibration data: {e}")
+            if tar_path.exists():
+                tar_path.unlink()
+            return None
+    
+    def _create_calibration_dataloader(self, calibration_dir: Path):
+        """Create dataloader for calibration data
+        
+        Args:
+            calibration_dir: Path to calibration data directory
+            
+        Returns:
+            Calibration dataloader or None
+        """
+        try:
+            from super_gradients.training.dataloaders.dataloaders import coco_detection_yolo_format_val
+            from super_gradients.training.datasets.detection_datasets.yolo_format_detection import YoloDarknetFormatDetectionDataset
+            
+            # Create a simple dataset from calibration images
+            # This assumes images are in calibration_dir/images/
+            images_dir = calibration_dir / "images"
+            
+            # Create temporary labels directory with dummy labels if needed
+            labels_dir = calibration_dir / "labels"
+            if not labels_dir.exists():
+                labels_dir.mkdir()
+                # Create dummy label files (empty) for each image
+                for img_path in images_dir.glob("*.jpg"):
+                    label_path = labels_dir / f"{img_path.stem}.txt"
+                    label_path.touch()  # Create empty file
+            
+            # Create calibration dataset
+            dataset_params = {
+                'data_dir': str(calibration_dir),
+                'images_dir': 'images',
+                'labels_dir': 'labels',
+                'classes': list(range(self.config['model']['num_classes'])),
+                'input_dim': self.config['model']['input_size'],
+                'transforms': [
+                    {'DetectionLongestMaxSize': {'max_height': self.config['model']['input_size'][0], 
+                                               'max_width': self.config['model']['input_size'][1]}},
+                    {'DetectionPadIfNeeded': {'min_height': self.config['model']['input_size'][0], 
+                                            'min_width': self.config['model']['input_size'][1], 
+                                            'image_pad_value': 114, 'mask_pad_value': 1}},
+                    {'DetectionTargetsFormatTransform': {'input_format': 'XYXY_LABEL', 
+                                                        'output_format': 'LABEL_CXCYWH'}}
+                ]
+            }
+            
+            # Create dataloader
+            calibration_loader = coco_detection_yolo_format_val(
+                dataset_params=dataset_params,
+                dataloader_params={
+                    'batch_size': min(self.config['training']['batch_size'], 8),  # Smaller batch for calibration
+                    'num_workers': 2,
+                    'shuffle': True,
+                    'drop_last': False,
+                    'pin_memory': False
+                }
+            )
+            
+            self.logger.info(f"Created calibration dataloader with {len(calibration_loader)} batches")
+            return calibration_loader
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create calibration dataloader: {e}")
+            return None
+    
     def _create_ultralytics_trainer(self):
         """Create Ultralytics YOLO trainer"""
         # TODO: Implement ultralytics trainer for YOLOv8/v9
@@ -694,12 +991,32 @@ class UnifiedYOLOTrainer:
             start_time = time.time()
             
             # Execute training with fixed dataloaders
-            trainer_components['trainer'].train(
-                model=trainer_components['model'],
-                training_params=trainer_components['training_params'],
-                train_loader=trainer_components['train_loader'],
-                valid_loader=trainer_components['val_loader']
-            )
+            if trainer_components.get('qat_enabled', False):
+                # For QAT, we need to handle training differently
+                self.logger.info("Executing Quantization-Aware Training...")
+                
+                # Check if we're using QATTrainer
+                if hasattr(trainer_components['trainer'].__class__, 'train_from_config'):
+                    # Create QAT configuration
+                    qat_config = self._create_qat_config(trainer_components)
+                    model, training_results = trainer_components['trainer'].train_from_config(qat_config)
+                else:
+                    # Fallback to regular training with QAT params
+                    self.logger.warning("QATTrainer.train_from_config not available, using regular train method")
+                    trainer_components['trainer'].train(
+                        model=trainer_components['model'],
+                        training_params=trainer_components['training_params'],
+                        train_loader=trainer_components['train_loader'],
+                        valid_loader=trainer_components['val_loader']
+                    )
+            else:
+                # Regular training
+                trainer_components['trainer'].train(
+                    model=trainer_components['model'],
+                    training_params=trainer_components['training_params'],
+                    train_loader=trainer_components['train_loader'],
+                    valid_loader=trainer_components['val_loader']
+                )
             
             training_time = time.time() - start_time
             self.logger.info(f"Training completed in {training_time/3600:.1f} hours")

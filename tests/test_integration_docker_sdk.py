@@ -30,15 +30,17 @@ class DockerSDKIntegrationTest:
         self.parallel_context = parallel_context
         self.docker_manager = docker_manager
         self.mqtt_broker = mqtt_broker
-        self.containers = []
+        self.containers = {}
         self.test_passed = False
+        self.network = None  # Will use host network mode
         
     def get_service_env(self, service_name: str) -> Dict[str, str]:
         """Get environment variables for a service with proper test isolation"""
         env = self.parallel_context.get_service_env(service_name)
         # Override MQTT settings to use test broker
-        env['MQTT_BROKER'] = self.mqtt_broker.host
-        env['MQTT_PORT'] = str(self.mqtt_broker.port)
+        conn_params = self.mqtt_broker.get_connection_params()
+        env['MQTT_BROKER'] = conn_params['host']
+        env['MQTT_PORT'] = str(conn_params['port'])
         env['MQTT_TLS'] = 'false'
         return env
         
@@ -67,28 +69,18 @@ class DockerSDKIntegrationTest:
             wait_timeout=10
         )
         
-        self.containers.append(container)
+        self.containers[service_name] = container
         logger.info(f"Started {service_name} container: {container_name}")
         return container
         
-        # Create and start container
-        container = self.docker_client.containers.run(
-            "eclipse-mosquitto:latest",
-            name=container_name,
-            ports={'1883/tcp': 11884},  # Different port to avoid conflicts
-            detach=True,
-            remove=False,
-            network=self.network.name,
-            command=["sh", "-c", f"echo '{config_content}' > /mosquitto/config/mosquitto.conf && /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf"]
-        )
-        
-        self.containers['mqtt'] = container
+        # Not starting a separate MQTT container - using test broker
         
         # Wait for MQTT to be ready
         for i in range(10):
             try:
                 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test")
-                client.connect("localhost", 11884, 60)
+                conn_params = self.mqtt_broker.get_connection_params()
+                client.connect(conn_params['host'], conn_params['port'], 60)
                 client.disconnect()
                 logger.info("✓ MQTT broker ready")
                 return True
@@ -101,6 +93,9 @@ class DockerSDKIntegrationTest:
     def build_and_start_fire_consensus(self):
         """Build and start fire consensus container"""
         logger.info("Building and starting fire consensus container...")
+        
+        # Get connection params
+        conn_params = self.mqtt_broker.get_connection_params()
         
         # Build the image
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -127,7 +122,7 @@ class DockerSDKIntegrationTest:
             return False
             
         # Remove existing container if any
-        container_name = "fire-consensus-test-sdk"
+        container_name = self.docker_manager.get_container_name("fire-consensus-sdk")
         try:
             old_container = self.docker_client.containers.get(container_name)
             old_container.stop(timeout=5)
@@ -135,6 +130,10 @@ class DockerSDKIntegrationTest:
         except docker.errors.NotFound:
             pass
             
+        # Get namespace prefix from parallel context
+        namespace = self.parallel_context.namespace
+        topic_prefix = namespace.namespace if hasattr(namespace, 'namespace') else ''
+        
         # Start container
         try:
             container = self.docker_client.containers.run(
@@ -142,10 +141,11 @@ class DockerSDKIntegrationTest:
                 name=container_name,
                 detach=True,
                 remove=False,
-                network=self.network.name,
+                network_mode='host',
                 environment={
-                    'MQTT_BROKER': 'mqtt-test-sdk',
-                    'MQTT_PORT': '1883',
+                    'MQTT_BROKER': conn_params['host'],
+                    'MQTT_PORT': str(conn_params['port']),
+                    'TOPIC_PREFIX': topic_prefix,  # Add topic prefix for test isolation
                     'CONSENSUS_THRESHOLD': '2',
                     'MIN_CONFIDENCE': '0.7',
                     'SINGLE_CAMERA_TRIGGER': 'false',
@@ -194,24 +194,27 @@ class DockerSDKIntegrationTest:
         logger.info("\n=== DOCKER SDK INTEGRATION TEST ===")
         
         try:
-            # Setup network
-            self.setup_network()
-            
-            # Start MQTT broker
-            if not self.start_mqtt_container():
-                return False
+            # Using test MQTT broker from fixture
+            conn_params = self.mqtt_broker.get_connection_params()
+            logger.info(f"Using test MQTT broker on {conn_params['host']}:{conn_params['port']}")
                 
             # Build and start fire consensus
             if not self.build_and_start_fire_consensus():
                 return False
                 
+            # Get namespace prefix
+            namespace = self.parallel_context.namespace
+            topic_prefix = namespace.namespace if hasattr(namespace, 'namespace') else ''
+            
             # Connect MQTT client for testing
             fire_triggered = False
             
             def on_message(client, userdata, msg):
                 nonlocal fire_triggered
                 logger.info(f"Received: {msg.topic} - {msg.payload}")
-                if msg.topic == "fire/trigger":
+                # Check for fire trigger with namespace prefix
+                expected_topic = f"{topic_prefix}/fire/trigger" if topic_prefix else "fire/trigger"
+                if msg.topic == expected_topic:
                     fire_triggered = True
                     
             def on_connect(client, userdata, flags, rc, properties):
@@ -221,7 +224,7 @@ class DockerSDKIntegrationTest:
             client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test-publisher")
             client.on_message = on_message
             client.on_connect = on_connect
-            client.connect("localhost", 11884, 60)
+            client.connect(conn_params['host'], conn_params['port'], 60)
             client.loop_start()
             
             # Wait for connection
@@ -235,8 +238,9 @@ class DockerSDKIntegrationTest:
                     'status': 'online',
                     'timestamp': time.time()
                 }
-                client.publish('system/camera_telemetry', json.dumps(telemetry), retain=False)
-                logger.info(f"  Sent telemetry for {camera_id}")
+                telemetry_topic = f"{topic_prefix}/system/camera_telemetry" if topic_prefix else "system/camera_telemetry"
+                client.publish(telemetry_topic, json.dumps(telemetry), retain=False)
+                logger.info(f"  Sent telemetry for {camera_id} to {telemetry_topic}")
                 time.sleep(0.1)  # Small delay between messages
             
             # Wait for telemetry to be processed
@@ -261,9 +265,10 @@ class DockerSDKIntegrationTest:
                         'timestamp': time.time()
                     }
                     
-                    topic = f"fire/detection/{camera_id}"
+                    base_topic = f"fire/detection/{camera_id}"
+                    topic = f"{topic_prefix}/{base_topic}" if topic_prefix else base_topic
                     client.publish(topic, json.dumps(detection), retain=False)
-                    logger.info(f"  Sent detection {i+1} from {camera_id} (size: {size})")
+                    logger.info(f"  Sent detection {i+1} from {camera_id} (size: {size}) to {topic}")
                     
                 time.sleep(1)  # 1 second between detection sets
                     
@@ -334,9 +339,9 @@ if __name__ == "__main__":
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # Run test
-    test = DockerSDKIntegrationTest()
-    success = test.test_fire_detection_flow()
+    # Cannot run without pytest fixtures
+    print("This test requires pytest fixtures. Run with: pytest test_integration_docker_sdk.py")
+    sys.exit(1)
     
     if success:
         print("\n✅ Test PASSED")

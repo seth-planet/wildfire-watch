@@ -27,7 +27,7 @@ import json
 
 # Import GPIO components
 import gpio_trigger.trigger as trigger
-from gpio_trigger.trigger import PumpController, GPIO, CONFIG, PumpState
+from gpio_trigger.trigger import PumpController, GPIO, PumpState
 # gpio_test_setup and wait_for_state are now available via conftest.py
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ class TestEmergencyButton:
             pytest.skip("GPIO simulation not available")
             
         # Setup emergency button pin
-        emergency_pin = CONFIG.get('EMERGENCY_BUTTON_PIN', 21)
+        emergency_pin = safety_controller.config.emergency_button_pin
         gpio_test_setup.setup(emergency_pin, gpio_test_setup.IN, pull_up_down=gpio_test_setup.PUD_UP)
         
         # Simulate button press (active low)
@@ -101,7 +101,7 @@ class TestEmergencyButton:
         # Check valve state - use the GPIO instance from the trigger module
         # The controller uses its own GPIO instance, not the test fixture's
         from gpio_trigger.trigger import GPIO as controller_gpio
-        assert controller_gpio.input(CONFIG['MAIN_VALVE_PIN']) == controller_gpio.HIGH
+        assert controller_gpio.input(safety_controller.config.main_valve_pin) == controller_gpio.HIGH
     
     @pytest.mark.timeout(30)
     def test_emergency_button_debouncing(self, safety_controller, gpio_test_setup):
@@ -109,7 +109,7 @@ class TestEmergencyButton:
         if gpio_test_setup is None:
             pytest.skip("GPIO simulation not available")
             
-        emergency_pin = CONFIG.get('EMERGENCY_BUTTON_PIN', 21)
+        emergency_pin = safety_controller.config.emergency_button_pin
         
         # Rapid button presses
         for _ in range(5):
@@ -134,7 +134,7 @@ class TestDryRunProtection:
             pytest.skip("GPIO simulation not available")
             
         # Setup flow sensor
-        flow_pin = CONFIG.get('FLOW_SENSOR_PIN', 19)
+        flow_pin = safety_controller.config.flow_sensor_pin
         if flow_pin:
             gpio_test_setup.setup(flow_pin, gpio_test_setup.IN, pull_up_down=gpio_test_setup.PUD_DOWN)
             gpio_test_setup._state[flow_pin] = gpio_test_setup.LOW  # No flow
@@ -157,7 +157,7 @@ class TestDryRunProtection:
             
             # Should enter error state
             assert safety_controller._state == PumpState.ERROR
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) == gpio_test_setup.LOW
+            assert gpio_test_setup.input(safety_controller.config.ign_on_pin) == gpio_test_setup.LOW
     
     @pytest.mark.timeout(30)
     def test_water_flow_prevents_dry_run_error(self, safety_controller, gpio_test_setup):
@@ -166,7 +166,7 @@ class TestDryRunProtection:
             pytest.skip("GPIO simulation not available")
             
         # Setup flow sensor with flow detected
-        flow_pin = CONFIG.get('FLOW_SENSOR_PIN', 19)
+        flow_pin = safety_controller.config.flow_sensor_pin
         if flow_pin:
             gpio_test_setup.setup(flow_pin, gpio_test_setup.IN)
             gpio_test_setup._state[flow_pin] = gpio_test_setup.HIGH  # Flow detected
@@ -200,7 +200,7 @@ class TestReservoirMonitoring:
             pytest.skip("GPIO simulation not available")
             
         # Setup float switch
-        float_pin = CONFIG.get('RESERVOIR_FLOAT_PIN', 16)
+        float_pin = safety_controller.config.reservoir_float_pin
         if float_pin:
             gpio_test_setup.setup(float_pin, gpio_test_setup.IN, pull_up_down=gpio_test_setup.PUD_DOWN)
             gpio_test_setup._state[float_pin] = gpio_test_setup.LOW  # Not full
@@ -224,7 +224,7 @@ class TestReservoirMonitoring:
             
             if safety_controller._state == PumpState.REFILLING:
                 # Verify refill valve is open
-                assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) == gpio_test_setup.HIGH
+                assert gpio_test_setup.input(safety_controller.config.refill_valve_pin) == gpio_test_setup.HIGH
                 
                 # Simulate float switch activation (tank full)
                 gpio_test_setup._state[float_pin] = gpio_test_setup.HIGH
@@ -237,7 +237,7 @@ class TestReservoirMonitoring:
                 time.sleep(0.5)
                 
                 # Refill valve should close
-                assert gpio_test_setup.input(CONFIG['REFILL_VALVE_PIN']) == gpio_test_setup.LOW
+                assert gpio_test_setup.input(safety_controller.config.refill_valve_pin) == gpio_test_setup.LOW
                 assert safety_controller._refill_complete is True
 
 
@@ -251,7 +251,7 @@ class TestLinePressure:
             pytest.skip("GPIO simulation not available")
             
         # Setup pressure switch
-        pressure_pin = CONFIG.get('LINE_PRESSURE_PIN', 20)
+        pressure_pin = safety_controller.config.line_pressure_pin
         if pressure_pin:
             gpio_test_setup.setup(pressure_pin, gpio_test_setup.IN, pull_up_down=gpio_test_setup.PUD_DOWN)
             gpio_test_setup._state[pressure_pin] = gpio_test_setup.HIGH  # Good pressure
@@ -284,7 +284,7 @@ class TestLinePressure:
             # Engine should be off or stopping
             if safety_controller._state not in [PumpState.REFILLING, PumpState.COOLDOWN]:
                 time.sleep(0.5)
-            assert gpio_test_setup.input(CONFIG['IGN_ON_PIN']) == gpio_test_setup.LOW
+            assert gpio_test_setup.input(safety_controller.config.ign_on_pin) == gpio_test_setup.LOW
 
 
 class TestEmergencyMQTT:
@@ -391,10 +391,10 @@ class TestSafetyIntegration:
             pytest.skip("GPIO simulation not available")
             
         # Setup all safety pins
-        emergency_pin = CONFIG.get('EMERGENCY_BUTTON_PIN', 21)
-        float_pin = CONFIG.get('RESERVOIR_FLOAT_PIN', 16)
-        pressure_pin = CONFIG.get('LINE_PRESSURE_PIN', 20)
-        flow_pin = CONFIG.get('FLOW_SENSOR_PIN', 19)
+        emergency_pin = safety_controller.config.emergency_button_pin
+        float_pin = safety_controller.config.reservoir_float_pin
+        pressure_pin = safety_controller.config.line_pressure_pin
+        flow_pin = safety_controller.config.flow_sensor_pin
         
         # Initialize all pins
         if emergency_pin:
