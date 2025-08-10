@@ -74,8 +74,7 @@ class TestEmergencyButton:
     @pytest.mark.timeout(30)
     def test_emergency_button_triggers_pump(self, safety_controller, gpio_test_setup):
         """Test emergency button starts pump immediately."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         # Setup emergency button pin
         emergency_pin = safety_controller.config.emergency_button_pin
@@ -106,8 +105,7 @@ class TestEmergencyButton:
     @pytest.mark.timeout(30)
     def test_emergency_button_debouncing(self, safety_controller, gpio_test_setup):
         """Test emergency button debounces multiple presses."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         emergency_pin = safety_controller.config.emergency_button_pin
         
@@ -130,8 +128,7 @@ class TestDryRunProtection:
     @pytest.mark.timeout(30)
     def test_dry_run_timeout_stops_pump(self, safety_controller, gpio_test_setup):
         """Test pump stops if no water flow detected."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         # Setup flow sensor
         flow_pin = safety_controller.config.flow_sensor_pin
@@ -162,8 +159,7 @@ class TestDryRunProtection:
     @pytest.mark.timeout(30)
     def test_water_flow_prevents_dry_run_error(self, safety_controller, gpio_test_setup):
         """Test water flow detection prevents dry run error."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         # Setup flow sensor with flow detected
         flow_pin = safety_controller.config.flow_sensor_pin
@@ -196,8 +192,7 @@ class TestReservoirMonitoring:
     @pytest.mark.timeout(30)
     def test_float_switch_stops_refill(self, safety_controller, gpio_test_setup):
         """Test float switch activation stops refill."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         # Setup float switch
         float_pin = safety_controller.config.reservoir_float_pin
@@ -247,8 +242,7 @@ class TestLinePressure:
     @pytest.mark.timeout(30)
     def test_low_pressure_triggers_shutdown(self, safety_controller, gpio_test_setup):
         """Test low line pressure causes safe shutdown."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         # Setup pressure switch
         pressure_pin = safety_controller.config.line_pressure_pin
@@ -387,8 +381,7 @@ class TestSafetyIntegration:
     @pytest.mark.timeout(30)
     def test_multiple_safety_features_together(self, safety_controller, gpio_test_setup):
         """Test multiple safety features work together correctly."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation is always available, no need to skip
             
         # Setup all safety pins
         emergency_pin = safety_controller.config.emergency_button_pin

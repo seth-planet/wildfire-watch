@@ -180,14 +180,18 @@ class TestE2EHardwareIntegration:
             assert self.detector_type == 'cpu'
             self._test_cpu_inference_basic()
     
-    def test_fire_consensus_with_simulated_detections(self, test_mqtt_broker, mqtt_client, monkeypatch):
+    def test_fire_consensus_with_simulated_detections(self, test_mqtt_broker, mqtt_client, monkeypatch, mqtt_topic_factory):
         """Test fire consensus service with simulated detections"""
+        # Get topic prefix for worker isolation
+        topic_prefix = mqtt_topic_factory("").rstrip("/")
+        
         # Set environment variables for single camera trigger
         monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'true')
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
         monkeypatch.setenv('DETECTION_WINDOW', '10')
         monkeypatch.setenv('COOLDOWN_PERIOD', '5')
+        monkeypatch.setenv('TOPIC_PREFIX', topic_prefix)
         
         from fire_consensus.consensus import FireConsensus
         
@@ -201,7 +205,8 @@ class TestE2EHardwareIntegration:
             })
         
         mqtt_client.on_message = on_message
-        mqtt_client.subscribe('fire/trigger')
+        fire_trigger_topic = mqtt_topic_factory('fire/trigger')
+        mqtt_client.subscribe(fire_trigger_topic)
         
         # Start consensus service
         consensus = FireConsensus()
@@ -223,7 +228,8 @@ class TestE2EHardwareIntegration:
             'status': 'online',
             'timestamp': time.time()
         }
-        publisher.publish('system/camera_telemetry', json.dumps(telemetry))
+        telemetry_topic = mqtt_topic_factory('system/camera_telemetry')
+        publisher.publish(telemetry_topic, json.dumps(telemetry))
         
         time.sleep(0.5)
         
@@ -244,14 +250,15 @@ class TestE2EHardwareIntegration:
                 'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                 'timestamp': base_time + i * 0.5
             }
-            publisher.publish('fire/detection', json.dumps(detection))
+            detection_topic = mqtt_topic_factory('fire/detection')
+            publisher.publish(detection_topic, json.dumps(detection))
             time.sleep(0.1)
         
         # Wait for consensus
         time.sleep(3)
         
         # Check if fire trigger was sent
-        trigger_messages = [m for m in consensus_messages if m['topic'] == 'fire/trigger']
+        trigger_messages = [m for m in consensus_messages if m['topic'] == fire_trigger_topic]
         assert len(trigger_messages) > 0, f"No fire trigger received. Messages: {[m['topic'] for m in consensus_messages]}"
         
         # Verify trigger content
@@ -263,31 +270,31 @@ class TestE2EHardwareIntegration:
         publisher.loop_stop()
         publisher.disconnect()
     
-    def test_gpio_trigger_responds_to_fire(self, test_mqtt_broker):
+    def test_gpio_trigger_responds_to_fire(self, test_mqtt_broker, pump_controller_factory, mqtt_topic_factory):
         """Test GPIO trigger responds to fire detection"""
-        from gpio_trigger.trigger import PumpController, PumpControllerConfig
-        
-        # Set environment variables for test broker settings
-        import os
-        os.environ['MQTT_BROKER'] = test_mqtt_broker.host
-        os.environ['MQTT_PORT'] = str(test_mqtt_broker.port)
-        os.environ['MQTT_TLS'] = 'false'
-        
-        # Create config object - it will load from environment
-        config = PumpControllerConfig()
-        
-        # Start pump controller with config
-        controller = PumpController(config=config)
+        # Use the factory to create controller with proper topic prefix
+        controller = pump_controller_factory(auto_connect=True)
         self.services['pump'] = controller
         
-        # PumpController connects automatically in __init__, no need to wait
-        time.sleep(1.0)  # Brief pause to ensure connection is established
+        # Get the worker ID for debugging
+        worker_id = os.environ.get('PYTEST_CURRENT_TEST', '').split('::')[0].split('[')[-1].rstrip(']') or 'master'
+        
+        # PumpController connects automatically in __init__, brief pause to ensure connection
+        time.sleep(1.0)
         
         # Send fire trigger via MQTT
         import paho.mqtt.client as mqtt
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         publisher.connect(test_mqtt_broker.host, test_mqtt_broker.port)
         publisher.loop_start()
+        
+        # Use the same topic prefix that the controller is using
+        topic_prefix = controller.config.topic_prefix
+        fire_trigger_topic = f"{topic_prefix}/fire/trigger"
+        
+        # Debug logging
+        print(f"[Worker: {worker_id}] Publishing fire trigger to topic: {fire_trigger_topic}")
+        print(f"[Worker: {worker_id}] Controller subscribed to topic: {fire_trigger_topic}")
         
         # Send trigger in the correct format
         trigger_payload = {
@@ -296,7 +303,7 @@ class TestE2EHardwareIntegration:
             'confidence': 0.85,
             'timestamp': time.time()
         }
-        publisher.publish('fire/trigger', json.dumps(trigger_payload))
+        publisher.publish(fire_trigger_topic, json.dumps(trigger_payload))
         
         # Wait for pump to respond
         time.sleep(2)
@@ -329,7 +336,7 @@ class TestE2EHardwareIntegration:
     
     @pytest.mark.slow
     @pytest.mark.skipif(not has_camera_on_network(), reason="No cameras on network")
-    def test_complete_fire_detection_pipeline(self, test_mqtt_broker):
+    def test_complete_fire_detection_pipeline(self, test_mqtt_broker, monkeypatch, mqtt_topic_factory, pump_controller_factory):
         """Test complete pipeline: Camera → AI → Consensus → Trigger"""
         # This is the ultimate integration test
         # It would require:
@@ -345,11 +352,11 @@ class TestE2EHardwareIntegration:
         
         try:
             # Set environment for single camera trigger BEFORE creating services
-            os.environ['SINGLE_CAMERA_TRIGGER'] = 'true'
-            os.environ['CONSENSUS_THRESHOLD'] = '1'
-            os.environ['MIN_CONFIDENCE'] = '0.7'
-            os.environ['DETECTION_WINDOW'] = '10'
-            os.environ['COOLDOWN_PERIOD'] = '5'
+            monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'true')
+            monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
+            monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
+            monkeypatch.setenv('DETECTION_WINDOW', '10')
+            monkeypatch.setenv('COOLDOWN_PERIOD', '5')
             
             # Start all services
             from camera_detector.detect import CameraDetector
@@ -370,8 +377,8 @@ class TestE2EHardwareIntegration:
             consensus = FireConsensus()
             services_started.append(consensus)
             
-            # GPIO trigger
-            controller = PumpController()
+            # GPIO trigger - use factory for proper topic prefix
+            controller = pump_controller_factory(auto_connect=True)
             services_started.append(controller)
             
             # Wait for all services to connect
@@ -398,6 +405,14 @@ class TestE2EHardwareIntegration:
             monitor.subscribe('#')  # Subscribe to all topics
             monitor.loop_start()
             
+            # Get worker ID for debugging
+            worker_id = os.environ.get('PYTEST_CURRENT_TEST', '').split('::')[0].split('[')[-1].rstrip(']') or 'master'
+            
+            # Debug logging for topic prefixes
+            topic_prefix = controller.config.topic_prefix
+            print(f"[Worker: {worker_id}] Test using topic prefix: {topic_prefix}")
+            print(f"[Worker: {worker_id}] Controller subscribing to prefix: {topic_prefix}")
+            
             # Simulate AI detection from Frigate
             publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
             publisher.connect(test_mqtt_broker.host, test_mqtt_broker.port)
@@ -410,7 +425,8 @@ class TestE2EHardwareIntegration:
                     'status': 'online',
                     'timestamp': time.time()
                 }
-                publisher.publish('system/camera_telemetry', json.dumps(telemetry))
+                telemetry_topic = f"{topic_prefix}/system/camera_telemetry"
+                publisher.publish(telemetry_topic, json.dumps(telemetry))
             
             time.sleep(1)  # Let cameras register
             
@@ -424,7 +440,8 @@ class TestE2EHardwareIntegration:
                 'status': 'online',
                 'timestamp': base_time
             }
-            publisher.publish('system/camera_telemetry', json.dumps(telemetry))
+            telemetry_topic = f"{topic_prefix}/system/camera_telemetry"
+            publisher.publish(telemetry_topic, json.dumps(telemetry))
             time.sleep(0.5)
             
             # Send growing fire detections - using same pattern as working test
@@ -441,7 +458,8 @@ class TestE2EHardwareIntegration:
                     'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                     'timestamp': base_time + i * 0.5
                 }
-                publisher.publish('fire/detection', json.dumps(detection))
+                detection_topic = f"{topic_prefix}/fire/detection"
+                publisher.publish(detection_topic, json.dumps(detection))
                 time.sleep(0.1)
             
             # Wait for pipeline to process

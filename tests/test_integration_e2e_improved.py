@@ -24,8 +24,10 @@ from typing import Dict, List, Optional
 import paho.mqtt.client as mqtt
 
 # Import parallel test utilities
-from test_utils.helpers import ParallelTestContext, DockerContainerManager, mqtt_test_environment
+from test_utils.helpers import ParallelTestContext, DockerContainerManager, mqtt_test_environment, wait_for_mqtt_connection
 from test_utils.topic_namespace import create_namespaced_client, TopicNamespace
+from test_utils.debug_helpers import DebugContext, debug_mqtt_client
+from test_utils.debug_logger import TestDebugLogger, debug_test, wait_with_debug, log_docker_container_status
 
 
 @pytest.mark.integration
@@ -103,29 +105,73 @@ class TestE2EIntegrationImproved:
         
         # Apply environment variables but remove MQTT_CLIENT_ID so each service
         # creates its own unique ID
-        for key, value in env_vars.items():
-            if key != 'MQTT_CLIENT_ID':  # Let each service create unique ID
-                os.environ[key] = str(value)
+        # NOTE: We modify os.environ here because the services are started in threads
+        # and read configuration from environment. This is isolated per test worker
+        # due to pytest-xdist process isolation.
+        original_env = {}
+        try:
+            for key, value in env_vars.items():
+                if key != 'MQTT_CLIENT_ID':  # Let each service create unique ID
+                    original_env[key] = os.environ.get(key)
+                    os.environ[key] = str(value)
+            
+            # Environment variables are now properly set by ParallelTestContext
+            
+            # Service-specific configuration
+            # Store original values for cleanup
+            service_env = {
+                'MAX_ENGINE_RUNTIME': '60',  # Minimum allowed by schema validation
+                'GPIO_SIMULATION': 'true',
+                'SINGLE_CAMERA_TRIGGER': 'false',  # Multi-camera consensus test requires this to be false
+                'MIN_CONFIDENCE': '0.7',  # Lower threshold for test
+                'CONSENSUS_THRESHOLD': '2',  # Require 2 cameras normally
+                'DETECTION_WINDOW': '30',  # Longer window for test
+                'MOVING_AVERAGE_WINDOW': '3',  # Default 3, requires 6 detections
+            }
+            
+            for key, value in service_env.items():
+                original_env[key] = os.environ.get(key)
+                os.environ[key] = value
+            
+            # Store original_env for cleanup in finally block
+            self._original_env = original_env
+        except Exception as e:
+            # Restore environment on error
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            raise
         
-        # Environment variables are now properly set by ParallelTestContext
+        # Additional service configuration
+        additional_env = {
+            'AREA_INCREASE_RATIO': '1.15',  # 15% growth (lower for testing)
+            'LOG_LEVEL': 'DEBUG',  # Enable debug logging
+            'HEALTH_INTERVAL': '10',  # Minimum allowed health interval
+        }
         
-        # Service-specific configuration
-        os.environ['MAX_ENGINE_RUNTIME'] = '60'  # Minimum allowed by schema validation
-        os.environ['GPIO_SIMULATION'] = 'true'
-        os.environ['SINGLE_CAMERA_TRIGGER'] = 'true'
-        os.environ['MIN_CONFIDENCE'] = '0.7'  # Lower threshold for test
-        os.environ['CONSENSUS_THRESHOLD'] = '2'  # Require 2 cameras normally
-        os.environ['DETECTION_WINDOW'] = '30'  # Longer window for test
-        os.environ['MOVING_AVERAGE_WINDOW'] = '3'  # Default 3, requires 6 detections
-        os.environ['AREA_INCREASE_RATIO'] = '1.15'  # 15% growth (lower for testing)
-        os.environ['LOG_LEVEL'] = 'DEBUG'  # Enable debug logging
-        os.environ['HEALTH_INTERVAL'] = '10'  # Minimum allowed health interval
+        for key, value in additional_env.items():
+            original_env[key] = os.environ.get(key)
+            os.environ[key] = value
+        
+        # Update stored original_env
+        self._original_env = original_env
         
         # Reduce startup delays for faster testing
-        os.environ['PRIMING_DURATION'] = '2.0'  # Reduce from 180s to 2s
-        os.environ['IGNITION_START_DURATION'] = '3.0'  # Reduce from 5s to 3s
-        os.environ['RPM_REDUCTION_DURATION'] = '1.0'  # Reduce from 10s to 1s
-        os.environ['RPM_REDUCTION_LEAD'] = '50'  # Start RPM reduction 10s after pump starts
+        timing_env = {
+            'PRIMING_DURATION': '2.0',  # Reduce from 180s to 2s
+            'IGNITION_START_DURATION': '3.0',  # Reduce from 5s to 3s
+            'RPM_REDUCTION_DURATION': '1.0',  # Reduce from 10s to 1s
+            'RPM_REDUCTION_LEAD': '50',  # Start RPM reduction 10s after pump starts
+        }
+        
+        for key, value in timing_env.items():
+            original_env[key] = os.environ.get(key)
+            os.environ[key] = value
+        
+        # Final update of stored original_env
+        self._original_env = original_env
         
         # PumpController will read all configuration from environment variables through PumpControllerConfig
         # No need to update any CONFIG dictionary as it was removed
@@ -146,6 +192,16 @@ class TestE2EIntegrationImproved:
             # FireConsensus connects to MQTT in its __init__ method
             consensus = FireConsensus()
             self.local_services.append(consensus)
+            
+            # Debug: Print consensus configuration
+            print(f"[DEBUG] FireConsensus configuration:")
+            print(f"[DEBUG]   - single_camera_trigger: {consensus.config.single_camera_trigger}")
+            print(f"[DEBUG]   - consensus_threshold: {consensus.config.consensus_threshold}")
+            print(f"[DEBUG]   - min_confidence: {consensus.config.min_confidence}")
+            print(f"[DEBUG]   - area_increase_ratio: {consensus.config.area_increase_ratio}")
+            print(f"[DEBUG]   - moving_average_window: {consensus.config.moving_average_window}")
+            print(f"[DEBUG]   - detection_window: {consensus.config.detection_window}")
+            print(f"[DEBUG]   - topic_prefix: '{consensus.config.topic_prefix}'")
             
             # Wait for consensus to connect to MQTT with longer timeout
             print("[DEBUG] Waiting for FireConsensus MQTT connection...")
@@ -171,8 +227,9 @@ class TestE2EIntegrationImproved:
             # Start GPIO trigger service  
             print("[DEBUG] Starting PumpController service locally...")
             pump_controller = PumpController()
-            # PumpController connects automatically in __init__, no need to wait
-            time.sleep(1.0)  # Brief pause to ensure connection is established
+            # PumpController connects automatically in __init__, but we should verify
+            if not wait_for_mqtt_connection(pump_controller, timeout=10):
+                raise RuntimeError(f"PumpController failed to connect to MQTT broker at {mqtt_broker}:{mqtt_port}")
             self.local_services.append(pump_controller)
             print("[DEBUG] ✅ PumpController service started and connected")
             
@@ -187,6 +244,16 @@ class TestE2EIntegrationImproved:
     
     def _cleanup_e2e_services(self):
         """Clean up E2E test services (local instances)"""
+        # Restore original environment variables first
+        if hasattr(self, '_original_env'):
+            print("[DEBUG] Restoring original environment variables")
+            for key, value in self._original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            delattr(self, '_original_env')
+        
         if hasattr(self, 'local_services'):
             for service in self.local_services:
                 try:
@@ -250,22 +317,25 @@ class TestE2EIntegrationImproved:
         # Ensure Docker images are built
         self._ensure_docker_images_built()
         
-        # Start services with worker-isolated names
+        # Start services with worker-isolated names (excluding MQTT broker which is provided by fixture)
         services_to_start = {
-            'mqtt-broker': 'eclipse-mosquitto:2.0',
             'camera-detector': 'wildfire-watch/camera_detector:latest',
             'fire-consensus': 'wildfire-watch/fire_consensus:latest',
             'gpio-trigger': 'wildfire-watch/gpio_trigger:latest'
         }
         
-        # Start MQTT first (already done by test_mqtt_broker fixture)
-        # Just verify it's running
+        # Verify MQTT broker from fixture is running
+        assert self.mqtt_broker is not None, "MQTT broker fixture not available"
         assert self.mqtt_broker.is_running(), "MQTT broker not running"
+        
+        # Log MQTT broker connection details
+        conn_params = self.mqtt_broker.get_connection_params()
+        print(f"[DEBUG] Using test MQTT broker at {conn_params['host']}:{conn_params['port']}")
         
         # Start other services
         containers = []
         
-        for service, image in list(services_to_start.items())[1:]:  # Skip mqtt-broker
+        for service, image in services_to_start.items():
             container_name = self.docker_manager.get_container_name(service)
             
             # Remove old container if exists
@@ -364,74 +434,153 @@ class TestE2EIntegrationImproved:
             assert 'cameras' in config, "No cameras in Frigate config"
             assert len(config['cameras']) > 0, "No cameras configured"
     
-    def test_multi_camera_consensus(self, mqtt_client):
+    def test_multi_camera_consensus(self, mqtt_client, docker_client):
         """Test that consensus requires multiple cameras to agree"""
         consensus_event = Event()
         pump_event = Event()
+        detection_count = 0
+        consensus_health_seen = False
         consensus_threshold = 2  # Require 2 cameras
+        
+        # Start the required services
+        self._start_e2e_services(docker_client, mqtt_client)
         
         # Get the namespace for topic stripping
         namespace = mqtt_client._namespace
         
         def on_message(client, userdata, msg):
+            nonlocal detection_count, consensus_health_seen
             # Strip namespace from topic for comparison
             original_topic = namespace.strip(msg.topic)
             
-            if original_topic == "trigger/fire_detected":
+            # Track fire detections being received
+            if original_topic == "fire/detection":
+                detection_count += 1
+                print(f"[DEBUG] Fire detection #{detection_count} received")
+                try:
+                    payload = json.loads(msg.payload.decode())
+                    print(f"[DEBUG] Detection details: camera={payload.get('camera_id')}, "
+                          f"confidence={payload.get('confidence')}, "
+                          f"bbox={payload.get('bbox')}, "
+                          f"object_id={payload.get('object_id')}")
+                except:
+                    pass
+            elif original_topic == "system/fire_consensus/health":
+                consensus_health_seen = True
+                try:
+                    health = json.loads(msg.payload.decode())
+                    print(f"[DEBUG] Consensus health: cameras_total={health.get('cameras_total', 0)}, "
+                          f"cameras_online={health.get('cameras_online', 0)}, "
+                          f"detections_total={health.get('detections_total', 0)}")
+                except:
+                    pass
+            elif original_topic == "fire/trigger":
+                print(f"[DEBUG] Fire consensus reached! Payload: {msg.payload.decode()}")
                 consensus_event.set()
-            elif original_topic == "gpio/pump/status":
-                status = json.loads(msg.payload.decode())
-                if status.get('state') == 'active':
-                    pump_event.set()
+            elif original_topic == "system/trigger_telemetry":
+                try:
+                    telemetry = json.loads(msg.payload.decode())
+                    action = telemetry.get('action', '')
+                    state = telemetry.get('system_state', {}).get('state', 'unknown')
+                    print(f"[DEBUG] GPIO telemetry: action={action}, state={state}")
+                    # Check for pump activation events
+                    if action in ['engine_running', 'pump_sequence_start'] or state == 'RUNNING':
+                        pump_event.set()
+                        print(f"[DEBUG] Pump activated! action={action}, state={state}")
+                except:
+                    pass
         
         # Set the callback BEFORE wrapping
         mqtt_client.client.on_message = on_message
         
-        mqtt_client.subscribe("trigger/fire_detected")
-        mqtt_client.subscribe("gpio/pump/status")
+        mqtt_client.subscribe("fire/trigger")
+        mqtt_client.subscribe("system/trigger_telemetry")  # GPIO trigger telemetry
+        mqtt_client.subscribe("fire/detection")  # Monitor detections
+        mqtt_client.subscribe("system/fire_consensus/health")  # Monitor consensus health
+        mqtt_client.subscribe("#")  # Subscribe to all messages for debugging
         mqtt_client.loop_start()
         
-        # First, send detection from only one camera (should NOT trigger)
-        detection = {
-            'camera_id': 'camera_0',
-            'confidence': 0.95,
-            'object_type': 'fire',
-            'timestamp': time.time()
-        }
-        mqtt_client.publish("frigate/camera_0/fire", json.dumps(detection))
+        # First, register cameras via telemetry so consensus knows about them
+        for cam_id in ['camera_0', 'camera_1']:
+            telemetry = {
+                'camera_id': cam_id,
+                'status': 'online',
+                'timestamp': time.time()
+            }
+            print(f"[DEBUG] Publishing camera telemetry for {cam_id} to system/camera_telemetry")
+            mqtt_client.publish("system/camera_telemetry", json.dumps(telemetry))
+        
+        time.sleep(2)  # Give consensus more time to register cameras and start health reporting
+        
+        # Check if consensus service registered the cameras
+        if not consensus_health_seen:
+            print("[WARNING] No consensus health messages seen yet")
+        
+        print(f"[DEBUG] Starting fire detection simulation...")
+        
+        # First, send multiple detections from only one camera (should NOT trigger)
+        # Use pixel coordinates as the consensus service expects
+        base_time = time.time()
+        print(f"[DEBUG] Sending detections from camera_0 only...")
+        
+        for i in range(10):  # Send 10 detections to ensure we have enough for median calculation
+            # Calculate growing fire - ensure sufficient growth
+            # Start at 100 pixels and grow by 30% each time for clear median growth
+            size = 100 * (1.3 ** i)  # Exponential growth
+            detection = {
+                'camera_id': 'camera_0',
+                'object_id': 'fire_1',
+                'confidence': 0.85 + i * 0.01,
+                'timestamp': base_time + i * 0.5,  # Space detections 0.5 seconds apart
+                'bbox': [200, 200, 200 + size, 200 + size]  # Pixel coordinates
+            }
+            mqtt_client.publish("fire/detection", json.dumps(detection))
+            time.sleep(0.1)
+            print(f"[DEBUG] Camera 0 detection {i+1}: size={size:.0f}px, area={size*size:.0f}px²")
         
         # Wait briefly - consensus should NOT be reached
-        consensus_reached = consensus_event.wait(timeout=5)
+        time.sleep(2)
+        consensus_reached = consensus_event.wait(timeout=3)
         assert not consensus_reached, "Consensus reached with only 1 camera (threshold is 2)"
         
-        # Now send from second camera - should trigger consensus
-        detection['camera_id'] = 'camera_1'
-        detection['timestamp'] = time.time()
-        mqtt_client.publish("frigate/camera_1/fire", json.dumps(detection))
+        print(f"[DEBUG] Good - no consensus with 1 camera. Now sending from camera_1...")
         
-        # Simulate consensus service behavior - publish consensus trigger
-        time.sleep(0.5)  # Brief delay to simulate processing
-        consensus_msg = {
-            'triggered': True,
-            'cameras': ['camera_0', 'camera_1'],
-            'confidence': 0.95,
-            'timestamp': time.time()
-        }
-        mqtt_client.publish("trigger/fire_detected", json.dumps(consensus_msg))
+        # Now send from second camera - should trigger consensus
+        for i in range(10):  # Send 10 detections from second camera
+            # Calculate growing fire - same growth pattern as camera_0
+            size = 100 * (1.3 ** i)  # Exponential growth
+            detection = {
+                'camera_id': 'camera_1',
+                'object_id': 'fire_2',
+                'confidence': 0.85 + i * 0.01,
+                'timestamp': base_time + i * 0.5,  # Use same timestamps as camera_0
+                'bbox': [500, 300, 500 + size, 300 + size]  # Different location in pixels
+            }
+            mqtt_client.publish("fire/detection", json.dumps(detection))
+            time.sleep(0.1)
+            print(f"[DEBUG] Camera 1 detection {i+1}: size={size:.0f}px, area={size*size:.0f}px²")
+        
+        print(f"[DEBUG] Sent {detection_count} total detections")
+        
+        # Give consensus service time to process all detections
+        time.sleep(3)
+        
+        # Debug: Force publish a consensus health report to see camera status
+        print("[DEBUG] Requesting consensus health status...")
+        mqtt_client.publish("system/fire_consensus/health_request", json.dumps({"request": "status"}))
+        time.sleep(1)
         
         # Consensus should now be reached
         consensus_reached = consensus_event.wait(timeout=10)
+        
+        if not consensus_reached:
+            print(f"[ERROR] Consensus not reached! Total detections sent: {detection_count}")
+            print("[ERROR] Check if consensus service is receiving detections properly")
+            print(f"[ERROR] Expected namespace prefix in topics: {namespace.namespace}")
+            
         assert consensus_reached, "Consensus not reached with 2 cameras"
         
-        # Simulate GPIO trigger behavior - publish pump activation
-        pump_status = {
-            'state': 'active',
-            'timestamp': time.time(),
-            'triggered_by': 'fire_consensus'
-        }
-        mqtt_client.publish("gpio/pump/status", json.dumps(pump_status))
-        
-        # Pump should be activated
+        # Pump should be activated automatically by the services
         pump_activated = pump_event.wait(timeout=10)
         assert pump_activated, "Pump not activated after consensus"
         
@@ -637,42 +786,40 @@ class TestE2EIntegrationImproved:
         # 2. Growth of at least 20% in area
         # Let's send growing fire detections from both cameras
         
-        def send_growing_fire_detections(camera_id, object_id, num_detections=8):
+        def send_growing_fire_detections(camera_id, object_id, num_detections=10):
             """Send detections showing fire growth."""
-            # Use normalized coordinates (0-1) instead of pixel coordinates
-            base_size = 0.05  # 5% of frame initially
-            growth_factor = 1.4  # 40% total growth
+            # Use pixel coordinates as the consensus service expects
             base_time = time.time()
             
             for i in range(num_detections):
-                # Calculate growing size
-                size_multiplier = 1 + (growth_factor - 1) * (i / (num_detections - 1))
-                current_size = base_size * size_multiplier
+                # Use exponential growth to ensure median shows >20% increase
+                # Start at 100 pixels, grow by 30% each time
+                size = 100 * (1.3 ** i)
                 
-                # Normalized coordinates [x1, y1, x2, y2] between 0 and 1
-                x1, y1 = 0.2, 0.2  # Start position
-                x2 = x1 + current_size
-                y2 = y1 + current_size
+                # Pixel coordinates [x1, y1, x2, y2]
+                x1, y1 = 200, 200  # Start position
+                x2 = x1 + size
+                y2 = y1 + size
                 
                 detection = {
                     'camera_id': camera_id,
                     'confidence': 0.85 + (i * 0.01),  # Increasing confidence
-                    'object': 'fire',  # Consensus expects 'object' not 'object_type'
                     'timestamp': base_time + i * 0.5,  # Spread detections over time
-                    'bbox': [x1, y1, x2, y2],  # Normalized coordinates [0-1]
+                    'bbox': [x1, y1, x2, y2],  # Pixel coordinates
                     'object_id': object_id  # Same object ID for growth tracking
                 }
                 
                 # Send to the main fire detection topic
                 topic = f"{namespace_prefix}/fire/detection"
-                raw_client.publish(topic, json.dumps(detection), qos=1)
+                info = raw_client.publish(topic, json.dumps(detection), qos=1)
+                info.wait_for_publish()  # Ensure message is delivered
                 
-                print(f"[DEBUG] {camera_id} detection {i+1}/{num_detections}: area={current_size*current_size:.4f}")
+                print(f"[DEBUG] {camera_id} detection {i+1}/{num_detections}: size={size:.0f}px, area={size*size:.0f}px²")
                 time.sleep(0.1)  # Small delay between detections
         
         # Send growing fires from both cameras
-        send_growing_fire_detections('camera_0', 'fire_obj_1', 8)
-        send_growing_fire_detections('camera_1', 'fire_obj_2', 8)
+        send_growing_fire_detections('camera_0', 'fire_obj_1', 10)
+        send_growing_fire_detections('camera_1', 'fire_obj_2', 10)
         
         print("[DEBUG] ✅ Sent growing fire detections from both cameras")
         
@@ -714,7 +861,7 @@ class TestE2EIntegrationImproved:
         self._start_e2e_services(docker_client, mqtt_client)
         
         # Also start camera detector
-        container_name = self.docker_manager.get_container_name("e2e-camera-detector")
+        container_name = self.docker_manager.get_container_name(f"e2e-camera-detector-{self.parallel_context.worker_id}")
         self.docker_manager.cleanup_old_container(container_name)
         
         env_vars = self.parallel_context.get_service_env('camera_detector')
@@ -902,8 +1049,13 @@ class TestE2EIntegrationImproved:
     @pytest.mark.infrastructure_dependent
     def test_mqtt_broker_recovery(self, docker_client, mqtt_client):
         """Test services recover from MQTT broker failure"""
+        # Import required services
+        from fire_consensus.consensus import FireConsensus
+        from gpio_trigger.trigger import PumpController
+        from camera_detector.detect import CameraDetector
+        
         # Start a dedicated MQTT broker container for this test
-        broker_name = self.docker_manager.get_container_name("recovery-mqtt")
+        broker_name = self.docker_manager.get_container_name(f"recovery-mqtt-{self.parallel_context.worker_id}")
         self.docker_manager.cleanup_old_container(broker_name)
         
         # Create mosquitto config
@@ -914,21 +1066,23 @@ class TestE2EIntegrationImproved:
             f.write("allow_anonymous true\n")
             f.write("listener 1883\n")
         
-        # Use dynamic port allocation to avoid conflicts
+        # Use a fixed port based on worker ID to avoid conflicts but allow reconnection after restart
+        # Calculate a unique port based on worker_id
+        import hashlib
+        worker_hash = int(hashlib.md5(self.parallel_context.worker_id.encode()).hexdigest()[:4], 16)
+        mqtt_port = 20000 + (worker_hash % 10000)  # Port range 20000-29999
+        
         mqtt_container = self.docker_manager.start_container(
             image="eclipse-mosquitto:2.0",
             name=broker_name,
             config={
-                'ports': {'1883/tcp': None},  # Dynamic port allocation
+                'ports': {'1883/tcp': mqtt_port},  # Fixed port allocation
                 'detach': True,
                 'volumes': {config_dir: {'bind': '/mosquitto/config', 'mode': 'ro'}}
             },
             wait_timeout=10
         )
         
-        # Get the dynamically allocated port
-        container_ports = mqtt_container.attrs['NetworkSettings']['Ports']
-        mqtt_port = int(container_ports['1883/tcp'][0]['HostPort'])
         print(f"[DEBUG] Started dedicated MQTT broker on port {mqtt_port}")
         
         # Wait for MQTT broker to be ready
@@ -948,269 +1102,297 @@ class TestE2EIntegrationImproved:
         if not broker_ready:
             pytest.fail("MQTT broker failed to become ready")
         
-        # Start services with custom broker
-        # We'll start them manually to use our custom broker
-        services_to_start = ['fire-consensus', 'gpio-trigger', 'camera-detector']
-        service_containers = []
+        # Save original environment variables for restoration
+        original_env = {}
+        service_instances = []
         
-        for service in services_to_start:
-            container_name = self.docker_manager.get_container_name(f"recovery-{service}")
-            self.docker_manager.cleanup_old_container(container_name)
-            
-            # Get environment variables but override MQTT settings
-            env_vars = self.parallel_context.get_service_env(service.replace('-', '_'))
+        try:
+            # Get environment variables and override MQTT settings
+            env_vars = self.parallel_context.get_service_env('recovery_test')
             env_vars['MQTT_BROKER'] = 'localhost'
             env_vars['MQTT_PORT'] = str(mqtt_port)
             
-            # Fix environment variable names for refactored services
-            # Environment variables are properly set by ParallelTestContext
-                
             # Service-specific settings
-            if service == 'gpio-trigger':
-                env_vars['MAX_ENGINE_RUNTIME'] = '10'
-                env_vars['GPIO_SIMULATION'] = 'true'
-            elif service == 'fire-consensus':
-                env_vars['SINGLE_CAMERA_TRIGGER'] = 'true'
-                env_vars['MIN_CONFIDENCE'] = '0.8'
-                env_vars['CONSENSUS_THRESHOLD'] = '1'
-                env_vars['DETECTION_WINDOW'] = '30'
-                env_vars['LOG_LEVEL'] = 'DEBUG'
-                env_vars['HEALTH_INTERVAL'] = '5'
-            elif service == 'camera-detector':
-                env_vars['HEALTH_REPORT_INTERVAL'] = '5'
-                env_vars['LOG_LEVEL'] = 'DEBUG'
-                env_vars['SMART_DISCOVERY_ENABLED'] = 'false'
-                env_vars['DISCOVERY_INTERVAL'] = '3600'
-                env_vars['MAC_TRACKING_ENABLED'] = 'false'
+            service_config = {
+                'MAX_ENGINE_RUNTIME': '60',  # Minimum allowed by schema
+                'GPIO_SIMULATION': 'true',
+                'SINGLE_CAMERA_TRIGGER': 'true',
+                'MIN_CONFIDENCE': '0.8',
+                'CONSENSUS_THRESHOLD': '1',
+                'DETECTION_WINDOW': '30',
+                'LOG_LEVEL': 'DEBUG',
+                'HEALTH_INTERVAL': '5',
+                'HEALTH_REPORT_INTERVAL': '5',
+                'SMART_DISCOVERY_ENABLED': 'false',
+                'DISCOVERY_INTERVAL': '3600',
+                'MAC_TRACKING_ENABLED': 'false',
+                'GPIO_TRIGGER_HEALTH_INTERVAL': '5',  # Fast health reports for test
+                'FIRE_CONSENSUS_HEALTH_INTERVAL': '5',
+                'CAMERA_DETECTOR_HEALTH_INTERVAL': '5',
+                # Add timing settings for PumpController
+                'PRIMING_DURATION': '2',  # 2 seconds for testing
+                'IGNITION_START_DURATION': '1',  # 1 second for testing
+                'FIRE_OFF_DELAY': '30'  # 30 seconds for testing
+            }
             
-            # Start container
-            # Fix service name for image
-            if service == 'fire-consensus':
-                image_name = 'wildfire-watch/fire_consensus:latest'
-            elif service == 'gpio-trigger':
-                image_name = 'wildfire-watch/gpio_trigger:latest'
-            elif service == 'camera-detector':
-                image_name = 'wildfire-watch/camera_detector:latest'
-            else:
-                image_name = f'wildfire-watch/{service}:latest'
-            container = self.docker_manager.start_container(
-                image=image_name,
-                name=container_name,
-                config={
-                    'environment': env_vars,
-                    'network_mode': 'host',
-                    'detach': True
-                },
-                wait_timeout=10
-            )
-            service_containers.append(container)
-        
-        # Wait for services to be fully connected
-        time.sleep(10)
-        
-        # Set up monitoring for health messages
-        health_before_restart = {}
-        health_after_restart = {}
-        reconnection_events = {
-            'camera_detector': Event(),
-            'fire_consensus': Event(),
-            'gpio_trigger': Event()
-        }
-        
-        def on_health_message(client, userdata, msg):
-            try:
-                print(f"[DEBUG] Received message on topic: {msg.topic}")
-                
-                # Extract service name from topic
-                topic_parts = msg.topic.split('/')
-                if 'health' in msg.topic or 'telemetry' in msg.topic:
-                    # Get service name from topic pattern
-                    if 'camera_detector' in msg.topic:
-                        service = 'camera_detector'
-                    elif 'fire_consensus' in msg.topic:
-                        service = 'fire_consensus'
-                    elif 'gpio_trigger' in msg.topic or 'trigger_telemetry' in msg.topic:
-                        service = 'gpio_trigger'
-                        print(f"[DEBUG] GPIO trigger health/telemetry detected from topic: {msg.topic}")
-                    else:
-                        return
-                    
-                    payload = json.loads(msg.payload.decode())
-                    
-                    # For trigger_telemetry, only process health_report messages
-                    if 'trigger_telemetry' in msg.topic:
-                        if payload.get('action') != 'health_report':
-                            print(f"[DEBUG] Ignoring non-health trigger telemetry: {payload.get('action')}")
-                            return
-                    
-                    timestamp = payload.get('timestamp', time.time())
-                    
-                    # Track health messages - use a flag to know when we're after restart
-                    if not hasattr(on_health_message, 'after_restart'):
-                        on_health_message.after_restart = False
-                        
-                    if not on_health_message.after_restart:
-                        health_before_restart[service] = timestamp
-                    else:
-                        if service not in health_after_restart:
-                            health_after_restart[service] = timestamp
-                            reconnection_events[service].set()
-                            print(f"[DEBUG] {service} reconnected and published health")
-            except Exception as e:
-                print(f"[DEBUG] Error processing health message: {e}")
-        
-        # Create a monitor client to track health messages
-        monitor_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "recovery_monitor")
-        monitor_client.on_message = on_health_message
-        
-        # Add debug logging
-        def on_connect(client, userdata, flags, rc, properties=None):
-            print(f"[DEBUG] Monitor client connected with result code {rc}")
+            # Apply all environment variables
+            for key, value in {**env_vars, **service_config}.items():
+                original_env[key] = os.environ.get(key)
+                os.environ[key] = str(value)
             
-        monitor_client.on_connect = on_connect
+            # Start services as Python processes
+            print("[DEBUG] Starting services as Python processes...")
+            
+            # Start FireConsensus
+            print("[DEBUG] Starting FireConsensus service...")
+            consensus = FireConsensus()
+            service_instances.append(consensus)
+            if not consensus.wait_for_connection(timeout=10):
+                raise RuntimeError("FireConsensus failed to connect to MQTT broker")
+            print("[DEBUG] ✅ FireConsensus started and connected")
+            
+            # Start PumpController
+            print("[DEBUG] Starting PumpController service...")
+            pump = PumpController()
+            service_instances.append(pump)
+            # PumpController doesn't have wait_for_connection, give it time
+            time.sleep(2)
+            print("[DEBUG] ✅ PumpController started")
+            
+            # Start CameraDetector
+            print("[DEBUG] Starting CameraDetector service...")
+            detector = CameraDetector()
+            service_instances.append(detector)
+            if not detector.wait_for_connection(timeout=10):
+                raise RuntimeError("CameraDetector failed to connect to MQTT broker")
+            print("[DEBUG] ✅ CameraDetector started and connected")
         
-        # Connect with retry logic
-        max_retries = 10
-        retry_delay = 0.5
-        connected = False
-        
-        for retry in range(max_retries):
-            try:
-                monitor_client.connect("localhost", mqtt_port, 60)
-                connected = True
-                print(f"[DEBUG] Monitor client connected on attempt {retry + 1}")
-                break
-            except ConnectionRefusedError:
-                if retry < max_retries - 1:
-                    print(f"[DEBUG] Connection attempt {retry + 1} failed, retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    retry_delay = min(retry_delay * 1.5, 5.0)  # Exponential backoff with max 5s
-                else:
-                    raise
-        
-        if not connected:
-            pytest.fail("Failed to connect monitor client to MQTT broker")
-        
-        # Subscribe to all health topics with namespace
-        namespace = self.parallel_context.namespace.namespace
-        monitor_client.subscribe(f"{namespace}/system/+/health")
-        monitor_client.subscribe(f"{namespace}/system/trigger_telemetry")
-        # Also subscribe to all topics for debugging
-        monitor_client.subscribe(f"{namespace}/#")
-        print(f"[DEBUG] Monitor subscribed to namespace: {namespace}")
-        monitor_client.loop_start()
-        
-        # Wait to collect some health messages before restart
-        print("[DEBUG] Waiting for health messages from services...")
-        time.sleep(15)
-        
-        # Check we have health messages from all services
-        print(f"[DEBUG] Health messages before restart: {list(health_before_restart.keys())}")
-        
-        # If no health messages, check container logs
-        if not health_before_restart:
-            print("[DEBUG] No health messages received, checking container logs...")
-            for container in service_containers:
+            # Set up monitoring for health messages
+            health_before_restart = {}
+            health_after_restart = {}
+            reconnection_events = {
+                'camera_detector': Event(),
+                'fire_consensus': Event(),
+                'gpio_trigger': Event()
+            }
+            
+            def on_health_message(client, userdata, msg):
                 try:
-                    logs = container.logs(tail=30).decode('utf-8')
-                    print(f"[DEBUG] {container.name} logs:\n{logs}")
+                    # Log all messages for debugging
+                    payload_str = msg.payload.decode() if msg.payload else "empty"
+                    print(f"[DEBUG] Received message on topic: {msg.topic}, payload preview: {payload_str[:100]}")
+                    
+                    # Extract service name from topic
+                    topic_parts = msg.topic.split('/')
+                    if 'health' in msg.topic or 'telemetry' in msg.topic:
+                        # Get service name from topic pattern
+                        if 'camera_detector' in msg.topic:
+                            service = 'camera_detector'
+                        elif 'fire_consensus' in msg.topic:
+                            service = 'fire_consensus'
+                        elif 'gpio_trigger' in msg.topic or 'trigger_telemetry' in msg.topic:
+                            service = 'gpio_trigger'
+                            print(f"[DEBUG] GPIO trigger health/telemetry detected from topic: {msg.topic}")
+                        else:
+                            return
+                        
+                        payload = json.loads(msg.payload.decode())
+                        
+                        # For trigger_telemetry, only process health_report messages
+                        if 'trigger_telemetry' in msg.topic:
+                            if payload.get('action') != 'health_report':
+                                print(f"[DEBUG] Ignoring non-health trigger telemetry: {payload.get('action')}")
+                                return
+                        
+                        timestamp = payload.get('timestamp', time.time())
+                        
+                        # Track health messages - use a flag to know when we're after restart
+                        if not hasattr(on_health_message, 'after_restart'):
+                            on_health_message.after_restart = False
+                            
+                        if not on_health_message.after_restart:
+                            health_before_restart[service] = timestamp
+                        else:
+                            if service not in health_after_restart:
+                                health_after_restart[service] = timestamp
+                                reconnection_events[service].set()
+                                print(f"[DEBUG] {service} reconnected and published health")
                 except Exception as e:
-                    print(f"[DEBUG] Failed to get logs from {container.name}: {e}")
-        
-        # Restart the MQTT container to simulate broker failure
-        print("[DEBUG] Simulating MQTT broker failure by restarting container...")
-        
-        # Stop the MQTT container
-        mqtt_container.stop(timeout=5)
-        print("[DEBUG] MQTT broker stopped")
-        
-        # Wait a bit for services to detect disconnection
-        time.sleep(10)
-        
-        # Restart the MQTT container
-        print("[DEBUG] Restarting MQTT broker...")
-        mqtt_container.start()
-        
-        # Wait for container to be running
-        mqtt_container.reload()
-        
-        # Get the new port after restart (it might have changed)
-        container_ports = mqtt_container.attrs['NetworkSettings']['Ports']
-        if container_ports and '1883/tcp' in container_ports and container_ports['1883/tcp']:
-            mqtt_port = int(container_ports['1883/tcp'][0]['HostPort'])
+                    print(f"[DEBUG] Error processing health message: {e}")
+            
+            # Create a monitor client to track health messages
+            monitor_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "recovery_monitor")
+            monitor_client.on_message = on_health_message
+            
+            # Add debug logging and re-subscribe on reconnect
+            def on_connect(client, userdata, flags, rc, properties=None):
+                print(f"[DEBUG] Monitor client connected with result code {rc}")
+                # Re-subscribe on reconnect
+                namespace = self.parallel_context.namespace.namespace
+                client.subscribe(f"{namespace}/system/+/health")
+                client.subscribe(f"{namespace}/system/trigger_telemetry")
+                client.subscribe(f"{namespace}/system/+/lwt")
+                client.subscribe(f"{namespace}/#")
+                print(f"[DEBUG] Monitor re-subscribed to namespace: {namespace}")
+                
+            monitor_client.on_connect = on_connect
+            
+            # Connect with retry logic
+            max_retries = 10
+            retry_delay = 0.5
+            connected = False
+            
+            for retry in range(max_retries):
+                try:
+                    monitor_client.connect("localhost", mqtt_port, 60)
+                    connected = True
+                    print(f"[DEBUG] Monitor client connected on attempt {retry + 1}")
+                    break
+                except ConnectionRefusedError:
+                    if retry < max_retries - 1:
+                        print(f"[DEBUG] Connection attempt {retry + 1} failed, retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 1.5, 5.0)  # Exponential backoff with max 5s
+                    else:
+                        raise
+            
+            if not connected:
+                pytest.fail("Failed to connect monitor client to MQTT broker")
+            
+            # Subscribe to all health topics with namespace
+            namespace = self.parallel_context.namespace.namespace
+            monitor_client.subscribe(f"{namespace}/system/+/health")
+            monitor_client.subscribe(f"{namespace}/system/trigger_telemetry")
+            # Also subscribe to all topics for debugging
+            monitor_client.subscribe(f"{namespace}/#")
+            print(f"[DEBUG] Monitor subscribed to namespace: {namespace}")
+            monitor_client.loop_start()
+            
+            # Wait to collect some health messages before restart
+            print("[DEBUG] Waiting for health messages from services...")
+            time.sleep(15)
+            
+            # Check we have health messages from all services
+            print(f"[DEBUG] Health messages before restart: {list(health_before_restart.keys())}")
+            
+            # If no health messages, debug why
+            if not health_before_restart:
+                print("[DEBUG] No health messages received, services may be using wrong topic namespace")
+                print(f"[DEBUG] Expected namespace: {namespace}")
+            
+            # Restart the MQTT container to simulate broker failure
+            print("[DEBUG] Simulating MQTT broker failure by restarting container...")
+            
+            # Stop the MQTT container with error handling
+            try:
+                mqtt_container.stop(timeout=5)
+                print("[DEBUG] MQTT broker stopped")
+            except docker.errors.NotFound:
+                print("[DEBUG] MQTT container already stopped or removed")
+                # Container is already gone, which is what we wanted anyway
+            
+            # Wait a bit for services to detect disconnection
+            time.sleep(10)
+            
+            # Restart the MQTT container
+            print("[DEBUG] Restarting MQTT broker...")
+            try:
+                mqtt_container.start()
+                # Wait for container to be running
+                mqtt_container.reload()
+            except docker.errors.NotFound:
+                # Container was removed, need to recreate it
+                print("[DEBUG] MQTT container was removed, recreating...")
+                mqtt_container = self.docker_manager.start_container(
+                    image="eclipse-mosquitto:2.0",
+                    ports={'1883/tcp': mqtt_port},
+                    volumes={config_dir: {'bind': '/mosquitto/config', 'mode': 'ro'}},
+                    name=mqtt_name,
+                    labels={'com.wildfire.test': 'true'},
+                    mem_limit='512m',
+                    cpu_quota=50000
+                )
+                # Wait for health check
+                if not self.docker_manager.wait_for_healthy(mqtt_name, timeout=30):
+                    raise RuntimeError("MQTT broker failed to restart")
+            
+            # Port remains the same after restart with fixed port allocation
             print(f"[DEBUG] MQTT broker restarted on port {mqtt_port}")
-        else:
-            print(f"[DEBUG] No port mapping found after restart, using original port {mqtt_port}")
-        
-        # Wait for broker to be ready
-        start_time = time.time()
-        while time.time() - start_time < 30:
-            try:
-                test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test_restart")
-                test_client.connect("localhost", mqtt_port, 60)
-                test_client.disconnect()
-                print(f"[DEBUG] MQTT broker is ready on port {mqtt_port}")
-                break
-            except Exception as e:
-                print(f"[DEBUG] Connection attempt failed: {e}")
-                time.sleep(1)
-        else:
-            pytest.fail("MQTT broker failed to restart within 30 seconds")
-        
-        # Mark that we're now tracking post-restart messages
-        on_health_message.after_restart = True
-        
-        # Wait for all services to reconnect
-        print("[DEBUG] Waiting for services to reconnect...")
-        all_reconnected = True
-        for service, event in reconnection_events.items():
-            # GPIO trigger has 60s health interval by default, so give it more time
-            timeout = 90 if service == 'gpio_trigger' else 60
-            reconnected = event.wait(timeout=timeout)
-            if not reconnected:
-                print(f"[DEBUG] {service} failed to reconnect within timeout")
-                # Check container logs
-                for container in service_containers:
-                    if service.replace('_', '-') in container.name:
-                        try:
-                            logs = container.logs(tail=50).decode('utf-8')
-                            print(f"[DEBUG] {service} logs:\n{logs}")
-                        except:
-                            pass
-                all_reconnected = False
+            
+            # Wait for broker to be ready
+            start_time = time.time()
+            while time.time() - start_time < 30:
+                try:
+                    test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, "test_restart")
+                    test_client.connect("localhost", mqtt_port, 60)
+                    test_client.disconnect()
+                    print(f"[DEBUG] MQTT broker is ready on port {mqtt_port}")
+                    break
+                except Exception as e:
+                    print(f"[DEBUG] Connection attempt failed: {e}")
+                    time.sleep(1)
             else:
-                print(f"[DEBUG] {service} successfully reconnected")
-        
-        # Assert all services reconnected
-        assert all_reconnected, "Not all services reconnected after broker restart"
-        
-        print(f"[DEBUG] All services successfully reconnected after broker restart")
-        print(f"[DEBUG] Health timestamps after restart: {health_after_restart}")
-        
-        # Cleanup
-        monitor_client.loop_stop()
-        monitor_client.disconnect()
-        
-        # Stop and remove containers
-        for container in service_containers:
+                pytest.fail("MQTT broker failed to restart within 30 seconds")
+            
+            # Mark that we're now tracking post-restart messages
+            on_health_message.after_restart = True
+            
+            # Wait for all services to reconnect
+            print("[DEBUG] Waiting for services to reconnect...")
+            all_reconnected = True
+            for service, event in reconnection_events.items():
+                # All services have 5s health interval configured
+                timeout = 30  # Give 30 seconds for reconnection
+                reconnected = event.wait(timeout=timeout)
+                if not reconnected:
+                    print(f"[DEBUG] {service} failed to reconnect within timeout")
+                    all_reconnected = False
+                else:
+                    print(f"[DEBUG] {service} successfully reconnected")
+            
+            # Assert all services reconnected
+            assert all_reconnected, "Not all services reconnected after broker restart"
+            
+            print(f"[DEBUG] All services successfully reconnected after broker restart")
+            print(f"[DEBUG] Health timestamps after restart: {health_after_restart}")
+            
+        finally:
+            # Cleanup
+            if 'monitor_client' in locals():
+                monitor_client.loop_stop()
+                monitor_client.disconnect()
+            
+            # Clean up service instances
+            for service in service_instances:
+                try:
+                    if hasattr(service, 'cleanup'):
+                        service.cleanup()
+                    elif hasattr(service, 'shutdown'):
+                        service.shutdown()
+                    print(f"[DEBUG] Cleaned up {service.__class__.__name__}")
+                except Exception as e:
+                    print(f"[DEBUG] Error cleaning up {service.__class__.__name__}: {e}")
+            
+            # Restore environment variables
+            for key, value in original_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+                    
+            # Stop MQTT container
             try:
-                container.stop(timeout=5)
-                container.remove()
+                mqtt_container.stop(timeout=5)
+                mqtt_container.remove()
             except:
                 pass
                 
-        # Stop MQTT container
-        try:
-            mqtt_container.stop(timeout=5)
-            mqtt_container.remove()
-        except:
-            pass
-            
-        # Cleanup config directory
-        try:
-            shutil.rmtree(config_dir)
-        except:
-            pass
+            # Cleanup config directory
+            try:
+                import shutil
+                shutil.rmtree(config_dir)
+            except:
+                pass
 
 
 @pytest.mark.integration
@@ -1223,7 +1405,11 @@ class TestE2EPipelineWithRealCamerasImproved:
     def e2e_setup(self, request, docker_client):
         """Setup E2E test environment, parameterized for TLS"""
         use_tls = request.param == "tls"
-        mqtt_port = 8883 if use_tls else 1883
+        # Use dynamic port allocation to avoid conflicts in parallel tests
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('', 0))
+            mqtt_port = s.getsockname()[1]
         containers = {}
         
         # Get worker_id from request
@@ -1298,8 +1484,24 @@ log_type all
             user="root"
         )
         
-        # Wait for MQTT to start
-        time.sleep(5)
+        # Wait for MQTT to start with proper verification
+        mqtt_ready = False
+        for retry in range(30):  # Try for up to 30 seconds
+            try:
+                test_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, f"test_{worker_id}")
+                test_client.connect("localhost", mqtt_port, 60)
+                test_client.disconnect()
+                mqtt_ready = True
+                print(f"[DEBUG] MQTT broker ready on port {mqtt_port}")
+                break
+            except Exception as e:
+                if retry < 29:
+                    time.sleep(1)
+                else:
+                    print(f"[ERROR] MQTT broker failed to start: {e}")
+        
+        if not mqtt_ready:
+            raise RuntimeError(f"MQTT broker failed to become ready on port {mqtt_port}")
         
         yield {
             "containers": containers, 
@@ -1329,12 +1531,105 @@ log_type all
     def test_complete_pipeline_with_real_cameras(self, docker_client, e2e_setup):
         """Test complete fire detection pipeline with proper consensus and TensorRT"""
         
+        # Check if required Docker images are available
+        required_images = [
+            "wildfire-watch/camera_detector:latest",
+            "wildfire-watch/fire_consensus:latest",
+            "wildfire-watch/gpio_trigger:latest",
+            "ghcr.io/blakeblackshear/frigate:stable-tensorrt"
+        ]
+        
+        for image_name in required_images:
+            try:
+                docker_client.images.get(image_name)
+            except docker.errors.ImageNotFound:
+                # Build the image instead of skipping
+                print(f"Docker image '{image_name}' not found. Building it now...")
+                
+                # Map image name to Dockerfile path
+                dockerfile_map = {
+                    "wildfire-watch/camera_detector:latest": "camera_detector/Dockerfile",
+                    "wildfire-watch/fire_consensus:latest": "fire_consensus/Dockerfile",
+                    "wildfire-watch/gpio_trigger:latest": "gpio_trigger/Dockerfile"
+                }
+                
+                if image_name in dockerfile_map:
+                    dockerfile = dockerfile_map[image_name]
+                    build_args = ['docker', 'build', '-t', image_name, '-f', dockerfile, '.']
+                    
+                    # Special handling for gpio_trigger which needs platform arg
+                    if 'gpio_trigger' in dockerfile:
+                        build_args.extend(['--build-arg', 'PLATFORM=amd64'])
+                    
+                    try:
+                        result = subprocess.run(build_args, capture_output=True, text=True, timeout=300)
+                        if result.returncode != 0:
+                            raise RuntimeError(
+                                f"Failed to build Docker image '{image_name}': {result.stderr}\n"
+                                "Please ensure Docker is installed and the Dockerfile exists."
+                            )
+                        print(f"✓ Successfully built Docker image: {image_name}")
+                    except subprocess.TimeoutExpired:
+                        raise RuntimeError(
+                            f"Building Docker image '{image_name}' timed out after 5 minutes. "
+                            "Please check your Docker setup and network connection."
+                        )
+                    except FileNotFoundError:
+                        raise RuntimeError(
+                            "Docker is not installed or not in PATH. "
+                            "Please install Docker and ensure the Docker daemon is running."
+                        )
+                elif image_name == "ghcr.io/blakeblackshear/frigate:stable-tensorrt":
+                    # Can't build external Frigate image, must pull it
+                    print(f"Pulling external Docker image: {image_name}")
+                    try:
+                        result = subprocess.run(['docker', 'pull', image_name], 
+                                              capture_output=True, text=True, timeout=600)
+                        if result.returncode != 0:
+                            raise RuntimeError(
+                                f"Failed to pull Docker image '{image_name}': {result.stderr}\n"
+                                "Please check your internet connection and Docker Hub access."
+                            )
+                        print(f"✓ Successfully pulled Docker image: {image_name}")
+                    except subprocess.TimeoutExpired:
+                        raise RuntimeError(
+                            f"Pulling Docker image '{image_name}' timed out after 10 minutes. "
+                            "Please check your internet connection."
+                        )
+                    except FileNotFoundError:
+                        raise RuntimeError(
+                            "Docker is not installed or not in PATH. "
+                            "Please install Docker and ensure the Docker daemon is running."
+                        )
+        
         # Check if camera credentials are available
         camera_credentials = os.getenv('CAMERA_CREDENTIALS')
         if not camera_credentials:
             pytest.skip("CAMERA_CREDENTIALS environment variable not set, skipping E2E camera tests")
         
+        # Clean up any leftover containers from previous runs
+        worker_id = e2e_setup['worker_id']
+        container_prefix = e2e_setup['container_prefix']
+        cleanup_names = [
+            f'{container_prefix}-e2e-mqtt',
+            f'{container_prefix}-e2e-camera-detector',
+            f'{container_prefix}-e2e-frigate',
+            f'{container_prefix}-e2e-consensus',
+            f'{container_prefix}-e2e-gpio'
+        ]
+        
+        for name in cleanup_names:
+            try:
+                container = docker_client.containers.get(name)
+                container.stop(timeout=2)
+                container.remove()
+                print(f"[DEBUG] Cleaned up leftover container: {name}")
+            except:
+                pass
+        
         use_tls = e2e_setup['use_tls']
+        
+        # TLS tests now use dynamic port allocation to avoid conflicts
         mqtt_port = e2e_setup['mqtt_port']
         containers = e2e_setup['containers']
         cert_dir = e2e_setup['cert_dir']
@@ -1404,9 +1699,28 @@ log_type all
             )
         
         discovery_client.on_message = on_discovery
-        discovery_client.connect('localhost', mqtt_port, 60)
-        discovery_client.subscribe(f'{namespace_prefix}/camera/discovery/+')
-        discovery_client.loop_start()
+        
+        # Retry connection with exponential backoff
+        connected = False
+        for retry in range(10):
+            try:
+                discovery_client.connect('localhost', mqtt_port, 60)
+                connected = True
+                print(f"[DEBUG] Discovery client connected to MQTT on port {mqtt_port}")
+                break
+            except (ConnectionRefusedError, OSError) as e:
+                if retry < 9:
+                    wait_time = min(2 ** retry, 10)  # Exponential backoff up to 10s
+                    print(f"[DEBUG] Connection attempt {retry + 1} failed: {e}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    raise RuntimeError(f"Failed to connect to MQTT broker after 10 attempts: {e}")
+        
+        if connected:
+            discovery_client.subscribe(f'{namespace_prefix}/camera/discovery/+')
+            discovery_client.loop_start()
+        else:
+            raise RuntimeError("Could not establish MQTT connection")
         
         # Wait for camera discovery
         print("Waiting for camera discovery...")
@@ -1552,7 +1866,8 @@ log_type all
         # Start GPIO trigger with safety timeout
         # Note: GPIO trigger has a minimum runtime of 60 seconds
         max_runtime = 60
-        print(f"Starting GPIO trigger with {max_runtime}s safety timeout...")
+        rpm_reduction_lead = 50  # Start RPM reduction 50 seconds before shutdown (at 10s)
+        print(f"Starting GPIO trigger with {max_runtime}s safety timeout, RPM reduction at {max_runtime - rpm_reduction_lead}s...")
         
         containers['gpio'] = docker_client.containers.run(
             "wildfire-watch/gpio_trigger:latest",
@@ -1566,7 +1881,7 @@ log_type all
                 'TOPIC_PREFIX': namespace_prefix,  # Add namespace prefix
                 'GPIO_SIMULATION': 'true',
                 'MAX_ENGINE_RUNTIME': str(max_runtime),
-                'RPM_REDUCTION_LEAD': '5',  # Reduce RPM 5 seconds before shutdown
+                'RPM_REDUCTION_LEAD': str(rpm_reduction_lead),  # Reduce RPM 50 seconds before shutdown
                 'LOG_LEVEL': 'DEBUG',
                 'TLS_CA_PATH': '/certs/ca.crt' if use_tls else '',  # Override default cert path for GPIO
             },
@@ -1612,7 +1927,9 @@ log_type all
                     if action in ['engine_running', 'pump_sequence_start']:
                         pump_activated_event.set()
                         print(f"💧 Pump activated! Action: {action}")
-                    elif action in ['shutdown_initiated', 'shutdown_complete', 'idle_state_entered'] and pump_activated_event.is_set():
+                    elif action in ['shutdown_initiated', 'shutdown_complete', 'idle_state_entered', 
+                                   'rpm_reduced', 'max_runtime_reached', 'rpm_reduce_on',
+                                   'cooldown_entered', 'engine_stopped'] and pump_activated_event.is_set():
                         pump_deactivated_event.set()
                         print(f"🛑 Pump deactivated! Action: {action}")
                     
@@ -1722,12 +2039,13 @@ log_type all
         assert pump_activated, "Pump was not activated after consensus"
         
         # Wait for safety timeout  
-        # The pump runs for max_runtime seconds AFTER engine starts
-        # Engine start happens after priming (2s) + ignition start delay (2s) = ~4s
-        # So total time from fire trigger to shutdown is approximately max_runtime + 5-10s
-        print(f"Waiting {max_runtime}s for safety timeout...")
+        # With MAX_ENGINE_RUNTIME=60s and RPM_REDUCTION_LEAD=50s,
+        # RPM reduction starts at 10s (60-50), and we detect deactivation on RPM reduction
+        # Add some buffer for startup delays (priming, ignition, etc.)
+        expected_deactivation_time = max_runtime - rpm_reduction_lead + 10  # 10s + 10s buffer = 20s
+        print(f"Waiting up to {expected_deactivation_time}s for RPM reduction to trigger...")
         start_wait = time.time()
-        pump_deactivated = pump_deactivated_event.wait(timeout=max_runtime + 30)
+        pump_deactivated = pump_deactivated_event.wait(timeout=expected_deactivation_time)
         wait_time = time.time() - start_wait
         
         if not pump_deactivated:

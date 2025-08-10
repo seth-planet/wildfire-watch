@@ -1,0 +1,51 @@
+# Frigate Configuration for YOLOv8
+
+detectors:
+  coral:
+    type: yolov8
+    device: usb
+    model:
+      path: /models/yolo8l_fire_640x640_frigate.tflite
+      conf_threshold: 0.25
+      iou_threshold: 0.45
+      max_detections: 100
+      labels:
+        - fire
+        - smoke
+        - person
+        - vehicle
+
+# Model configuration
+model:
+  width: 640
+  height: 640
+  input_tensor: nhwc
+  input_pixel_format: rgb
+  # No need for output tensor meta - handled by custom detector
+
+# Object tracking
+objects:
+  track:
+    - fire
+    - smoke
+    - person
+  filters:
+    fire:
+      min_score: 0.3
+      threshold: 0.35
+    smoke:
+      min_score: 0.25
+      threshold: 0.3
+
+# Camera configuration example
+cameras:
+  front_yard:
+    ffmpeg:
+      inputs:
+        - path: rtsp://user:pass@camera_ip/stream
+          roles:
+            - detect
+    detect:
+      width: 640
+      height: 640
+      fps: 5

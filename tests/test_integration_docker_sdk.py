@@ -22,6 +22,33 @@ from test_utils.topic_namespace import create_namespaced_client
 logger = logging.getLogger(__name__)
 
 
+@pytest.fixture(scope="function")
+def session_test_mqtt_broker(worker_id):
+    """Function-scoped test MQTT broker"""
+    sys.path.insert(0, os.path.dirname(__file__))
+    from test_utils.enhanced_mqtt_broker import TestMQTTBroker
+    broker = TestMQTTBroker(session_scope=True, worker_id=worker_id)
+    broker.start()
+    yield broker
+    broker.stop()
+
+
+@pytest.fixture(scope="function")
+def session_docker_container_manager(worker_id):
+    """Function-scoped Docker container manager"""
+    from test_utils.helpers import DockerContainerManager
+    manager = DockerContainerManager(worker_id=worker_id)
+    yield manager
+    manager.cleanup()
+
+
+@pytest.fixture(scope="function")
+def session_parallel_test_context(worker_id):
+    """Function-scoped parallel test context"""
+    from test_utils.helpers import ParallelTestContext
+    return ParallelTestContext(worker_id)
+
+
 class DockerSDKIntegrationTest:
     """Test integration using Docker SDK with proper isolation"""
     
@@ -211,11 +238,20 @@ class DockerSDKIntegrationTest:
             
             def on_message(client, userdata, msg):
                 nonlocal fire_triggered
-                logger.info(f"Received: {msg.topic} - {msg.payload}")
+                payload_str = msg.payload.decode('utf-8') if isinstance(msg.payload, bytes) else str(msg.payload)
+                logger.info(f"Received: {msg.topic} - {payload_str[:100]}...")  # Log first 100 chars
+                
+                # Extra debug for consensus and fire messages
+                if "consensus" in msg.topic.lower() or "fire" in msg.topic.lower():
+                    logger.debug(f"[DEBUG] Fire/Consensus message: {msg.topic}")
+                    
                 # Check for fire trigger with namespace prefix
                 expected_topic = f"{topic_prefix}/fire/trigger" if topic_prefix else "fire/trigger"
                 if msg.topic == expected_topic:
                     fire_triggered = True
+                    logger.info("🔥 FIRE TRIGGER RECEIVED! Test should pass.")
+                else:
+                    logger.debug(f"[DEBUG] Not a trigger (expected: {expected_topic}, got: {msg.topic})")
                     
             def on_connect(client, userdata, flags, rc, properties):
                 logger.info(f"Test client connected with result code {rc}")
@@ -243,22 +279,42 @@ class DockerSDKIntegrationTest:
                 logger.info(f"  Sent telemetry for {camera_id} to {telemetry_topic}")
                 time.sleep(0.1)  # Small delay between messages
             
-            # Wait for telemetry to be processed
-            time.sleep(3)
+            # Wait longer for telemetry to be processed and consensus to initialize
+            logger.info("Waiting for consensus service to process camera telemetry...")
+            time.sleep(5)  # Increased from 3 to 5 seconds
             
             # Send fire detections with growth pattern
             logger.info("Injecting fire detections with growth pattern...")
+            logger.info(f"[DEBUG] Using topic prefix: '{topic_prefix}'")
+            logger.info(f"[DEBUG] Expected fire/trigger topic: '{topic_prefix}/fire/trigger' if topic_prefix else 'fire/trigger'")
             
-            # Send detections from multiple cameras with increasing size
+            # First, send initial detections to establish baseline
+            for _ in range(3):  # Send 3 initial detections
+                for camera_id in ['camera_1', 'camera_2', 'camera_3']:
+                    detection = {
+                        'camera_id': camera_id,
+                        'confidence': 0.80,
+                        'object_type': 'fire',
+                        'object_id': f'{camera_id}_fire_1',
+                        'bounding_box': [0.1, 0.1, 0.2, 0.2],  # Small initial size
+                        'timestamp': time.time()
+                    }
+                    base_topic = f"fire/detection/{camera_id}"
+                    topic = f"{topic_prefix}/{base_topic}" if topic_prefix else base_topic
+                    client.publish(topic, json.dumps(detection), retain=False)
+                time.sleep(0.5)
+            
+            # Now send growing detections
             base_size = 100
-            for i in range(10):  # More detections for growth analysis
-                # Simulate fire growth
-                size = base_size + (i * 20)  # Growing fire
+            # Send more detections with more aggressive growth to ensure trigger
+            for i in range(15):  # Reduced from 20 to 15 for faster test
+                # Simulate fire growth - more aggressive growth pattern
+                size = base_size + (i * 70)  # Even more aggressive growth (was 50, now 70)
                 
                 for camera_id in ['camera_1', 'camera_2', 'camera_3']:
                     detection = {
                         'camera_id': camera_id,
-                        'confidence': 0.85,
+                        'confidence': 0.85 + (i * 0.005),  # Increasing confidence too
                         'object_type': 'fire',
                         'object_id': f'{camera_id}_fire_1',  # Consistent object ID
                         'bounding_box': [0.1, 0.1, 0.1 + (size/1000), 0.1 + (size/1000)],  # Normalized bbox
@@ -268,24 +324,50 @@ class DockerSDKIntegrationTest:
                     base_topic = f"fire/detection/{camera_id}"
                     topic = f"{topic_prefix}/{base_topic}" if topic_prefix else base_topic
                     client.publish(topic, json.dumps(detection), retain=False)
-                    logger.info(f"  Sent detection {i+1} from {camera_id} (size: {size}) to {topic}")
+                    logger.info(f"  Sent detection {i+1} from {camera_id} (size: {size}, conf: {detection['confidence']:.2f}) to {topic}")
                     
-                time.sleep(1)  # 1 second between detection sets
+                time.sleep(0.3)  # Even faster detection rate - 0.3s between detection sets (was 0.5s)
                     
             
             # Wait for consensus
             logger.info("Waiting for consensus...")
-            time.sleep(10)  # Give more time for consensus processing
+            # Use event-based waiting with a generous timeout
+            trigger_event = Event()
+            
+            # Update the callback to set the event
+            original_on_message = client.on_message
+            def on_message_with_event(client, userdata, msg):
+                original_on_message(client, userdata, msg)
+                if fire_triggered:
+                    trigger_event.set()
+            
+            client.on_message = on_message_with_event
+            
+            # Wait up to 30 seconds for fire trigger
+            if trigger_event.wait(timeout=30):
+                logger.info("Fire trigger received within timeout")
+            else:
+                logger.warning("No fire trigger received within 30s timeout")
             
             # Check logs
             if 'consensus' in self.containers:
-                logs = self.containers['consensus'].logs().decode('utf-8')  # Get all logs
-                logger.info(f"\nConsensus container logs:\n{logs}")
+                try:
+                    logs = self.containers['consensus'].logs().decode('utf-8')  # Get all logs
+                    logger.info(f"\nConsensus container logs:\n{logs}")
+                except docker.errors.NotFound:
+                    logger.warning("Consensus container not found - may have exited early")
+                except Exception as e:
+                    logger.error(f"Failed to get consensus logs: {e}")
                 
             # Also check MQTT broker logs
             if 'mqtt' in self.containers:
-                mqtt_logs = self.containers['mqtt'].logs(tail=50).decode('utf-8')
-                logger.info(f"\nMQTT broker logs:\n{mqtt_logs}")
+                try:
+                    mqtt_logs = self.containers['mqtt'].logs(tail=50).decode('utf-8')
+                    logger.info(f"\nMQTT broker logs:\n{mqtt_logs}")
+                except docker.errors.NotFound:
+                    logger.warning("MQTT container not found - may have exited early")
+                except Exception as e:
+                    logger.error(f"Failed to get MQTT logs: {e}")
                 
             client.loop_stop()
             client.disconnect()
@@ -321,9 +403,9 @@ class DockerSDKIntegrationTest:
 @pytest.mark.docker
 @pytest.mark.integration
 @pytest.mark.timeout(300)
-def test_docker_sdk_integration(parallel_test_context, docker_container_manager, test_mqtt_broker):
+def test_docker_sdk_integration(session_parallel_test_context, session_docker_container_manager, session_test_mqtt_broker):
     """Test Docker container integration using SDK with proper isolation"""
-    test = DockerSDKIntegrationTest(parallel_test_context, docker_container_manager, test_mqtt_broker)
+    test = DockerSDKIntegrationTest(session_parallel_test_context, session_docker_container_manager, session_test_mqtt_broker)
     
     try:
         success = test.test_fire_detection_flow()

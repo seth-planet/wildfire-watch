@@ -1,0 +1,39 @@
+# Custom Frigate build with YOLO EdgeTPU support
+FROM ghcr.io/blakeblackshear/frigate:stable
+
+# Install Python 3.8 for Coral TPU compatibility
+RUN apt-get update && apt-get install -y \
+    python3.8 \
+    python3.8-dev \
+    python3.8-distutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install pycoral for EdgeTPU with Python 3.8
+RUN python3.8 -m pip install --extra-index-url https://google-coral.github.io/py-repo/ pycoral~=2.0
+
+# Copy our custom YOLO detector plugin
+COPY yolo_edgetpu.py /opt/frigate/frigate/detectors/plugins/
+
+# Create models directory
+RUN mkdir -p /models
+
+# Copy fire detection labels
+COPY fire_labels.txt /models/
+
+# Ensure plugin is registered by updating __init__.py
+RUN echo "# Auto-generated plugin imports" >> /opt/frigate/frigate/detectors/plugins/__init__.py && \
+    echo "from . import yolo_edgetpu" >> /opt/frigate/frigate/detectors/plugins/__init__.py
+
+# Set environment for EdgeTPU
+ENV PYTHONPATH="/opt/frigate:$PYTHONPATH"
+ENV LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH"
+
+# Verify plugin installation
+RUN python3 -c "import sys; sys.path.insert(0, '/opt/frigate'); \
+    from frigate.detectors.plugins import yolo_edgetpu; \
+    print('YOLO EdgeTPU plugin loaded successfully')"
+
+WORKDIR /opt/frigate
+
+# Use Frigate's standard entrypoint
+ENTRYPOINT ["python3", "-m", "frigate"]

@@ -386,6 +386,27 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
         """MQTT connection callback."""
         self._safe_log('info', "MQTT connected, ready for fire detection messages")
         
+        # Restart health reporting after reconnection
+        if hasattr(self, 'health_reporter') and self.health_reporter:
+            self._safe_log('info', "Restarting health reporting after reconnection")
+            try:
+                # Publish immediate health status
+                initial_health = {
+                    'healthy': True,
+                    'status': 'online',
+                    'service': 'fire_consensus',
+                    'timestamp': time.time()
+                }
+                if self.publish_message("system/fire_consensus/health", initial_health, retain=True):
+                    self._safe_log('info', "Published health status after reconnection")
+                else:
+                    self._safe_log('error', "Failed to publish health status after reconnection")
+                    
+                # Force an immediate health report
+                self.health_reporter._publish_health()
+            except Exception as e:
+                self._safe_log('error', f"Failed to restart health reporting: {e}", exc_info=True)
+        
     def _on_message(self, topic: str, payload: any):
         """Handle incoming MQTT messages."""
         try:
@@ -527,10 +548,12 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
             camera.last_seen = time.time()
             camera.is_online = True
             
-            self._safe_log('debug', f"Added detection from {camera_id}: "
+            detection_count = len(camera.detections[detection.object_id])
+            self._safe_log('debug', f"[DEBUG] Added detection from {camera_id}: "
                             f"confidence={detection.confidence:.2f}, "
                             f"area={detection.area:.4f}, "
-                            f"object_id={detection.object_id}")
+                            f"object_id={detection.object_id}, "
+                            f"total_for_object={detection_count}")
             
         # Check consensus
         self._check_consensus()
@@ -585,6 +608,7 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
         """Get list of growing fire object IDs for a camera."""
         camera = self.cameras.get(camera_id)
         if not camera:
+            self._safe_log('debug', f"[DEBUG] get_growing_fires: No camera found for {camera_id}")
             return []
             
         growing_fires = []
@@ -595,7 +619,10 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
             recent = [d for d in detections 
                      if current_time - d.timestamp <= self.config.detection_window]
             
+            self._safe_log('debug', f"[DEBUG] Camera {camera_id}, Object {object_id}: {len(recent)} recent detections out of {len(detections)} total")
+            
             if len(recent) < self.config.moving_average_window * 2:
+                self._safe_log('debug', f"[DEBUG] Not enough recent detections: {len(recent)} < {self.config.moving_average_window * 2}")
                 continue
                 
             # Calculate moving averages using median for noise robustness
@@ -604,9 +631,13 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
             early_avg = np.median(areas[:self.config.moving_average_window])
             recent_avg = np.median(areas[-self.config.moving_average_window:])
             
+            growth_ratio = recent_avg / early_avg if early_avg > 0 else 0
+            self._safe_log('debug', f"[DEBUG] Growth analysis: early_avg={early_avg:.4f}, recent_avg={recent_avg:.4f}, ratio={growth_ratio:.2f}, required={self.config.area_increase_ratio}")
+            
             # Check growth
             if recent_avg >= early_avg * self.config.area_increase_ratio:
                 growing_fires.append(object_id)
+                self._safe_log('debug', f"[DEBUG] GROWING FIRE DETECTED: {object_id} on camera {camera_id}")
                 
         return growing_fires
         

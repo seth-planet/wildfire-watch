@@ -1,37 +1,37 @@
 {
   "metrics": {
-    "avg_inference_ms": 60.02970596193336,
-    "p95_inference_ms": 60.4375637951307,
-    "p99_inference_ms": 88.80478922044837,
-    "fps": 16.65841909394209,
+    "avg_inference_ms": 59.879355411976576,
+    "p95_inference_ms": 60.125193977728486,
+    "p99_inference_ms": 78.54626570828258,
+    "fps": 16.700246572794406,
     "per_video": {
       "fire1.mov": {
         "total_detections": 96,
         "fire_detections": 93,
         "unique_frames_with_fire": 47,
-        "avg_inference_ms": 63.642628849484026,
-        "fps": 15.712738742534004
+        "avg_inference_ms": 63.71720165014267,
+        "fps": 15.69434899998878
       },
       "fire2.mov": {
         "total_detections": 0,
         "fire_detections": 0,
         "unique_frames_with_fire": 0,
-        "avg_inference_ms": 58.92796812579036,
-        "fps": 16.96987070494869
+        "avg_inference_ms": 58.59772928990424,
+        "fps": 17.06550769318444
       },
       "fire3.mp4": {
         "total_detections": 0,
         "fire_detections": 0,
         "unique_frames_with_fire": 0,
-        "avg_inference_ms": 58.910471964627504,
-        "fps": 16.974910684817548
+        "avg_inference_ms": 58.74925374984741,
+        "fps": 17.021492804963454
       },
       "fire4.mp4": {
         "total_detections": 0,
         "fire_detections": 0,
         "unique_frames_with_fire": 0,
-        "avg_inference_ms": 58.63775490783155,
-        "fps": 17.053858927099576
+        "avg_inference_ms": 58.453236958011985,
+        "fps": 17.107692439998115
       }
     }
   },

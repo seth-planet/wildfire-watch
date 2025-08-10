@@ -300,6 +300,7 @@ class WebInterfaceConfig(ConfigBase):
             'system/+/lwt',
             
             # GPIO trigger telemetry
+            'system/trigger_telemetry',
             'system/trigger_telemetry/+',
             
             # Fire detection and consensus

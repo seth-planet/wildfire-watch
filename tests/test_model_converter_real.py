@@ -25,8 +25,17 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
 try:
     from convert_model import EnhancedModelConverter
     HAS_CONVERTER = True
-except ImportError:
-    HAS_CONVERTER = False
+except ImportError as e:
+    print(f"Warning: Could not import EnhancedModelConverter: {e}")
+    # Try alternative import path
+    try:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))
+        from convert_model import EnhancedModelConverter
+        HAS_CONVERTER = True
+    except ImportError:
+        HAS_CONVERTER = False
 
 
 class TestRealModelConversions:
@@ -98,7 +107,7 @@ class TestRealModelConversions:
         out_dir.mkdir()
         return out_dir
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_onnx_conversion_real(self, test_model, calibration_data, output_dir):
         """Test real ONNX conversion without mocking"""
         print("\n" + "="*60)
@@ -157,7 +166,7 @@ class TestRealModelConversions:
         except ImportError:
             print("⚠ ONNX package not installed, skipping validation")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     @pytest.mark.slow
     def test_tflite_conversion_real(self, test_model, calibration_data, output_dir):
         """Test real TFLite conversion with INT8 quantization"""
@@ -206,7 +215,7 @@ class TestRealModelConversions:
             elif 'cpu' in tflite_path.name or 'fp16' in tflite_path.name:
                 print("    ✓ FP16 optimized model")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_multi_size_conversion_real(self, test_model, calibration_data, output_dir):
         """Test conversion with multiple sizes"""
         print("\n" + "="*60)
@@ -241,7 +250,7 @@ class TestRealModelConversions:
             assert len(onnx_files) > 0, f"No ONNX files for {size}x{size}"
             print(f"✓ Created ONNX for {size}x{size}: {onnx_files[0].name}")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_tensorrt_conversion_prep(self, test_model, calibration_data, output_dir):
         """Test TensorRT conversion preparation (ONNX optimization)"""
         # Skip if not on Linux
@@ -284,7 +293,7 @@ class TestRealModelConversions:
             if engine_files:
                 print(f"✓ Created TensorRT engine: {engine_files[0].name}")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_openvino_conversion_real(self, test_model, calibration_data, output_dir):
         """Test OpenVINO conversion"""
         print("\n" + "="*60)
@@ -321,7 +330,7 @@ class TestRealModelConversions:
                 for f in ov_files:
                     print(f"  - {f.name}")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_hailo_conversion_prep(self, test_model, calibration_data, output_dir):
         """Test Hailo conversion preparation"""
         print("\n" + "="*60)
@@ -371,7 +380,7 @@ class TestRealModelConversions:
             if 'python3.10' in script_content:
                 print("  ✓ Script correctly uses Python 3.10 for Hailo SDK")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_conversion_with_validation(self, test_model, calibration_data, output_dir):
         """Test conversion with validation enabled"""
         print("\n" + "="*60)
@@ -414,7 +423,7 @@ class TestRealModelConversions:
                 print(f"  FPS: {bench_results['fps']:.2f}")
                 print(f"  Avg inference: {bench_results.get('avg_inference_ms', 'N/A')}ms")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_error_recovery(self, calibration_data, output_dir):
         """Test error handling and recovery"""
         print("\n" + "="*60)
@@ -436,7 +445,7 @@ class TestRealModelConversions:
         assert 'error' in results
         print(f"✓ Handled missing model gracefully: {results['error']}")
     
-    @pytest.mark.skipif(not HAS_CONVERTER, reason="Converter module not available")
+    # Converter should always be available in the codebase
     def test_conversion_summary(self, test_model, calibration_data, output_dir):
         """Test generation of conversion summary"""
         print("\n" + "="*60)

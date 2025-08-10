@@ -113,7 +113,9 @@ except ImportError:
     HardwareError = Exception
     GPIOVerificationError = Exception
 
-load_dotenv()
+# Only load .env if not running tests
+if not os.environ.get('PYTEST_CURRENT_TEST'):
+    load_dotenv()
 
 # ─────────────────────────────────────────────────────────────
 # Configuration
@@ -299,6 +301,9 @@ except (ImportError, RuntimeError):
         LOW = False
         _state = {}
         _lock = threading.RLock()  # Add GPIO state lock
+        _mode = {}  # Pin mode (IN/OUT)
+        _pull = {}  # Pull resistor state
+        _edge_callbacks = {}  # Edge detection callbacks
         
         @classmethod
         def setmode(cls, mode):
@@ -311,6 +316,10 @@ except (ImportError, RuntimeError):
         @classmethod
         def setup(cls, pin, mode, initial=None, pull_up_down=None):
             with cls._lock:
+                cls._mode[pin] = mode
+                if pull_up_down is not None:
+                    cls._pull[pin] = pull_up_down
+                
                 if mode == cls.OUT:
                     cls._state[pin] = initial if initial is not None else cls.LOW
                 else:
@@ -340,6 +349,9 @@ except (ImportError, RuntimeError):
         def cleanup(cls):
             with cls._lock:
                 cls._state.clear()
+                cls._mode.clear()
+                cls._pull.clear()
+                cls._edge_callbacks.clear()
 
 # ─────────────────────────────────────────────────────────────
 # State Machine
@@ -665,8 +677,8 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
         # Optional hardware validation pins
         if self.config.relay_feedback_pins:
             for i, pin_str in enumerate(self.config.relay_feedback_pins):
-                if pin_str.strip():
-                    pin = int(pin_str.strip())
+                if isinstance(pin_str, int) or (isinstance(pin_str, str) and pin_str.strip()):
+                    pin = int(pin_str) if isinstance(pin_str, int) else int(pin_str.strip())
                     GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
                     logger.info(f"Relay feedback pin {i+1} configured on pin {pin}")
         
@@ -1762,8 +1774,8 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             # Check relay feedback pins if configured
             if self.config.relay_feedback_pins:
                 for i, pin_str in enumerate(self.config.relay_feedback_pins):
-                    if pin_str.strip():
-                        pin = int(pin_str.strip())
+                    if isinstance(pin_str, int) or (isinstance(pin_str, str) and pin_str.strip()):
+                        pin = int(pin_str) if isinstance(pin_str, int) else int(pin_str.strip())
                         feedback_state = GPIO.input(pin)
                         expected_state = self._get_expected_relay_state(i)
                         
@@ -1811,6 +1823,9 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                     pump_running = (self._state == PumpState.RUNNING and 
                                   GPIO.input(self.config.ign_on_pin))
                     
+                    # Debug log every check
+                    logger.debug(f"Dry run check: state={self._state.name}, ign_on={GPIO.input(self.config.ign_on_pin)}, pump_running={pump_running}, pump_start={self._pump_start_time is not None}")
+                    
                     if pump_running:
                         # Initialize pump start time if not set
                         if self._pump_start_time is None:
@@ -1837,6 +1852,9 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
                         # Check dry run time limit
                         dry_run_time = current_time - self._pump_start_time
                         
+                        # Debug logging
+                        if dry_run_time > 2.0:  # Log after 2 seconds
+                            logger.debug(f"Dry run monitor: runtime={dry_run_time:.1f}s, water_flow={self._water_flow_detected}, max_time={self.config.max_dry_run_time}s")
                         
                         if dry_run_time > self.config.max_dry_run_time and not self._water_flow_detected:
                             logger.critical(f"DRY RUN PROTECTION: Pump running {dry_run_time:.1f}s without water flow!")

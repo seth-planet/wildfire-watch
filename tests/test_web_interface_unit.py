@@ -113,9 +113,15 @@ class TestModels:
 class TestSecurity:
     """Test security middleware and utilities."""
     
-    def test_lan_only_middleware_allows_local(self):
+    @patch('web_interface.security.get_config')
+    def test_lan_only_middleware_allows_local(self, mock_get_config):
         """Test LAN-only middleware allows local IPs."""
         from fastapi import FastAPI, Request
+        
+        # Mock the config to avoid MQTT_BROKER requirement
+        mock_config = MagicMock()
+        mock_config.allowed_networks = ['127.0.0.1', '192.168.1.']
+        mock_get_config.return_value = mock_config
         
         app = FastAPI()
         middleware = LANOnlyMiddleware(app, allowed_networks={'127.0.0.1', '192.168.1.'})
@@ -126,9 +132,15 @@ class TestSecurity:
         assert not middleware._is_allowed_ip('8.8.8.8')
         assert not middleware._is_allowed_ip('192.168.2.100')
         
-    def test_lan_only_middleware_cidr(self):
+    @patch('web_interface.security.get_config')
+    def test_lan_only_middleware_cidr(self, mock_get_config):
         """Test LAN-only middleware with CIDR notation."""
         from fastapi import FastAPI
+        
+        # Mock the config to avoid MQTT_BROKER requirement
+        mock_config = MagicMock()
+        mock_config.allowed_networks = ['10.0.0.0/8']
+        mock_get_config.return_value = mock_config
         
         app = FastAPI()
         middleware = LANOnlyMiddleware(app, allowed_networks={'10.0.0.0/8'})
@@ -137,9 +149,16 @@ class TestSecurity:
         assert middleware._is_allowed_ip('10.255.255.255')
         assert not middleware._is_allowed_ip('11.0.0.0')
         
-    def test_rate_limiter_token_bucket(self):
+    @patch('web_interface.security.get_config')
+    def test_rate_limiter_token_bucket(self, mock_get_config):
         """Test rate limiter token bucket algorithm."""
         from fastapi import FastAPI
+        
+        # Mock the config to avoid MQTT_BROKER requirement
+        mock_config = MagicMock()
+        mock_config.rate_limit_enabled = True
+        mock_config.rate_limit_requests = 60
+        mock_get_config.return_value = mock_config
         
         app = FastAPI()
         limiter = RateLimitMiddleware(app, requests_per_minute=60, burst_size=5)
@@ -156,14 +175,29 @@ class TestSecurity:
         
     def test_debug_auth_token_verification(self):
         """Test debug authentication token verification."""
-        with patch('web_interface.security.get_config') as mock_config:
-            mock_config.return_value.debug_mode = True
-            mock_config.return_value.debug_token = 'test-token-1234567890123456789012'
+        # Need to patch both where it's imported and where it's used
+        with patch('web_interface.security.get_config') as mock_get_config:
+            # Setup mock config
+            mock_config = MagicMock()
+            mock_config.debug_mode = True
+            mock_config.debug_token = 'test-token-1234567890123456789012'
+            mock_get_config.return_value = mock_config
             
+            # Also reset the global config singleton
+            import web_interface.config
+            web_interface.config._config = None
+            
+            # Now create the middleware with mocked config
             auth = DebugAuthMiddleware()
             
+            # Debug: Check if config was properly set
+            print(f"[DEBUG] auth.config.debug_mode: {auth.config.debug_mode}")
+            print(f"[DEBUG] auth.config.debug_token: {auth.config.debug_token}")
+            
             # Valid token
-            assert auth.verify_debug_token('test-token-1234567890123456789012', '127.0.0.1')
+            result = auth.verify_debug_token('test-token-1234567890123456789012', '127.0.0.1')
+            print(f"[DEBUG] verify_debug_token result: {result}")
+            assert result
             
             # Invalid token
             assert not auth.verify_debug_token('wrong-token', '127.0.0.1')
@@ -192,6 +226,7 @@ class TestConfiguration:
     """Test configuration management."""
     
     @patch.dict(os.environ, {
+        'MQTT_BROKER': 'localhost',
         'STATUS_PANEL_HTTP_PORT': '9090',
         'STATUS_PANEL_DEBUG_MODE': 'true',
         'STATUS_PANEL_DEBUG_TOKEN': 'test-token-1234567890123456789012345',
@@ -209,6 +244,7 @@ class TestConfiguration:
     def test_config_validation(self):
         """Test configuration validation."""
         with patch.dict(os.environ, {
+            'MQTT_BROKER': 'localhost',
             'STATUS_PANEL_DEBUG_MODE': 'true',
             'STATUS_PANEL_DEBUG_TOKEN': 'short'  # Too short
         }):
@@ -216,6 +252,9 @@ class TestConfiguration:
                 WebInterfaceConfig()
             assert 'token too weak' in str(exc_info.value)
             
+    @patch.dict(os.environ, {
+        'MQTT_BROKER': 'localhost'
+    })
     def test_config_mqtt_topics(self):
         """Test MQTT topic generation."""
         config = WebInterfaceConfig()
@@ -226,6 +265,9 @@ class TestConfiguration:
         assert 'gpio/status' in topics
         assert len(topics) > 10  # Should have many topics
         
+    @patch.dict(os.environ, {
+        'MQTT_BROKER': 'localhost'
+    })
     def test_config_security_defaults(self):
         """Test security-focused default configuration."""
         config = WebInterfaceConfig()

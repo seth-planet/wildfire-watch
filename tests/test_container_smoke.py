@@ -83,10 +83,19 @@ class TestContainerSmoke:
                 print("Frigate image not found locally, attempting to pull...")
                 try:
                     docker_client.images.pull("ghcr.io/blakeblackshear/frigate:stable")
-                    print("Frigate base image pulled successfully")
+                    print("✓ Frigate base image pulled successfully")
                 except Exception as pull_error:
-                    print(f"Could not pull Frigate image: {pull_error}")
-                    pytest.skip(f"Could not access Frigate base image: {pull_error}")
+                    # Provide descriptive error message
+                    raise RuntimeError(
+                        f"Failed to pull Frigate Docker image from ghcr.io.\n"
+                        f"This could be due to:\n"
+                        f"1. Network connectivity issues\n"
+                        f"2. GitHub Container Registry being temporarily unavailable\n"
+                        f"3. Rate limiting on the registry\n\n"
+                        f"You can try pulling manually with:\n"
+                        f"  docker pull ghcr.io/blakeblackshear/frigate:stable\n\n"
+                        f"Original error: {pull_error}"
+                    )
         except docker.errors.APIError as e:
             pytest.skip(f"Could not access Frigate base image: {e}")
 

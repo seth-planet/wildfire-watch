@@ -208,17 +208,39 @@ class SafeDataLoaderWrapper:
                 if isinstance(targets, torch.Tensor) and targets.numel() > 0:
                     logger.info(f"  First few targets:\n{targets[:min(5, len(targets))]}")
             
-            if isinstance(targets, torch.Tensor) and targets.numel() > 0:
+            # Handle both Tensor and dict targets
+            if isinstance(targets, dict):
+                # Handle dict format from newer YOLO-NAS versions
+                # Try to extract tensor from common keys
+                target_tensor = None
+                for key in ['labels', 'targets', 'annotations', 'ground_truth']:
+                    if key in targets and isinstance(targets[key], torch.Tensor):
+                        target_tensor = targets[key]
+                        break
+                
+                if target_tensor is None:
+                    # If no standard key found, return unchanged
+                    return images, targets
+                    
+                # Use the extracted tensor for processing
+                targets_to_process = target_tensor
+            elif isinstance(targets, torch.Tensor):
+                targets_to_process = targets
+            else:
+                # Unknown format, return unchanged
+                return images, targets
+            
+            if targets_to_process.numel() > 0:
                 # Check target format based on number of columns
-                if targets.dim() == 2 and targets.shape[1] == 6:
+                if targets_to_process.dim() == 2 and hasattr(targets_to_process, 'shape') and targets_to_process.shape[1] == 6:
                     # Format: [batch_idx, x1, y1, x2, y2, class_id]
-                    class_indices = targets[:, 5]
-                elif targets.dim() == 2 and targets.shape[1] == 5:
+                    class_indices = targets_to_process[:, 5]
+                elif targets_to_process.dim() == 2 and hasattr(targets_to_process, 'shape') and targets_to_process.shape[1] == 5:
                     # Format: [x1, y1, x2, y2, class_id] (XYXY_LABEL)
-                    class_indices = targets[:, 4]
-                elif targets.dim() == 2 and targets.shape[1] > 1:
+                    class_indices = targets_to_process[:, 4]
+                elif targets_to_process.dim() == 2 and hasattr(targets_to_process, 'shape') and targets_to_process.shape[1] > 1:
                     # Fallback: assume column 1 has class indices
-                    class_indices = targets[:, 1]
+                    class_indices = targets_to_process[:, 1]
                 else:
                     # No valid format detected
                     return images, targets
@@ -260,15 +282,22 @@ class SafeDataLoaderWrapper:
                         )
                     
                     # Clamp to valid range based on target format
-                    if targets.shape[1] == 6:
+                    if hasattr(targets_to_process, 'shape') and targets_to_process.shape[1] == 6:
                         # Format: [batch_idx, x1, y1, x2, y2, class_id]
-                        targets[:, 5] = torch.clamp(targets[:, 5], 0, self.num_classes - 1)
-                    elif targets.shape[1] == 5:
+                        targets_to_process[:, 5] = torch.clamp(targets_to_process[:, 5], 0, self.num_classes - 1)
+                    elif hasattr(targets_to_process, 'shape') and targets_to_process.shape[1] == 5:
                         # Format: [x1, y1, x2, y2, class_id] (XYXY_LABEL)
-                        targets[:, 4] = torch.clamp(targets[:, 4], 0, self.num_classes - 1)
+                        targets_to_process[:, 4] = torch.clamp(targets_to_process[:, 4], 0, self.num_classes - 1)
                     else:
                         # Fallback
-                        targets[:, 1] = torch.clamp(targets[:, 1], 0, self.num_classes - 1)
+                        targets_to_process[:, 1] = torch.clamp(targets_to_process[:, 1], 0, self.num_classes - 1)
+                    
+                    # If targets was a dict, update it with the modified tensor
+                    if isinstance(targets, dict):
+                        for key in ['labels', 'targets', 'annotations', 'ground_truth']:
+                            if key in targets and torch.equal(targets[key], target_tensor):
+                                targets[key] = targets_to_process
+                                break
             
             return images, targets
         

@@ -176,6 +176,9 @@ class MQTTHandler(MQTTService):
         Returns:
             Event category
         """
+        # Store original topic for exact matching
+        original_topic = topic
+        
         # Remove topic prefix if present
         if hasattr(self, '_topic_prefix') and self._topic_prefix and topic.startswith(self._topic_prefix):
             topic = topic[len(self._topic_prefix):].lstrip('/')
@@ -199,18 +202,33 @@ class MQTTHandler(MQTTService):
         """Update internal state caches based on message.
         
         Args:
-            topic: MQTT topic
+            topic: MQTT topic (with prefix already removed)
             payload: Message payload
         """
         try:
+            # Remove topic prefix if present
+            if hasattr(self, '_topic_prefix') and self._topic_prefix and topic.startswith(self._topic_prefix):
+                topic = topic[len(self._topic_prefix):].lstrip('/')
+                
             # Service health updates
-            if '/health' in topic and isinstance(payload, dict):
+            if ('/health' in topic or topic == 'system/trigger_telemetry') and isinstance(payload, dict):
                 parts = topic.split('/')
                 if len(parts) >= 2:
-                    service_name = parts[1]
+                    # Special case for trigger_telemetry - it's the gpio_trigger service
+                    if topic == 'system/trigger_telemetry':
+                        service_name = 'gpio_trigger'
+                        # Check if it's a health report from telemetry
+                        if payload.get('action') != 'health_report':
+                            return  # Skip non-health telemetry messages
+                        # Convert uptime from seconds to hours for consistency
+                        if 'uptime' in payload:
+                            payload['uptime_hours'] = payload['uptime'] / 3600.0
+                    else:
+                        service_name = parts[1]
+                    
                     self._service_states[service_name] = ServiceHealth(
                         name=service_name,
-                        status='healthy' if payload.get('mqtt_connected', False) else 'unhealthy',
+                        status='healthy' if payload.get('mqtt_connected', False) or payload.get('state') == 'IDLE' else 'unhealthy',
                         last_seen=datetime.utcnow(),
                         uptime=payload.get('uptime_hours', 0),
                         details=payload

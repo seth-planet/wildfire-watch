@@ -25,10 +25,27 @@ class FixedCollateFunction:
         all_targets = []
         
         for batch_idx, (image, target) in enumerate(batch):
+            # Handle dict inputs (like from model outputs)
+            if isinstance(image, dict):
+                # Try to find the actual image data in the dict
+                if 'image' in image:
+                    image = image['image']
+                elif 'data' in image:
+                    image = image['data']
+                else:
+                    # Look for the first tensor/array in the dict
+                    for v in image.values():
+                        if hasattr(v, 'shape'):
+                            image = v
+                            break
+                    else:
+                        print(f"Warning: Could not find image data in dict: {image.keys()}")
+                        continue
+            
             # Convert numpy array to tensor if needed
             if hasattr(image, 'numpy'):  # It's already a tensor
                 # Check if we need to transpose from HWC to CHW
-                if image.dim() == 3 and image.shape[-1] == 3:
+                if image.dim() == 3 and hasattr(image, 'shape') and image.shape[-1] == 3:
                     # HWC format, transpose to CHW
                     image = image.permute(2, 0, 1)
                 images.append(image)
@@ -36,10 +53,29 @@ class FixedCollateFunction:
                 # Convert to tensor
                 image_tensor = torch.from_numpy(image)
                 # Check if we need to transpose from HWC to CHW
-                if len(image.shape) == 3 and image.shape[-1] == 3:
+                if hasattr(image, 'shape') and len(image.shape) == 3 and image.shape[-1] == 3:
                     # HWC format, transpose to CHW
                     image_tensor = image_tensor.permute(2, 0, 1)
                 images.append(image_tensor)
+            
+            # Handle dict targets (like from model outputs)
+            if isinstance(target, dict):
+                # Try to find the actual target data in the dict
+                if 'targets' in target:
+                    target = target['targets']
+                elif 'labels' in target:
+                    target = target['labels']
+                elif 'annotations' in target:
+                    target = target['annotations']
+                else:
+                    # Look for the first tensor/array in the dict
+                    for v in target.values():
+                        if hasattr(v, 'shape'):
+                            target = v
+                            break
+                    else:
+                        print(f"Warning: Could not find target data in dict: {target.keys()}")
+                        continue
             
             # Ensure all targets are float32
             if isinstance(target, torch.Tensor):
@@ -49,20 +85,23 @@ class FixedCollateFunction:
             if isinstance(target, torch.Tensor):
                 if target.numel() > 0:
                     # Ensure target is 2D
-                    if len(target.shape) == 1:
+                    if hasattr(target, 'shape') and len(target.shape) == 1:
                         target = target.unsqueeze(0)
                     
                     # Check if we need to add image index
-                    if target.shape[-1] == 5:
+                    if hasattr(target, 'shape') and target.shape[-1] == 5:
                         # Target format is [class_id, cx, cy, w, h]
                         # Add image index as first column
                         batch_indices = torch.full((target.shape[0], 1), batch_idx, dtype=target.dtype)
                         target = torch.cat([batch_indices, target], dim=1)
-                    elif target.shape[-1] == 6:
+                    elif hasattr(target, 'shape') and target.shape[-1] == 6:
                         # Target already has image index, update it
                         target[:, 0] = batch_idx
-                    else:
+                    elif hasattr(target, 'shape'):
                         print(f"Warning: Unexpected target shape {target.shape}")
+                        continue
+                    else:
+                        print(f"Warning: Target has no shape attribute")
                         continue
                     
                     # Validate class indices
@@ -74,7 +113,7 @@ class FixedCollateFunction:
                         print(f"Warning: Invalid class indices {invalid_classes} found, filtering...")
                         target = target[valid_mask]
                     
-                    if target.shape[0] > 0:
+                    if hasattr(target, 'shape') and target.shape[0] > 0:
                         all_targets.append(target)
             
             elif isinstance(target, list) and len(target) > 0:
@@ -82,9 +121,9 @@ class FixedCollateFunction:
                 print("Warning: Got list format targets, converting...")
                 for t in target:
                     if isinstance(t, torch.Tensor) and t.numel() > 0:
-                        if len(t.shape) == 1:
+                        if hasattr(t, 'shape') and len(t.shape) == 1:
                             t = t.unsqueeze(0)
-                        if t.shape[-1] == 5:
+                        if hasattr(t, 'shape') and t.shape[-1] == 5:
                             batch_indices = torch.full((t.shape[0], 1), batch_idx, dtype=t.dtype)
                             t = torch.cat([batch_indices, t], dim=1)
                         all_targets.append(t)

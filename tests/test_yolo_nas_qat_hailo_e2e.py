@@ -169,6 +169,7 @@ def gpu_available():
 def docker_available():
     """Check if Docker is available for Hailo conversion."""
     try:
+        # Check if Docker is installed
         result = subprocess.run(
             ["docker", "version"],
             capture_output=True,
@@ -176,7 +177,11 @@ def docker_available():
             timeout=10
         )
         if result.returncode != 0:
-            pytest.skip("Docker not available")
+            # Docker installed but daemon not running
+            raise RuntimeError(
+                "Docker is installed but the Docker daemon is not running.\n"
+                "Please start Docker with: sudo systemctl start docker (Linux) or start Docker Desktop (Mac/Windows)"
+            )
         
         # Check for Hailo Docker image
         result = subprocess.run(
@@ -187,11 +192,44 @@ def docker_available():
         )
         
         if "hailo-ai/hailo-dataflow-compiler" not in result.stdout:
-            logger.warning("Hailo Docker image not found, will attempt to pull during test")
+            logger.warning("Hailo Docker image not found, attempting to pull it...")
+            print("Pulling Hailo Docker image (this may take several minutes)...")
+            
+            # Try to pull the Hailo image
+            try:
+                pull_result = subprocess.run(
+                    ["docker", "pull", "hailo-ai/hailo-dataflow-compiler:latest"],
+                    capture_output=True,
+                    text=True,
+                    timeout=600  # 10 minute timeout for pulling
+                )
+                if pull_result.returncode != 0:
+                    logger.error(f"Failed to pull Hailo image: {pull_result.stderr}")
+                    raise RuntimeError(
+                        "Failed to pull Hailo Docker image.\n"
+                        "You can manually pull it with: docker pull hailo-ai/hailo-dataflow-compiler:latest\n"
+                        f"Error: {pull_result.stderr}"
+                    )
+                print("✓ Successfully pulled Hailo Docker image")
+            except subprocess.TimeoutExpired:
+                raise RuntimeError(
+                    "Pulling Hailo Docker image timed out after 10 minutes.\n"
+                    "Please check your internet connection and try pulling manually:\n"
+                    "docker pull hailo-ai/hailo-dataflow-compiler:latest"
+                )
         
         return True
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pytest.skip("Docker not available or not in PATH")
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Docker is not installed or not in PATH.\n"
+            "Please install Docker from https://docs.docker.com/get-docker/\n"
+            "After installation, ensure the Docker daemon is running."
+        )
+    except subprocess.SubprocessError as e:
+        raise RuntimeError(
+            f"Error checking Docker availability: {e}\n"
+            "Please ensure Docker is properly installed and the daemon is running."
+        )
 
 
 @pytest.fixture

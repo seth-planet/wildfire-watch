@@ -1,0 +1,24 @@
+# Custom Frigate build with YOLO EdgeTPU support
+# Based on stable Frigate with runtime patching
+FROM ghcr.io/blakeblackshear/frigate:stable
+
+# Copy patch files
+COPY yolo_edgetpu.py /patch/
+COPY yolo_edgetpu_v2.py /patch/
+COPY yolo_edgetpu_simple.py /patch/
+COPY patch_frigate.py /patch/
+COPY fire_labels.txt /models/
+
+# Make patch directory accessible
+RUN chmod +x /patch/patch_frigate.py
+
+# Create startup script that patches Frigate before running
+RUN echo '#!/bin/bash' > /start_frigate.sh && \
+    echo 'echo "Applying YOLO EdgeTPU patch..."' >> /start_frigate.sh && \
+    echo 'python3 /patch/patch_frigate.py' >> /start_frigate.sh && \
+    echo 'echo "Starting Frigate..."' >> /start_frigate.sh && \
+    echo 'exec python3 -m frigate' >> /start_frigate.sh && \
+    chmod +x /start_frigate.sh
+
+# Override entrypoint to use our startup script
+ENTRYPOINT ["/start_frigate.sh"]

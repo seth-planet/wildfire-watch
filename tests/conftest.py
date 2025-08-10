@@ -153,6 +153,40 @@ def session_process_cleanup():
             print(f"Final cleanup: {sum(final_results.values())} items cleaned")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def docker_cleanup_at_session_start():
+    """Clean up any stale Docker containers from previous test runs"""
+    import docker
+    
+    try:
+        client = docker.from_env()
+        
+        print("🧹 Cleaning up stale Docker containers from previous runs...")
+        cleaned = 0
+        
+        # Remove all containers with our test prefix
+        for container in client.containers.list(all=True, filters={"name": "wf-"}):
+            try:
+                print(f"  Removing stale container: {container.name}")
+                container.remove(force=True)
+                cleaned += 1
+            except Exception as e:
+                print(f"  Warning: Could not remove container {container.name}: {e}")
+        
+        if cleaned > 0:
+            print(f"✅ Removed {cleaned} stale test containers")
+        else:
+            print("✅ No stale containers found")
+            
+    except Exception as e:
+        print(f"⚠️  Docker cleanup error: {e}")
+        # Don't fail the test session if Docker cleanup fails
+    
+    yield  # Run tests
+    
+    # No cleanup needed at end since DockerContainerManager handles it
+
+
 # ─────────────────────────────────────────────────────────────
 # Shared MQTT Test Infrastructure
 # ─────────────────────────────────────────────────────────────
@@ -358,19 +392,26 @@ def pytest_sessionstart(session):
     """Clean up any leftover containers before starting tests"""
     import subprocess
     
-    print("Pre-test cleanup: removing any leftover test containers...")
+    # Get worker ID for targeted cleanup
+    worker_id = getattr(session.config, 'workerinput', {}).get('workerid', 'master')
+    
+    print(f"Pre-test cleanup for worker {worker_id}: removing any leftover test containers...")
     
     try:
-        # Clean up any containers with our test labels
-        result = subprocess.run(['docker', 'ps', '-aq', '--filter', 'label=com.wildfire.test=true'], 
-                              capture_output=True, text=True)
+        # Clean up only this worker's containers with both test and worker labels
+        result = subprocess.run([
+            'docker', 'ps', '-aq', 
+            '--filter', 'label=com.wildfire.test=true',
+            '--filter', f'label=com.wildfire.worker={worker_id}'
+        ], capture_output=True, text=True)
+        
         if result.returncode == 0 and result.stdout.strip():
             container_ids = result.stdout.strip().split('\n')
             for container_id in container_ids:
                 if container_id.strip():
                     try:
                         subprocess.run(['docker', 'rm', '-f', container_id.strip()], timeout=5)
-                        print(f"Removed leftover test container {container_id}")
+                        print(f"Removed leftover test container {container_id} for worker {worker_id}")
                     except:
                         pass
     except Exception as e:
@@ -405,34 +446,53 @@ def pytest_sessionfinish(session, exitstatus):
     sys.path.insert(0, os.path.dirname(__file__))
     from test_utils.enhanced_mqtt_broker import TestMQTTBroker
     
-    # Clean up all worker brokers
-    TestMQTTBroker.cleanup_session()
+    # Get worker ID for targeted cleanup
+    worker_id = None
+    if hasattr(session.config, '_worker_id'):
+        worker_id = session.config._worker_id
+    
+    # Clean up worker-specific broker
+    TestMQTTBroker.cleanup_session(worker_id=worker_id)
     
     # Additional aggressive cleanup of stray processes
     try:
-        # Kill any remaining mosquitto test processes
-        result = subprocess.run(['pgrep', '-f', 'mqtt_test_'], 
-                              capture_output=True, text=True)
-        if result.returncode == 0:
-            pids = result.stdout.strip().split('\n')
-            for pid in pids:
-                if pid.strip():
-                    try:
-                        subprocess.run(['kill', '-KILL', pid.strip()], timeout=1)
-                        print(f"Force killed stray mosquitto process {pid}")
-                    except:
-                        pass
+        # Kill any remaining mosquitto test processes for this worker only
+        if worker_id:
+            pattern = f'mqtt_test_{worker_id}_'
+            result = subprocess.run(['pgrep', '-f', pattern], 
+                                  capture_output=True, text=True)
+            if result.returncode == 0:
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    if pid.strip():
+                        try:
+                            subprocess.run(['kill', '-KILL', pid.strip()], timeout=1)
+                            print(f"Force killed stray mosquitto process {pid} for worker {worker_id}")
+                        except:
+                            pass
         
-        # Clean up any containers with our test labels
-        result = subprocess.run(['docker', 'ps', '-aq', '--filter', 'label=com.wildfire.test=true'], 
-                              capture_output=True, text=True)
+        # Clean up only this worker's containers with both test and worker labels
+        if worker_id:
+            result = subprocess.run([
+                'docker', 'ps', '-aq', 
+                '--filter', 'label=com.wildfire.test=true',
+                '--filter', f'label=com.wildfire.worker={worker_id}'
+            ], capture_output=True, text=True)
+        else:
+            # Fallback for master/single worker - only clean containers without worker label
+            result = subprocess.run([
+                'docker', 'ps', '-aq', 
+                '--filter', 'label=com.wildfire.test=true',
+                '--filter', 'label=com.wildfire.worker=master'
+            ], capture_output=True, text=True)
+            
         if result.returncode == 0 and result.stdout.strip():
             container_ids = result.stdout.strip().split('\n')
             for container_id in container_ids:
                 if container_id.strip():
                     try:
                         subprocess.run(['docker', 'rm', '-f', container_id.strip()], timeout=5)
-                        print(f"Force removed stray test container {container_id}")
+                        print(f"Force removed stray test container {container_id} for worker {worker_id or 'master'}")
                     except:
                         pass
                         
@@ -440,8 +500,7 @@ def pytest_sessionfinish(session, exitstatus):
         print(f"Warning: Error in aggressive cleanup: {e}")
     
     # Log cleanup status
-    if hasattr(session.config, '_worker_id'):
-        worker_id = session.config._worker_id
+    if worker_id:
         print(f"\nWorker {worker_id} completed test session cleanup")
 
 

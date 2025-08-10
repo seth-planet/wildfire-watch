@@ -776,8 +776,11 @@ class TestZoneBasedActivation:
 class TestSingleCameraMode:
     """Test single camera trigger mode with real MQTT"""
     
-    def test_single_camera_immediate_trigger(self, test_mqtt_broker, monkeypatch):
+    def test_single_camera_immediate_trigger(self, test_mqtt_broker, monkeypatch, mqtt_topic_factory):
         """Test single camera triggers immediately when enabled"""
+        # Get topic prefix for worker isolation
+        topic_prefix = mqtt_topic_factory("").rstrip("/")
+        
         # Enable single camera mode
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
@@ -785,6 +788,7 @@ class TestSingleCameraMode:
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')  # Still requires 2 normally
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
         monkeypatch.setenv('LOG_LEVEL', 'DEBUG')
+        monkeypatch.setenv('TOPIC_PREFIX', topic_prefix)
         
         # Import after environment setup
         import importlib
@@ -796,15 +800,17 @@ class TestSingleCameraMode:
         received_triggers = []
         trigger_event = threading.Event()
         
+        fire_trigger_topic = mqtt_topic_factory('fire/trigger')
+        
         def on_message(client, userdata, msg):
-            if 'fire/trigger' in msg.topic:
+            if msg.topic == fire_trigger_topic:
                 received_triggers.append(json.loads(msg.payload.decode()))
                 trigger_event.set()
         
         subscriber = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_single_subscriber")
         subscriber.on_message = on_message
         subscriber.connect(test_mqtt_broker.host, test_mqtt_broker.port)
-        subscriber.subscribe("fire/trigger")
+        subscriber.subscribe(fire_trigger_topic)
         subscriber.loop_start()
         
         time.sleep(0.5)
@@ -829,18 +835,58 @@ class TestSingleCameraMode:
             'timestamp': time.time(),
             'status': 'online'
         }
-        publisher.publish('system/camera_telemetry', json.dumps(telemetry_msg))
+        telemetry_topic = mqtt_topic_factory('system/camera_telemetry')
+        publisher.publish(telemetry_topic, json.dumps(telemetry_msg))
         time.sleep(0.5)
         
         # Send growing fire detections - ensure enough for minimum window
         base_time = time.time()
         detections = create_growing_fire_detections('single_cam', 'fire1', base_time, count=12, initial_size=0.02, growth_rate=0.01)
         
-        for detection in detections:
-            publisher.publish('fire/detection', json.dumps(detection))
+        # DEBUG: Log detection parameters
+        print(f"[DEBUG] Sending {len(detections)} detections with initial_size={detections[0]['bbox']}, final_size={detections[-1]['bbox']}")
+        print(f"[DEBUG] Detection window: {consensus.config.detection_window}s, moving_average_window: {consensus.config.moving_average_window}")
+        print(f"[DEBUG] Area increase ratio required: {consensus.config.area_increase_ratio}")
+        
+        # Calculate actual growth for debugging
+        first_bbox = detections[0]['bbox']
+        last_bbox = detections[-1]['bbox']
+        first_area = (first_bbox[2] - first_bbox[0]) * (first_bbox[3] - first_bbox[1])
+        last_area = (last_bbox[2] - last_bbox[0]) * (last_bbox[3] - last_bbox[1])
+        actual_growth = last_area / first_area if first_area > 0 else 0
+        print(f"[DEBUG] Actual area growth ratio: {actual_growth:.2f} (first_area={first_area:.4f}, last_area={last_area:.4f})")
+        
+        # Monitor consensus state before sending detections
+        def on_consensus_debug(client, userdata, msg):
+            """Debug consensus internal state"""
+            if 'consensus' in msg.topic or 'debug' in msg.topic:
+                print(f"[DEBUG CONSENSUS] {msg.topic}: {msg.payload.decode()[:200]}")
+        
+        debug_topics = [mqtt_topic_factory('#')]  # Subscribe to all topics for debugging
+        subscriber.subscribe(debug_topics[0])
+        subscriber.on_message = lambda c, u, m: (on_message(c, u, m), on_consensus_debug(c, u, m))
+        
+        for i, detection in enumerate(detections):
+            # Publish to camera-specific topic
+            detection_topic = mqtt_topic_factory(f'fire/detection/{detection["camera_id"]}')
+            publisher.publish(detection_topic, json.dumps(detection))
+            print(f"[DEBUG] Published detection {i+1}/{len(detections)} to {detection_topic}: bbox={detection['bbox']}, conf={detection['confidence']}")
             time.sleep(0.05)  # Shorter interval to ensure all within window
         
+        # Give consensus time to process
+        print(f"[DEBUG] All detections sent, waiting for consensus to process...")
+        time.sleep(1.0)  # Extra time for processing
+        
+        # DEBUG: Check consensus internal state if possible
+        if hasattr(consensus, 'cameras'):
+            with consensus.lock:
+                for cam_id, camera in consensus.cameras.items():
+                    print(f"[DEBUG] Camera {cam_id}: online={camera.is_online}, detections={len(camera.detections)}")
+                    for obj_id, dets in camera.detections.items():
+                        print(f"[DEBUG]   Object {obj_id}: {len(dets)} detections")
+        
         # Should trigger with just one camera
+        print(f"[DEBUG] Waiting for fire trigger on topic: {fire_trigger_topic}")
         assert trigger_event.wait(timeout=5), "Single camera should trigger immediately"
         
         assert len(received_triggers) > 0

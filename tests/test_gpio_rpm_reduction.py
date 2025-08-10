@@ -114,8 +114,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_rpm_reduction_on_manual_shutdown(self, rpm_controller, gpio_test_setup):
         """Test RPM reduction occurs when manually shutting down the pump."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Start pump
         print(f"Initial state: {rpm_controller._state}, refill_complete: {rpm_controller._refill_complete}")
@@ -159,8 +158,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_rpm_reduction_duration(self, rpm_controller, gpio_test_setup):
         """Test RPM reduction lasts for configured duration."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Start pump
         rpm_controller.handle_fire_trigger()
@@ -207,8 +205,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_fire_trigger_during_rpm_reduction_cancels_shutdown(self, rpm_controller, gpio_test_setup):
         """Test fire trigger during RPM reduction cancels shutdown."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Start pump
         rpm_controller.handle_fire_trigger()
@@ -235,8 +232,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_max_runtime_with_rpm_reduction(self, rpm_controller, gpio_test_setup):
         """Test RPM reduction occurs even at max runtime."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Set very short max runtime for testing
         # Update the controller's config directly for this test
@@ -280,8 +276,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_rpm_reduction_pin_configuration(self, rpm_controller, gpio_test_setup):
         """Test RPM reduction pin is properly configured."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Verify RPM reduce pin is configured
         rpm_pin = rpm_controller.config.rpm_reduce_pin
@@ -305,8 +300,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_error_state_deactivates_rpm_reduction(self, rpm_controller, gpio_test_setup):
         """Test error state immediately deactivates RPM reduction."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Start pump
         rpm_controller.handle_fire_trigger()
@@ -334,8 +328,7 @@ class TestRPMReduction:
     @pytest.mark.timeout(30)
     def test_cleanup_during_rpm_reduction(self, rpm_controller, gpio_test_setup):
         """Test cleanup properly handles RPM reduction state."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Start pump
         rpm_controller.handle_fire_trigger()
@@ -407,8 +400,7 @@ class TestRPMReductionIntegration:
     @pytest.mark.timeout(30)
     def test_rpm_reduction_during_shutdown(self, rpm_controller, gpio_test_setup):
         """Test that RPM reduction occurs during shutdown sequence."""
-        if gpio_test_setup is None:
-            pytest.skip("GPIO simulation not available")
+        # GPIO simulation always available
             
         # Check initial state
         print(f"Initial state: {rpm_controller._state}, refill_complete: {rpm_controller._refill_complete}")

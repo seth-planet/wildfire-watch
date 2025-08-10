@@ -10,7 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 FRIGATE_PLUGIN_DIR="$PROJECT_ROOT/converted_models/frigate_yolo_plugin"
 
 # Check if custom Frigate image exists
-if docker images "frigate-yolo:dev" --format "{{.Repository}}:{{.Tag}}" | grep -q "frigate-yolo:dev"; then
+if docker images "frigate-yolo:latest" --format "{{.Repository}}:{{.Tag}}" | grep -q "frigate-yolo:latest"; then
     echo "✓ Custom Frigate image already exists"
     exit 0
 fi
@@ -30,11 +30,11 @@ if [ -f "build_custom_frigate.sh" ]; then
     ./build_custom_frigate.sh
 else
     echo "Build script not found, building manually..."
-    docker build -f Dockerfile.patch -t frigate-yolo:dev .
+    docker build -f Dockerfile.patch -t frigate-yolo:latest .
 fi
 
 # Verify the image was built
-if docker images "frigate-yolo:dev" --format "{{.Repository}}:{{.Tag}}" | grep -q "frigate-yolo:dev"; then
+if docker images "frigate-yolo:latest" --format "{{.Repository}}:{{.Tag}}" | grep -q "frigate-yolo:latest"; then
     echo "✓ Custom Frigate image built successfully"
 else
     echo "✗ Failed to build custom Frigate image"
