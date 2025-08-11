@@ -43,6 +43,15 @@ except ImportError as e:
         pass
     SafeStreamHandler = None
 
+# Debug: Show which config file and worker is being used
+worker_id = os.environ.get('PYTEST_XDIST_WORKER', 'master')
+config_file = os.environ.get('PYTEST_INI_PATH', 'unknown')
+print(f"\n[DEBUG] Test Session Info:")
+print(f"  Worker ID: {worker_id}")
+print(f"  Config file: {config_file}")
+print(f"  Python version: {sys.version.split()[0]}")
+print(f"  Parallel execution: {'ENABLED' if worker_id != 'master' else 'DISABLED'}")
+
 # Import enhanced process cleanup for proper test isolation
 try:
     from test_utils.enhanced_process_cleanup import get_process_cleaner, cleanup_on_test_failure

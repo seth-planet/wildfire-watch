@@ -1470,11 +1470,13 @@ log_type all
 """
         config_path = cert_dir / "mosquitto.conf"
         config_path.write_text(config)
+        print(f"[DEBUG] Created mosquitto config at {config_path} with listener on port {mqtt_port}")
         
         # Start MQTT broker
         containers['mqtt'] = docker_client.containers.run(
             "eclipse-mosquitto:2.0",
             name=f"{container_prefix}-e2e-mqtt",
+            command=["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"],
             network_mode="host",
             volumes={
                 str(cert_dir): {'bind': '/mosquitto/config', 'mode': 'ro'}
@@ -1483,6 +1485,16 @@ log_type all
             remove=True,
             user="root"
         )
+        
+        # Give container a moment to start
+        time.sleep(2)
+        
+        # Verify container is running
+        try:
+            container_status = containers['mqtt'].status
+            print(f"[DEBUG] MQTT container started with status: {container_status}")
+        except Exception as e:
+            print(f"[ERROR] Failed to check MQTT container status: {e}")
         
         # Wait for MQTT to start with proper verification
         mqtt_ready = False
@@ -1496,9 +1508,23 @@ log_type all
                 break
             except Exception as e:
                 if retry < 29:
+                    # Check container status and logs
+                    try:
+                        container_status = containers['mqtt'].status
+                        container_logs = containers['mqtt'].logs(tail=10).decode('utf-8')
+                        print(f"[DEBUG] MQTT container status: {container_status}")
+                        if container_logs:
+                            print(f"[DEBUG] MQTT container logs:\n{container_logs}")
+                    except:
+                        pass
                     time.sleep(1)
                 else:
                     print(f"[ERROR] MQTT broker failed to start: {e}")
+                    try:
+                        container_logs = containers['mqtt'].logs().decode('utf-8')
+                        print(f"[ERROR] Final MQTT container logs:\n{container_logs}")
+                    except:
+                        pass
         
         if not mqtt_ready:
             raise RuntimeError(f"MQTT broker failed to become ready on port {mqtt_port}")
