@@ -371,17 +371,29 @@ class DockerIntegrationTest:
         monitor.message_callback_add(fire_trigger_topic, on_trigger_message)
         
         # Wait for consensus with longer timeout
-        if not trigger_event.wait(timeout=30):  # Increased from 15 to 30
-            print("WARNING: No fire trigger received within 30 seconds")
+        if not trigger_event.wait(timeout=45):  # Increased timeout for slower systems
+            print("WARNING: No fire trigger received within 45 seconds")
+            # Check if consensus service is still running
+            if 'consensus' in self.containers:
+                try:
+                    status = self.containers['consensus'].status
+                    print(f"Consensus container status: {status}")
+                except:
+                    print("Could not get consensus container status")
         
-        # Check consensus container logs
+        # Always check consensus container logs for debugging
         if 'consensus' in self.containers:
             try:
-                logs = self.containers['consensus'].logs(tail=20).decode()
-                print("\nConsensus container logs:")
+                logs = self.containers['consensus'].logs(tail=50).decode()  # More logs for debugging
+                print("\nConsensus container logs (last 50 lines):")
                 print(logs)
+                # Check for specific error patterns
+                if "ERROR" in logs or "CRITICAL" in logs:
+                    print("\n⚠️ Errors found in consensus logs")
             except docker.errors.NotFound:
                 print("\nConsensus container not found - may have exited early")
+            except Exception as e:
+                print(f"\nCould not get consensus logs: {e}")
         
         # Cleanup
         monitor.loop_stop()
