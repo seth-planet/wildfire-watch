@@ -142,6 +142,9 @@ utils/README_*.md
 # Demo output directory
 demo_output/
 
+# Archived development files
+archived/
+
 # Certificates (keep structure, ignore contents)
 certs/*.crt
 certs/*.key
