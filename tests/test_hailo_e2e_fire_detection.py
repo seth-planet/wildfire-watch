@@ -1,3 +1,12 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 #!/usr/bin/env python3.10
 """
 This test requires Python 3.10 and the Hailo SDK to be installed.

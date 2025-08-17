@@ -89,7 +89,9 @@ pytestmark = [
     pytest.mark.slow,
     pytest.mark.gpu,
     pytest.mark.infrastructure_dependent,
-    pytest.mark.timeout(28800)  # 8 hour total timeout
+    pytest.mark.timeout(28800),  # 8 hour total timeout
+    pytest.mark.e2e,
+    pytest.mark.integration,
 ]
 
 

@@ -9,6 +9,13 @@ from unittest.mock import patch
 
 # Add parent directory to path
 import sys
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.unit,
+    pytest.mark.smoke,
+]
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from utils.config_base import ConfigBase, ConfigSchema, ConfigValidationError, SharedMQTTConfig

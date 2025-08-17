@@ -63,12 +63,7 @@ class FireConsensusConfig(ConfigBase):
             default=2,
             min=1,
             max=10,
-            description="Number of cameras required for consensus"
-        ),
-        'single_camera_trigger': ConfigSchema(
-            bool,
-            default=False,
-            description="Allow single camera to trigger (overrides threshold)"
+            description="Number of cameras required for consensus (set to 1 for single camera mode)"
         ),
         'detection_window': ConfigSchema(
             float,
@@ -176,10 +171,6 @@ class FireConsensusConfig(ConfigBase):
         
     def validate(self):
         """Validate fire consensus configuration."""
-        # If single camera trigger enabled, consensus threshold doesn't matter
-        if self.single_camera_trigger and self.consensus_threshold > 1:
-            logging.warning("single_camera_trigger=true overrides consensus_threshold")
-            
         # Ensure min area < max area
         if self.min_area_ratio >= self.max_area_ratio:
             raise ValueError("min_area_ratio must be less than max_area_ratio")
@@ -253,7 +244,6 @@ class ConsensusHealthReporter(HealthReporter):
                 'cameras_online': len(online_cameras),
                 'cameras_detecting': recent_detections,
                 'consensus_threshold': self.consensus.config.consensus_threshold,
-                'single_camera_mode': self.consensus.config.single_camera_trigger,
                 'recent_consensus_events': len(self.consensus.consensus_events),
             }
             
@@ -582,11 +572,7 @@ class FireConsensus(MQTTService, ThreadSafeService, SafeLoggingMixin):
                     ])
                     
             # Check consensus threshold
-            consensus_met = False
-            if self.config.single_camera_trigger and len(cameras_with_fires) >= 1:
-                consensus_met = True
-            elif len(cameras_with_fires) >= self.config.consensus_threshold:
-                consensus_met = True
+            consensus_met = len(cameras_with_fires) >= self.config.consensus_threshold
                 
             if consensus_met:
                 # CRITICAL SAFETY FIX: Update trigger time ATOMICALLY before firing trigger

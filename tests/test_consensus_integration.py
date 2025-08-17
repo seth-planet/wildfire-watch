@@ -1,3 +1,10 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+]
+
 #!/usr/bin/env python3.12
 """
 Enhanced tests for FireConsensus service using real MQTT broker
@@ -58,9 +65,8 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
     monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
     monkeypatch.setenv('MQTT_TLS', 'false')
-    monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')
+    monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')  # Set to 1 for single camera tests
     monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
-    monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'false')
     monkeypatch.setenv('COOLDOWN_PERIOD', '60')
     
     # Ensure broker is running before creating consensus
@@ -82,6 +88,9 @@ def consensus_with_env(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     
     if not connected:
         logger.warning(f"Consensus service may not be connected (prefix: {prefix})")
+    
+    # Add delay to ensure MQTT subscriptions are fully established
+    time.sleep(1.0)
     
     yield consensus, prefix
     
@@ -113,8 +122,7 @@ def single_camera_consensus(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
     monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
     monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
     monkeypatch.setenv('MQTT_TLS', 'false')
-    monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
-    monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'true')
+    monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')  # Single camera mode
     monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
     monkeypatch.setenv('COOLDOWN_PERIOD', '5')
     
@@ -192,8 +200,9 @@ class TestConsensusTrigger:
         base_time = time.time()
         detections = create_growing_fire_detections('cam1', 'fire1', base_time)
         
+        # Use the correct topic format: fire/detection/{camera_id}
         for detection in detections:
-            mqtt_client.publish(detection_topic, json.dumps(detection))
+            mqtt_client.publish(f"{prefix}/fire/detection/cam1", json.dumps(detection))
             time.sleep(0.1)
         
         # Wait for trigger
@@ -205,9 +214,33 @@ class TestConsensusTrigger:
         assert trigger['consensus_cameras'] == ['cam1']
         assert len(trigger['fire_locations']) > 0
     
-    def test_multi_camera_consensus_trigger(self, consensus_with_env, mqtt_client):
+    def test_multi_camera_consensus_trigger(self, test_mqtt_broker, mqtt_topic_factory, monkeypatch, mqtt_client):
         """Test that multiple cameras detecting fire triggers consensus"""
-        consensus, prefix = consensus_with_env
+        # Create consensus with CONSENSUS_THRESHOLD=2 for multi-camera test
+        full_topic = mqtt_topic_factory("dummy")
+        prefix = full_topic.rsplit('/', 1)[0]
+        
+        # Add process ID and timestamp for complete isolation
+        import os
+        unique_suffix = f"{os.getpid()}_{int(time.time() * 1000) % 100000}"
+        prefix = f"{prefix}_{unique_suffix}"
+        
+        # Set environment variables with CONSENSUS_THRESHOLD=2
+        monkeypatch.setenv('TOPIC_PREFIX', prefix)
+        monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
+        monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
+        monkeypatch.setenv('MQTT_TLS', 'false')
+        monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')  # Require 2 cameras for multi-camera test
+        monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
+        monkeypatch.setenv('COOLDOWN_PERIOD', '60')
+        
+        # Import and create FireConsensus
+        from fire_consensus.consensus import FireConsensus
+        consensus = FireConsensus(auto_connect=False)
+        consensus._initialize_mqtt_connection()
+        
+        # Wait for connection
+        assert consensus.wait_for_connection(timeout=10.0), "Failed to connect to MQTT"
         
         # Create topics
         detection_topic = f"{prefix}/fire/detection"
@@ -237,13 +270,26 @@ class TestConsensusTrigger:
         
         time.sleep(0.5)
         
-        # Send detections from multiple cameras
+        # Send detections from multiple cameras interleaved
+        # This ensures both cameras have detections within the same time window
         base_time = time.time()
-        for cam_id in ['cam1', 'cam2']:
-            detections = create_growing_fire_detections(cam_id, f'{cam_id}_fire', base_time)
-            for detection in detections:  # Send all 8 detections
-                mqtt_client.publish(detection_topic, json.dumps(detection))
-                time.sleep(0.05)
+        cam1_detections = create_growing_fire_detections('cam1', 'cam1_fire', base_time)
+        cam2_detections = create_growing_fire_detections('cam2', 'cam2_fire', base_time)
+        
+        # Send detections interleaved from both cameras
+        # Use the correct topic format: fire/detection/{camera_id}
+        for i in range(8):  # Send all 8 detections
+            topic1 = f"{prefix}/fire/detection/cam1"
+            topic2 = f"{prefix}/fire/detection/cam2"
+            print(f"[TEST] Publishing to {topic1}: {cam1_detections[i]}")
+            mqtt_client.publish(topic1, json.dumps(cam1_detections[i]))
+            time.sleep(0.05)
+            print(f"[TEST] Publishing to {topic2}: {cam2_detections[i]}")
+            mqtt_client.publish(topic2, json.dumps(cam2_detections[i]))
+            time.sleep(0.05)
+        
+        # Wait a bit longer to ensure all detections are processed
+        time.sleep(2.0)  # Increased wait time
         
         # Wait for trigger
         assert trigger_event.wait(timeout=5), "No trigger received within timeout"
@@ -253,14 +299,24 @@ class TestConsensusTrigger:
         trigger = received_triggers[0]
         assert set(trigger['consensus_cameras']) == {'cam1', 'cam2'}
         assert len(trigger['fire_locations']) > 0
+        
+        # Cleanup
+        try:
+            consensus.cleanup()
+        except Exception as e:
+            logger.error(f"Error during consensus cleanup: {e}")
 
 
 class TestOnlineOfflineCameras:
     """Test handling of online/offline camera states"""
     
-    def test_offline_cameras_excluded_from_consensus(self, consensus_with_env, mqtt_client):
+    def test_offline_cameras_excluded_from_consensus(self, consensus_with_env, mqtt_client, monkeypatch):
         """Test that offline cameras are excluded from consensus calculation"""
         consensus, prefix = consensus_with_env
+        
+        # Set consensus threshold to 2 for this multi-camera test
+        monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')
+        consensus.config.consensus_threshold = 2  # Update runtime config
         
         # Create topics
         detection_topic = f"{prefix}/fire/detection"
@@ -815,6 +871,16 @@ class TestSingleCameraMode:
         
         time.sleep(0.5)
         
+        # Get the base topic prefix (without '/fire/trigger')
+        # fire_trigger_topic is like 'test_XXXX/fire/trigger', we want 'test_XXXX'
+        topic_prefix = fire_trigger_topic.rsplit('/fire/trigger', 1)[0] if '/fire/trigger' in fire_trigger_topic else ''
+        
+        # Set single camera mode for consensus
+        monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
+        monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
+        monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
+        monkeypatch.setenv('TOPIC_PREFIX', topic_prefix)
+        
         # Create consensus instance
         consensus = FireConsensus(auto_connect=False)
         consensus._initialize_mqtt_connection()
@@ -835,7 +901,7 @@ class TestSingleCameraMode:
             'timestamp': time.time(),
             'status': 'online'
         }
-        telemetry_topic = mqtt_topic_factory('system/camera_telemetry')
+        telemetry_topic = f"{topic_prefix}/system/camera_telemetry" if topic_prefix else "system/camera_telemetry"
         publisher.publish(telemetry_topic, json.dumps(telemetry_msg))
         time.sleep(0.5)
         
@@ -862,13 +928,14 @@ class TestSingleCameraMode:
             if 'consensus' in msg.topic or 'debug' in msg.topic:
                 print(f"[DEBUG CONSENSUS] {msg.topic}: {msg.payload.decode()[:200]}")
         
-        debug_topics = [mqtt_topic_factory('#')]  # Subscribe to all topics for debugging
-        subscriber.subscribe(debug_topics[0])
+        # Use the same topic prefix for debugging
+        debug_topic = f"{topic_prefix}/#"  # Subscribe to all topics with this prefix
+        subscriber.subscribe(debug_topic)
         subscriber.on_message = lambda c, u, m: (on_message(c, u, m), on_consensus_debug(c, u, m))
         
         for i, detection in enumerate(detections):
-            # Publish to camera-specific topic
-            detection_topic = mqtt_topic_factory(f'fire/detection/{detection["camera_id"]}')
+            # Publish to camera-specific topic using the base prefix
+            detection_topic = f"{topic_prefix}/fire/detection/{detection['camera_id']}" if topic_prefix else f"fire/detection/{detection['camera_id']}"
             publisher.publish(detection_topic, json.dumps(detection))
             print(f"[DEBUG] Published detection {i+1}/{len(detections)} to {detection_topic}: bbox={detection['bbox']}, conf={detection['confidence']}")
             time.sleep(0.05)  # Shorter interval to ensure all within window

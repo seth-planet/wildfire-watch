@@ -1,3 +1,11 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.mqtt,
+]
+
 #!/usr/bin/env python3.12
 """
 Comprehensive tests for MQTT Broker configuration and functionality

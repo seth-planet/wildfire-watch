@@ -1,3 +1,11 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
+
 #!/usr/bin/env python3.12
 """
 Hardware Integration Tests for Wildfire Watch

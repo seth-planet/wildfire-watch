@@ -1,3 +1,11 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.hardware,
+    pytest.mark.integration,
+]
+
 #!/usr/bin/env python3.12
 """Test RPM reduction functionality for safe motor shutdown with REAL components.
 

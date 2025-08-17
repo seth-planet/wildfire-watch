@@ -1,3 +1,11 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.smoke,
+]
+
 #!/usr/bin/env python3.12
 """
 Comprehensive tests for PumpController
@@ -1716,31 +1724,22 @@ class TestEmergencyBypass:
     """Test emergency bypass features with real MQTT"""
     
     @pytest.mark.timeout(30)
-    def test_emergency_switch_bypass(self, gpio_test_setup, test_mqtt_broker, monkeypatch):
+    def test_emergency_switch_bypass(self, gpio_test_setup, test_mqtt_broker, monkeypatch, mqtt_topic_factory, pump_controller_factory):
         """Test emergency switch bypasses all safety checks"""
-        # Configure environment
-        monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
-        monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
-        monkeypatch.setenv('EMERGENCY_BYPASS_ENABLED', 'true')
-        monkeypatch.setenv('EMERGENCY_SWITCH_PIN', '26')
-        # Set short timing for test
-        monkeypatch.setenv('PRIMING_DURATION', '0.2')
-        monkeypatch.setenv('IGNITION_START_DURATION', '0.1')
-        
         # Set up emergency switch state in simulated GPIO
         # Switch pressed = 0 (active low)
-        emergency_pin = int(os.getenv('EMERGENCY_SWITCH_PIN', '26'))
+        emergency_pin = 26
         gpio_test_setup._state[emergency_pin] = 0
         
-        # Import after environment setup
-        import importlib
-        if 'trigger' in sys.modules:
-            del sys.modules['trigger']
-        from gpio_trigger import trigger
-        from gpio_trigger.trigger import PumpController
-        
-        # Create pump controller
-        controller = PumpController()
+        # Create pump controller using factory with proper configuration
+        controller = pump_controller_factory(
+            priming_duration=0.2,
+            ignition_start_duration=0.1,
+            emergency_bypass_enabled=True,
+            emergency_switch_pin=emergency_pin,
+            auto_connect=False
+        )
+        controller.connect()
         
         # Wait for MQTT connection
         time.sleep(1.0)
@@ -1758,43 +1757,55 @@ class TestEmergencyBypass:
         controller.cleanup()
     
     @pytest.mark.timeout(30)
-    def test_mqtt_emergency_command(self, gpio_test_setup, test_mqtt_broker, monkeypatch):
+    def test_mqtt_emergency_command(self, gpio_test_setup, test_mqtt_broker, monkeypatch, mqtt_topic_factory, pump_controller_factory):
         """Test MQTT emergency command bypasses safety checks"""
         import paho.mqtt.client as mqtt
-        # Configure environment
-        monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
-        monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
-        monkeypatch.setenv('EMERGENCY_BYPASS_ENABLED', 'true')
-        # Set short timing for test
-        monkeypatch.setenv('PRIMING_DURATION', '0.2')
-        monkeypatch.setenv('IGNITION_START_DURATION', '0.1')
+        import json
+        from gpio_trigger.trigger import PumpState
         
-        # Import after environment setup
-        import importlib
-        if 'trigger' in sys.modules:
-            del sys.modules['trigger']
-        from gpio_trigger import trigger
-        from gpio_trigger.trigger import PumpController, PumpState
+        # Create pump controller using factory with proper MQTT config
+        controller = pump_controller_factory(
+            priming_duration=0.2,
+            ignition_start_duration=0.1,
+            emergency_bypass_enabled=True,
+            auto_connect=False  # We'll connect manually
+        )
+        controller.connect()
+        time.sleep(1.0)  # Wait for connection
         
-        # Create pump controller
-        controller = PumpController()
-        time.sleep(1.0)
+        # Debug: Check what topic the controller is actually subscribed to
+        print(f"[DEBUG] Controller emergency topic: {controller.config.emergency_topic}")
+        print(f"[DEBUG] Controller trigger topic: {controller.config.trigger_topic}")
+        print(f"[DEBUG] Controller topic prefix: {controller.config.topic_prefix}")
+        
+        # The controller's emergency_topic already includes the prefix due to _apply_topic_prefix()
+        # So we should use that directly
+        emergency_topic = controller.config.emergency_topic
         
         # Send emergency command via MQTT
         publisher = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="test_emergency_pub")
-        publisher.connect(test_mqtt_broker.host, test_mqtt_broker.port)
+        conn_params = test_mqtt_broker.get_connection_params()
+        publisher.connect(conn_params['host'], conn_params['port'])
         publisher.loop_start()
+        time.sleep(0.5)  # Ensure publisher is connected
         
         emergency_payload = {
-            'emergency': True,
+            'action': 'start',  # Changed from 'emergency' to 'action'
             'source': 'manual_override',
             'timestamp': time.time()
         }
         
-        publisher.publish('fire/trigger', json.dumps(emergency_payload))
+        print(f"[DEBUG] Publishing to topic: {emergency_topic}")
+        
+        # Publish to the topic the controller is subscribed to
+        info = publisher.publish(emergency_topic, json.dumps(emergency_payload))
+        info.wait_for_publish()  # Ensure message is sent
+        
+        # Give MQTT time to deliver the message
+        time.sleep(2.0)  # Increased wait time
     
         # Wait for processing
-        assert wait_for_state(controller, PumpState.RUNNING, timeout=5)
+        assert wait_for_state(controller, PumpState.RUNNING, timeout=10)
     
         # Verify emergency activation
         assert controller._state == PumpState.RUNNING

@@ -1,7 +1,3 @@
-import pytest
-
-pytestmark = pytest.mark.qat
-
 #!/usr/bin/env python3.10
 """
 Quantization-Aware Training (QAT) Tests
@@ -20,6 +16,12 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock, call
 import torch
 import numpy as np
+import pytest
+
+pytestmark = [
+    pytest.mark.qat,
+    pytest.mark.unit,
+]
 
 # Add converted_models to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))

@@ -1,7 +1,3 @@
-import pytest
-
-pytestmark = pytest.mark.deployment
-
 #!/usr/bin/env python3.12
 """
 Tests for deployment configurations and multi-node setups
@@ -10,6 +6,11 @@ Tests Docker Compose, service dependencies, and multi-node features
 import os
 import yaml
 import pytest
+
+pytestmark = [
+    pytest.mark.deployment,
+    pytest.mark.integration,
+]
 import subprocess
 from pathlib import Path
 from unittest.mock import patch, Mock

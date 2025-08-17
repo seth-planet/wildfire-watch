@@ -1,3 +1,10 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.unit,
+]
+
 #!/usr/bin/env python3.12
 """
 Test INT8 quantization workflow for YOLO-NAS models.

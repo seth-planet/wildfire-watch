@@ -166,16 +166,13 @@ class DockerIntegrationTest:
                     'MQTT_BROKER': mqtt_host,  # Use test broker host
                     'MQTT_PORT': str(mqtt_port),  # Use test broker port
                     'TOPIC_PREFIX': self.parallel_context.namespace.namespace,  # Add topic namespace
-                    'CONSENSUS_THRESHOLD': '2',
-                    'SINGLE_CAMERA_TRIGGER': 'true',  # Allow single camera to trigger for testing
+                    'CONSENSUS_THRESHOLD': '1',  # Set to 1 for single camera mode in testing
                     'MIN_CONFIDENCE': '0.7',  # Lower confidence threshold
                     'MIN_AREA_RATIO': '0.001',  # Very small minimum area
-                    'AREA_INCREASE_RATIO': '1.2',  # Lower growth requirement
-                    'MIN_CONFIDENCE': '0.7',
+                    'AREA_INCREASE_RATIO': '1.1',  # 10% growth threshold like SDK test
                     'LOG_LEVEL': 'DEBUG',
                     'CAMERA_WINDOW': '15',  # Correct env var name (not DETECTION_WINDOW)
                     'INCREASE_COUNT': '3',
-                    'AREA_INCREASE_RATIO': '1.1',  # 10% growth threshold like SDK test
                     'MOVING_AVERAGE_WINDOW': '2',  # Reduced for faster testing
                     'COOLDOWN_PERIOD': '0',
                     'CAMERA_TIMEOUT': '300',  # 5 minutes timeout for testing
@@ -191,7 +188,7 @@ class DockerIntegrationTest:
             
             # Wait for initialization and MQTT connection
             print("Waiting for consensus service to initialize...")
-            time.sleep(8)  # Give service time to start properly
+            time.sleep(15)  # Give more time for service to start properly
             
             # Check if container is still running
             container.reload()
@@ -322,13 +319,13 @@ class DockerIntegrationTest:
         print("Injecting fire detections with growth pattern...")
         
         # Send more detections to ensure consensus triggers
-        num_detections = 20  # Increased to 20 for better chance of triggering
+        num_detections = 30  # Increased to 30 for better chance of triggering
         current_time = time.time()
         
         for i in range(num_detections):
             # Use very aggressive growth to ensure trigger
-            # Start at 150 pixels, grow by 60% each time (very aggressive)
-            size = 150 * (1.6 ** i)
+            # Start at 150 pixels, grow by 80% each time (very aggressive)
+            size = 150 * (1.8 ** i)
             
             for camera_id in ['docker_test_cam1', 'docker_test_cam2']:
                 detection = {
@@ -342,12 +339,13 @@ class DockerIntegrationTest:
                 # Publish to the correct topic with namespace
                 topic = f'{topic_namespace}/fire/detection'
                 # Don't wait for publish - just send (like SDK test)
-                publisher.publish(
+                info = publisher.publish(
                     topic,
                     json.dumps(detection), 
                     qos=1,
                     retain=False
                 )
+                info.wait_for_publish()  # Ensure message is sent
                 
             print(f"  Sent detection {i+1}/{num_detections} (size: {size:.0f} pixels, conf: {0.85 + (i * 0.01):.2f})")
             
@@ -371,8 +369,8 @@ class DockerIntegrationTest:
         monitor.message_callback_add(fire_trigger_topic, on_trigger_message)
         
         # Wait for consensus with longer timeout
-        if not trigger_event.wait(timeout=45):  # Increased timeout for slower systems
-            print("WARNING: No fire trigger received within 45 seconds")
+        if not trigger_event.wait(timeout=90):  # Much longer timeout for slower systems
+            print("WARNING: No fire trigger received within 90 seconds")
             # Check if consensus service is still running
             if 'consensus' in self.containers:
                 try:

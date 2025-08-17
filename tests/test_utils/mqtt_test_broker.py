@@ -266,6 +266,64 @@ log_dest stdout
         elif self.embedded_broker:
             return self.embedded_broker.is_running()
         return False
+    
+    def reset_state(self):
+        """Reset broker state by clearing all retained messages and subscriptions
+        
+        This is critical for test isolation when using class-scoped brokers.
+        """
+        try:
+            # Create a client to clear retained messages
+            reset_client = mqtt.Client(
+                mqtt.CallbackAPIVersion.VERSION2,
+                client_id=f"reset_client_{int(time.time() * 1000)}"
+            )
+            
+            # Connect to broker
+            reset_client.connect(self.host, self.port, 60)
+            
+            # Clear common retained messages topics
+            # Publishing empty payloads with retain=True clears retained messages
+            test_topics = [
+                'system/+/lwt',      # Last will testament messages
+                'system/+/health',   # Health status messages
+                'fire/trigger',      # Fire trigger messages
+                'cameras/+/config',  # Camera configurations
+                '+/system/+/lwt',    # Prefixed LWT messages
+                '+/fire/trigger',    # Prefixed fire triggers
+                'test_+/+',         # Test-prefixed topics
+            ]
+            
+            for topic_pattern in test_topics:
+                # Subscribe to find existing topics
+                messages = []
+                
+                def on_message(client, userdata, msg):
+                    messages.append(msg.topic)
+                
+                reset_client.on_message = on_message
+                reset_client.subscribe(topic_pattern, qos=2)
+                reset_client.loop_start()
+                
+                # Give time to receive retained messages
+                time.sleep(0.2)
+                
+                # Clear each retained message
+                for topic in messages:
+                    reset_client.publish(topic, None, retain=True)
+                
+                reset_client.unsubscribe(topic_pattern)
+                reset_client.loop_stop()
+            
+            # Final cleanup
+            reset_client.disconnect()
+            
+            # Give broker time to process
+            time.sleep(0.1)
+            
+        except Exception as e:
+            # Log but don't fail - best effort cleanup
+            print(f"Warning: Could not fully reset broker state: {e}")
 
 
 class EmbeddedHBMQTTBroker:

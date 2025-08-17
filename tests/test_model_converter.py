@@ -1,7 +1,3 @@
-import pytest
-
-pytestmark = pytest.mark.model_conversion
-
 #!/usr/bin/env python3
 """
 Integration Tests for Model Converter Validation
@@ -12,6 +8,12 @@ Run Coral-specific tests with: python3.8 -m pytest tests/test_model_converter.py
 """
 
 import unittest
+import pytest
+
+pytestmark = [
+    pytest.mark.model_conversion,
+    pytest.mark.integration,
+]
 import tempfile
 import shutil
 import json
@@ -136,6 +138,10 @@ class ValidationIntegrationTests(unittest.TestCase):
                         
                         # Verify validation was called
                         mock_validate.assert_called_once_with(True, True)
+                        
+                        # Debug: Print results structure to understand the issue
+                        import json
+                        print(f"[DEBUG] Results structure: {json.dumps(results, indent=2, default=str)}")
                         
                         # Check results include validation
                         self.assertIn('sizes', results)

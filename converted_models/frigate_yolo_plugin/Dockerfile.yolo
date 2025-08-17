@@ -1,15 +1,24 @@
 # Custom Frigate build with YOLO EdgeTPU support
 FROM ghcr.io/blakeblackshear/frigate:stable
 
-# Install Python 3.8 for Coral TPU compatibility
+# Install EdgeTPU runtime dependencies
 RUN apt-get update && apt-get install -y \
-    python3.8 \
-    python3.8-dev \
-    python3.8-distutils \
+    curl \
+    gnupg \
+    ca-certificates \
+    libusb-1.0-0 \
+    libudev1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install pycoral for EdgeTPU with Python 3.8
-RUN python3.8 -m pip install --extra-index-url https://google-coral.github.io/py-repo/ pycoral~=2.0
+# Add Coral EdgeTPU repository and install runtime library
+RUN echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | tee /etc/apt/sources.list.d/coral-edgetpu.list && \
+    curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
+    apt-get update && \
+    apt-get install -y libedgetpu1-std && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install pycoral for EdgeTPU (compatible with Python 3.9)
+RUN python3 -m pip install --extra-index-url https://google-coral.github.io/py-repo/ pycoral~=2.0
 
 # Copy our custom YOLO detector plugin
 COPY yolo_edgetpu.py /opt/frigate/frigate/detectors/plugins/
@@ -25,8 +34,11 @@ RUN echo "# Auto-generated plugin imports" >> /opt/frigate/frigate/detectors/plu
     echo "from . import yolo_edgetpu" >> /opt/frigate/frigate/detectors/plugins/__init__.py
 
 # Set environment for EdgeTPU
-ENV PYTHONPATH="/opt/frigate:$PYTHONPATH"
-ENV LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu:$LD_LIBRARY_PATH"
+ENV PYTHONPATH="/opt/frigate:${PYTHONPATH}"
+ENV LD_LIBRARY_PATH="/usr/lib/aarch64-linux-gnu:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH}"
+
+# Verify EdgeTPU library is installed
+RUN ldconfig -p | grep edgetpu || echo "Warning: EdgeTPU library not found in ldconfig"
 
 # Verify plugin installation
 RUN python3 -c "import sys; sys.path.insert(0, '/opt/frigate'); \

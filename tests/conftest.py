@@ -120,6 +120,9 @@ def pytest_ignore_collect(collection_path, config):
         return True
     if "coral" in path.name and python_version[:2] != (3, 8):
         return True
+    # Skip web_interface tests for Python 3.10 (fastapi not installed)
+    if "web_interface" in path.name and python_version[:2] == (3, 10):
+        return True
     return False
 
 def pytest_runtest_makereport(item, call):
@@ -262,15 +265,30 @@ def mqtt_client(mqtt_client_factory):
 
 
 @pytest.fixture
-def mqtt_topic_factory(worker_id):
-    """Generate unique MQTT topics for parallel test safety"""
+def mqtt_topic_factory(worker_id, request):
+    """Generate unique MQTT topics for parallel test safety
+    
+    This fixture ensures consistent topic prefixes within a test while
+    providing isolation between tests when running in parallel or serial mode.
+    """
+    # Generate or retrieve a consistent test ID for this test
+    if worker_id and worker_id != 'master':
+        # In parallel mode, use worker ID for isolation
+        test_id = worker_id
+    else:
+        # In non-parallel mode, use the test node ID for consistency
+        # The node ID is unique per test and consistent within a test
+        test_node_id = request.node.nodeid
+        # Create a shorter, filesystem-safe ID from the node ID
+        import hashlib
+        test_id = hashlib.md5(test_node_id.encode()).hexdigest()[:8]
+    
     def generate_topic(base_topic):
-        # Use worker_id if available (from pytest-xdist)
-        if worker_id and worker_id != 'master':
-            return f"test_{worker_id}/{base_topic}"
-        else:
-            unique_id = uuid.uuid4().hex[:8]
-            return f"test_{unique_id}/{base_topic}"
+        return f"test_{test_id}/{base_topic}"
+    
+    # Store the test_id as an attribute for debugging
+    generate_topic.test_id = test_id
+    
     return generate_topic
 
 
@@ -800,7 +818,7 @@ def pump_controller_factory(test_mqtt_broker, mqtt_topic_factory, monkeypatch):
             'MQTT_BROKER': conn_params['host'],
             'MQTT_PORT': str(conn_params['port']),
             'MQTT_TLS': 'false',
-            'MQTT_TOPIC_PREFIX': topic_prefix,
+            'TOPIC_PREFIX': topic_prefix,  # Changed from MQTT_TOPIC_PREFIX to TOPIC_PREFIX
         }
         
         # Add any custom configuration from kwargs

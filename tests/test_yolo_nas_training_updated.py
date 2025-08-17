@@ -1,7 +1,3 @@
-import pytest
-
-pytestmark = pytest.mark.yolo_nas
-
 #!/usr/bin/env python3.10
 """
 Integration Tests for YOLO-NAS Training Pipeline
@@ -14,6 +10,13 @@ Run with: python3.10 -m pytest tests/test_yolo_nas_training_integration.py -v --
 
 import unittest
 import tempfile
+import pytest
+
+pytestmark = [
+    pytest.mark.yolo_nas,
+    pytest.mark.integration,
+    pytest.mark.slow,
+]
 import shutil
 import json
 import sys

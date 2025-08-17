@@ -1,3 +1,10 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.unit,
+]
+
 #!/usr/bin/env python3.12
 """Test cases for fire consensus area calculation with different camera resolutions.
 

@@ -6,6 +6,14 @@ Following integration testing philosophy - no internal mocking
 """
 import os
 import sys
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.cameras,
+    pytest.mark.smoke,
+]
 import ssl
 import time
 import json
@@ -13,7 +21,7 @@ import yaml
 import socket
 import pytest
 import threading
-from unittest.mock import Mock, patch
+# Note: Following integration testing philosophy - no internal mocking
 from typing import Dict, List, Optional
 import ipaddress
 import threading

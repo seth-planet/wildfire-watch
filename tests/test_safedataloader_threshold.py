@@ -13,7 +13,11 @@ import sys
 import pytest
 
 # Mark this entire file for Python 3.10 only
-pytestmark = [pytest.mark.python310, pytest.mark.yolo_nas]
+pytestmark = [
+    pytest.mark.python310, 
+    pytest.mark.yolo_nas,
+    pytest.mark.unit,
+]
 
 # Add converted_models to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'converted_models'))

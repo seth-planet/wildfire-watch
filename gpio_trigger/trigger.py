@@ -733,7 +733,8 @@ class PumpController(ThreadSafeStateMachine if ThreadSafeStateMachine is not obj
             
         while not self._shutdown and retry_count < max_retries:
             try:
-                port = 8883 if self.config.mqtt_tls else self.config.mqtt_port
+                # Always use the configured port - don't override for TLS
+                port = self.config.mqtt_port
                 self.client.connect(self.config.mqtt_broker, port, keepalive=60)
                 self.client.loop_start()
                 logger.info(f"MQTT client connected to {self.config.mqtt_broker}:{port}")

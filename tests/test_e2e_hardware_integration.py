@@ -208,6 +208,15 @@ class TestE2EHardwareIntegration:
         fire_trigger_topic = mqtt_topic_factory('fire/trigger')
         mqtt_client.subscribe(fire_trigger_topic)
         
+        # Get the base topic prefix (without '/fire/trigger')
+        topic_prefix = fire_trigger_topic.rsplit('/fire/trigger', 1)[0] if '/fire/trigger' in fire_trigger_topic else ''
+        
+        # Configure for single camera consensus
+        monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
+        monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
+        monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
+        monkeypatch.setenv('TOPIC_PREFIX', topic_prefix)
+        
         # Start consensus service
         consensus = FireConsensus()
         self.services['consensus'] = consensus
@@ -228,7 +237,7 @@ class TestE2EHardwareIntegration:
             'status': 'online',
             'timestamp': time.time()
         }
-        telemetry_topic = mqtt_topic_factory('system/camera_telemetry')
+        telemetry_topic = f"{topic_prefix}/system/camera_telemetry" if topic_prefix else "system/camera_telemetry"
         publisher.publish(telemetry_topic, json.dumps(telemetry))
         
         time.sleep(0.5)
@@ -250,7 +259,8 @@ class TestE2EHardwareIntegration:
                 'bbox': [x1, y1, x2, y2],  # [x1, y1, x2, y2] normalized
                 'timestamp': base_time + i * 0.5
             }
-            detection_topic = mqtt_topic_factory('fire/detection')
+            # Use consistent topic prefix for all detections
+            detection_topic = f"{topic_prefix}/fire/detection" if topic_prefix else "fire/detection"
             publisher.publish(detection_topic, json.dumps(detection))
             time.sleep(0.1)
         
@@ -351,33 +361,59 @@ class TestE2EHardwareIntegration:
         services_started = []
         
         try:
-            # Set environment for single camera trigger BEFORE creating services
-            monkeypatch.setenv('SINGLE_CAMERA_TRIGGER', 'true')
-            monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')
+            # Get topic prefix for all services FIRST
+            test_topic = mqtt_topic_factory('dummy')
+            topic_prefix = test_topic.rsplit('/', 1)[0]  # Get prefix without '/dummy'
+            
+            # Set ALL environment variables BEFORE creating any services
+            monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
+            monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
+            monkeypatch.setenv('MQTT_TLS', 'false')
+            monkeypatch.setenv('TOPIC_PREFIX', topic_prefix)  # Set prefix for all services
+            
+            # Set consensus configuration
+            monkeypatch.setenv('CONSENSUS_THRESHOLD', '1')  # Single camera mode
             monkeypatch.setenv('MIN_CONFIDENCE', '0.7')
             monkeypatch.setenv('DETECTION_WINDOW', '10')
             monkeypatch.setenv('COOLDOWN_PERIOD', '5')
             
-            # Start all services
-            from camera_detector.detect import CameraDetector
+            # Import services AFTER setting environment variables
             from fire_consensus.consensus import FireConsensus
             from gpio_trigger.trigger import PumpController, PumpControllerConfig
             
-            # Set environment variables for test broker settings
-            os.environ['MQTT_BROKER'] = test_mqtt_broker.host
-            os.environ['MQTT_PORT'] = str(test_mqtt_broker.port)
-            os.environ['MQTT_TLS'] = 'false'
+            # Note: Skip CameraDetector for this test - we're testing the fire detection pipeline,
+            # not camera discovery. We'll simulate detections directly.
             
-            # Camera detector - disable background scanning for test
-            detector = CameraDetector()
-            detector._shutdown = True  # Prevent background scanning
-            services_started.append(detector)
+            # Fire consensus - create with auto_connect=False and manually configure
+            consensus = FireConsensus(auto_connect=False)
+            # Update its config to use the test broker and prefix
+            consensus.config.mqtt_broker = test_mqtt_broker.host
+            consensus.config.mqtt_port = test_mqtt_broker.port
+            consensus.config.topic_prefix = topic_prefix
+            consensus.config.consensus_threshold = 1  # Single camera mode
+            consensus.config.min_confidence = 0.7
+            consensus.config.detection_window = 10.0
+            consensus.config.cooldown_period = 5.0
             
-            # Fire consensus
-            consensus = FireConsensus()
+            # Reinitialize MQTT with updated config
+            # The MQTTService stores broker info internally, so we need to update it
+            consensus.mqtt_config = consensus.config.__dict__  # Update the mqtt_config
+            consensus.topic_prefix = topic_prefix  # Set the topic prefix directly
+            consensus.setup_mqtt(
+                on_connect=consensus._on_connect,
+                on_message=consensus._on_message,
+                subscriptions=[
+                    "fire/detection",
+                    "fire/detection/+",
+                    "frigate/events",
+                    "system/camera_telemetry"
+                ]
+            )
+            consensus._initialize_mqtt_connection()  # Now connect with proper settings
             services_started.append(consensus)
             
-            # GPIO trigger - use factory for proper topic prefix
+            # GPIO trigger - use factory with consistent settings
+            # Don't need to pass mqtt_broker/port since pump_controller_factory handles it
             controller = pump_controller_factory(auto_connect=True)
             services_started.append(controller)
             

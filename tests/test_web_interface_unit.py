@@ -1,3 +1,10 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+]
+
 #!/usr/bin/env python3.12
 """Unit tests for the Web Interface service.
 
@@ -175,37 +182,52 @@ class TestSecurity:
         
     def test_debug_auth_token_verification(self):
         """Test debug authentication token verification."""
-        # Need to patch both where it's imported and where it's used
-        with patch('web_interface.security.get_config') as mock_get_config:
-            # Setup mock config
-            mock_config = MagicMock()
-            mock_config.debug_mode = True
-            mock_config.debug_token = 'test-token-1234567890123456789012'
-            mock_get_config.return_value = mock_config
-            
-            # Also reset the global config singleton
-            import web_interface.config
-            web_interface.config._config = None
-            
-            # Now create the middleware with mocked config
-            auth = DebugAuthMiddleware()
-            
-            # Debug: Check if config was properly set
-            print(f"[DEBUG] auth.config.debug_mode: {auth.config.debug_mode}")
-            print(f"[DEBUG] auth.config.debug_token: {auth.config.debug_token}")
-            
-            # Valid token
-            result = auth.verify_debug_token('test-token-1234567890123456789012', '127.0.0.1')
-            print(f"[DEBUG] verify_debug_token result: {result}")
-            assert result
-            
-            # Invalid token
-            assert not auth.verify_debug_token('wrong-token', '127.0.0.1')
-            
-            # Too many failures
-            for _ in range(5):
-                auth.verify_debug_token('wrong', '192.168.1.1')
-            assert not auth.verify_debug_token('test-token-1234567890123456789012', '192.168.1.1')
+        import importlib
+        import web_interface.config
+        import web_interface.security
+        
+        # Reset the singleton to ensure clean state
+        original_config = web_interface.config._config
+        web_interface.config._config = None
+        
+        # Reload the security module to force it to re-import config
+        importlib.reload(web_interface.security)
+        from web_interface.security import DebugAuthMiddleware
+        
+        try:
+            # Mock the get_config to avoid MQTT_BROKER requirement
+            with patch('web_interface.security.get_config') as mock_get_config:
+                # Create a mock config object
+                mock_config = MagicMock()
+                mock_config.debug_mode = True
+                mock_config.debug_token = 'test-token-1234567890123456789012'
+                mock_get_config.return_value = mock_config
+                
+                # Create auth middleware with mocked config
+                auth = DebugAuthMiddleware()
+                
+                # Verify the config was properly mocked
+                assert auth.config.debug_mode is True
+                assert auth.config.debug_token == 'test-token-1234567890123456789012'
+                
+                # Valid token
+                result = auth.verify_debug_token('test-token-1234567890123456789012', '127.0.0.1')
+                assert result, "Valid token should be accepted"
+                
+                # Invalid token
+                result = auth.verify_debug_token('wrong-token', '127.0.0.1')
+                assert not result, "Invalid token should be rejected"
+                
+                # Too many failures
+                for _ in range(5):
+                    auth.verify_debug_token('wrong', '192.168.1.1')
+                result = auth.verify_debug_token('test-token-1234567890123456789012', '192.168.1.1')
+                assert not result, "Valid token should be rejected after too many failures"
+        finally:
+            # Restore original singleton state
+            web_interface.config._config = original_config
+            # Reload security module to restore original imports
+            importlib.reload(web_interface.security)
             
     def test_csrf_token_generation_and_verification(self):
         """Test CSRF token generation and verification."""

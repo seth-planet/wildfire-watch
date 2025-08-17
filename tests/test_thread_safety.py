@@ -1,3 +1,10 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.unit,
+]
+
 #!/usr/bin/env python3.12
 """Thread Safety Tests for Wildfire Watch Services
 

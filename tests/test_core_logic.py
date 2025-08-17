@@ -8,7 +8,12 @@ import sys
 import time
 import json
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+]
+# Note: Following integration testing philosophy - using real configurations
 from pathlib import Path
 
 # Add project paths
@@ -22,19 +27,43 @@ from test_utils.helpers import mqtt_test_environment, MqttMessageListener
 from consensus import Detection, CameraState, FireConsensusConfig, FireConsensus
 
 
-# Create mock config for CameraState
-mock_config = Mock(spec=FireConsensusConfig)
-mock_config.CONSENSUS_THRESHOLD = 2
-mock_config.TIME_WINDOW = 30.0
-mock_config.MIN_CONFIDENCE = 0.7
-mock_config.MIN_AREA_RATIO = 0.0001
-mock_config.MAX_AREA_RATIO = 0.5
-mock_config.COOLDOWN_PERIOD = 60.0
-mock_config.SINGLE_CAMERA_TRIGGER = False
-mock_config.DETECTION_WINDOW = 30.0
-mock_config.MOVING_AVERAGE_WINDOW = 3
-mock_config.AREA_INCREASE_RATIO = 1.2
-mock_config.CAMERA_TIMEOUT = 300.0
+# Create real config for CameraState tests
+def create_test_config():
+    """Create a real FireConsensusConfig with test values"""
+    # Set environment variables for testing
+    os.environ['CONSENSUS_THRESHOLD'] = '2'
+    os.environ['DETECTION_WINDOW'] = '30.0'
+    os.environ['MIN_CONFIDENCE'] = '0.7'
+    os.environ['MIN_AREA_RATIO'] = '0.0001'
+    os.environ['MAX_AREA_RATIO'] = '0.5'
+    os.environ['COOLDOWN_PERIOD'] = '60.0'
+    # Single camera mode is handled by setting consensus_threshold to 1
+    # os.environ['SINGLE_CAMERA_TRIGGER'] = 'false' # This config field doesn't exist
+    os.environ['MOVING_AVERAGE_WINDOW'] = '3'
+    os.environ['AREA_INCREASE_RATIO'] = '1.2'
+    os.environ['CAMERA_TIMEOUT'] = '300.0'
+    
+    # Create and return real config
+    config = FireConsensusConfig()
+    
+    # For backward compatibility, add uppercase attributes that tests might use
+    config.CONSENSUS_THRESHOLD = config.consensus_threshold
+    config.TIME_WINDOW = config.detection_window  # Note: TIME_WINDOW renamed to detection_window
+    config.MIN_CONFIDENCE = config.min_confidence
+    config.MIN_AREA_RATIO = config.min_area_ratio
+    config.MAX_AREA_RATIO = config.max_area_ratio
+    config.COOLDOWN_PERIOD = config.cooldown_period
+    # Single camera mode is controlled by consensus_threshold = 1
+    # config.SINGLE_CAMERA_TRIGGER doesn't exist in FireConsensusConfig
+    config.DETECTION_WINDOW = config.detection_window
+    config.MOVING_AVERAGE_WINDOW = config.moving_average_window
+    config.AREA_INCREASE_RATIO = config.area_increase_ratio
+    config.CAMERA_TIMEOUT = config.camera_timeout
+    
+    return config
+
+# Create instance for tests that use it at module level
+test_config = create_test_config()
 
 class TestCoreLogic:
     """Test core logic with real MQTT connections for integration testing"""
@@ -227,23 +256,21 @@ class TestCoreLogic:
             # Cleanup
             consensus.cleanup()
     
-    def test_config_environment_variables(self):
+    def test_config_environment_variables(self, monkeypatch):
         """Test configuration reads from environment variables"""
-        with patch.dict(os.environ, {
-            'CONSENSUS_THRESHOLD': '3',
-            'MIN_CONFIDENCE': '0.8',
-            'MQTT_TLS': 'true'
-        }):
-            # Re-import to get fresh config
-            import importlib
-            import consensus
-            importlib.reload(consensus)
-            
-            config = consensus.FireConsensusConfig()
-            # ConfigBase uses snake_case attributes
-            assert config.consensus_threshold == 3
-            assert config.min_confidence == 0.8
-            assert config.mqtt_tls is True
+        # Note: Following integration testing philosophy - no patch.dict mocking
+        # Use monkeypatch fixture instead which properly handles environment isolation
+        monkeypatch.setenv('CONSENSUS_THRESHOLD', '3')
+        monkeypatch.setenv('MIN_CONFIDENCE', '0.8')
+        monkeypatch.setenv('MQTT_TLS', 'true')
+        
+        # Create config with environment variables set
+        config = FireConsensusConfig()
+        
+        # ConfigBase uses snake_case attributes
+        assert config.consensus_threshold == 3
+        assert config.min_confidence == 0.8
+        assert config.mqtt_tls is True
 
 
 if __name__ == "__main__":

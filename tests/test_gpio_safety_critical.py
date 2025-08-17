@@ -1,3 +1,11 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.hardware,
+    pytest.mark.integration,
+]
+
 #!/usr/bin/env python3.12
 """Test all emergency and safety features of GPIO trigger with REAL components.
 

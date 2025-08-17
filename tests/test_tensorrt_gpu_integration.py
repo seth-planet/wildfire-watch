@@ -1,3 +1,10 @@
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.integration,
+]
+
 #!/usr/bin/env python3.12
 """
 TensorRT GPU Integration Tests

@@ -20,6 +20,9 @@ if sys.version_info[:2] != (3, 8):
     print("Please run with: python3.8 -m pytest tests/test_e2e_coral_frigate.py")
     sys.exit(1)
 
+    pytest.mark.e2e,
+    pytest.mark.integration,
+    pytest.mark.slow,
 pytestmark = [pytest.mark.coral_tpu, pytest.mark.python38]
 
 import os

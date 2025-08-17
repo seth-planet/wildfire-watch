@@ -109,13 +109,22 @@ class EnhancedProcessCleaner(SafeLoggingMixin):
             except Exception as e:
                 self._safe_log("error", f"Error during signal cleanup: {e}")
             finally:
-                # Restore original handler and re-raise
+                # Restore original handler before re-raising to prevent recursion
                 if signum == signal.SIGINT and self.original_sigint_handler:
                     signal.signal(signal.SIGINT, self.original_sigint_handler)
+                    # Call the original handler if it's not default
+                    if self.original_sigint_handler not in (signal.SIG_DFL, signal.SIG_IGN):
+                        self.original_sigint_handler(signum, frame)
                 elif signum == signal.SIGTERM and self.original_sigterm_handler:
-                    signal.signal(signal.SIGTERM, self.original_sigterm_handler)
+                    signal.signal(signal.SIGTERM, self.original_sigterm_handler) 
+                    # Call the original handler if it's not default
+                    if self.original_sigterm_handler not in (signal.SIG_DFL, signal.SIG_IGN):
+                        self.original_sigterm_handler(signum, frame)
+                else:
+                    # For default handlers, exit appropriately
+                    signal.signal(signum, signal.SIG_DFL)
+                    os.kill(os.getpid(), signum)
                 self._cleanup_in_progress = False
-                os.kill(os.getpid(), signum)
         
         self.original_sigint_handler = signal.signal(signal.SIGINT, signal_handler)
         self.original_sigterm_handler = signal.signal(signal.SIGTERM, signal_handler)

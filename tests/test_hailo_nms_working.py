@@ -10,6 +10,14 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any
 from dataclasses import dataclass
+import pytest
+
+# Test tier markers for organization
+pytestmark = [
+    pytest.mark.hardware,
+    pytest.mark.integration,
+]
+
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
