@@ -107,6 +107,8 @@ docs/*_summary.md
 docs/*_report.md
 output/*_summary.md
 output/*_report.md
+output/*_fix*.md
+output/*_fixes*.md
 tests/*_summary.md
 tests/*_report.md
 
@@ -122,6 +124,15 @@ wildfire_calibration_data.tar.gz
 converted_models/output/
 hailo_qat_output/
 converted_models/frigate_model_cache/
+
+# Output directory artifacts
+output/checkpoints/
+output/hailo_*/
+output/test_*.py
+output/run_*.py
+output/*.log
+*.tfevents.*
+*.pkl
 
 # Utility module demos and examples
 utils/demo_*.py
