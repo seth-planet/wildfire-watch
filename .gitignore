@@ -68,7 +68,11 @@ debug_*
 test_*.py
 *_temp.py
 *_debug.py
+*_test.py
 simple_*.py
+fix_*.py
+*_shape_error.py
+prompt.txt
 *.bak
 *.tmp
 *.temp
