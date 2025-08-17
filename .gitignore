@@ -145,6 +145,9 @@ demo_output/
 # Archived development files
 archived/
 
+# Datasets (should be downloaded separately)
+datasets/
+
 # Certificates (keep structure, ignore contents)
 certs/*.crt
 certs/*.key
