@@ -4,7 +4,7 @@
 
 # Support both amd64 (local dev) and arm64 (Pi)
 ARG PLATFORM
-FROM --platform=${PLATFORM} python:3.12-slim
+FROM --platform=${PLATFORM} python:3.13.7-slim
 
 # Build argument for environment (test or production)
 ARG BUILD_ENV=production
