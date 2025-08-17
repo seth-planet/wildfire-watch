@@ -148,6 +148,40 @@ archived/
 # Datasets (should be downloaded separately)
 datasets/
 
+# Converted models directory patterns
+converted_models/**/*.tflite
+converted_models/**/*.pt
+converted_models/**/*.pth
+converted_models/**/*.onnx
+converted_models/**/*.engine
+converted_models/**/*.hef
+converted_models/**/*.pkl
+converted_models/**/*.tar.gz
+converted_models/**/*.tar
+converted_models/**/*.zip
+
+# Calibration data
+converted_models/calibration_data*/
+converted_models/**/calibration_data*/
+
+# Generated directories in converted_models
+converted_models/runs/
+converted_models/output*/
+converted_models/coral*/
+converted_models/hailo_*/
+converted_models/frigate_*/
+converted_models/test_dataset/
+converted_models/YOLO-NAS-pytorch/
+converted_models/converted_models/
+
+# Metadata and config files
+converted_models/**/*.json
+converted_models/**/*.yaml
+converted_models/**/*.yml
+converted_models/**/*.txt
+converted_models/**/*.sh
+!converted_models/README.md
+
 # Certificates (keep structure, ignore contents)
 certs/*.crt
 certs/*.key
