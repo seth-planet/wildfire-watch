@@ -139,6 +139,9 @@ utils/demo_*.py
 utils/*_example.py
 utils/README_*.md
 
+# Demo output directory
+demo_output/
+
 # Certificates (keep structure, ignore contents)
 certs/*.crt
 certs/*.key
