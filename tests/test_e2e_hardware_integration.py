@@ -36,7 +36,7 @@ class TestE2EHardwareIntegration:
         # Configure environment for real hardware testing
         monkeypatch.setenv('MQTT_BROKER', test_mqtt_broker.host)
         monkeypatch.setenv('MQTT_PORT', str(test_mqtt_broker.port))
-        monkeypatch.setenv('CAMERA_CREDENTIALS', os.getenv('CAMERA_CREDENTIALS', 'admin:S3thrule'))
+        monkeypatch.setenv('CAMERA_CREDENTIALS', os.getenv('CAMERA_CREDENTIALS', 'admin:password'))
         monkeypatch.setenv('GPIO_SIMULATION', 'true')  # Simulate GPIO unless on RPi
         monkeypatch.setenv('CONSENSUS_THRESHOLD', '2')
         monkeypatch.setenv('MIN_CONFIDENCE', '0.7')

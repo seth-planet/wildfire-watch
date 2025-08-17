@@ -5,7 +5,9 @@
 echo "Setting up wildfire-watch test environment..."
 
 # Camera credentials for tests
-export CAMERA_CREDENTIALS="admin:S3thrule"
+# Set CAMERA_CREDENTIALS environment variable before running tests
+# Example: export CAMERA_CREDENTIALS="admin:password"
+export CAMERA_CREDENTIALS="${CAMERA_CREDENTIALS:-admin:password}"
 
 # CUDA configuration to prevent out of memory errors
 export CUDA_VISIBLE_DEVICES=0

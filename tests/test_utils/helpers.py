@@ -1415,7 +1415,7 @@ class ParallelTestContext:
         # Service-specific configuration
         if service == 'camera_detector':
             base_env.update({
-                'CAMERA_CREDENTIALS': 'admin:S3thrule',
+                'CAMERA_CREDENTIALS': os.getenv('CAMERA_CREDENTIALS', 'admin:password'),
                 'DISCOVERY_INTERVAL': '30',
                 'FRIGATE_CONFIG_PATH': f'/tmp/{self.worker_id}/frigate_config.yml'
             })

@@ -63,7 +63,9 @@ class TestE2ECoralFrigate:
     @pytest.fixture(autouse=True)
     def setup_camera_credentials(self, monkeypatch):
         """Set camera credentials for test"""
-        monkeypatch.setenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
+        # Use environment variable or default placeholder
+        creds = os.getenv('CAMERA_CREDENTIALS', 'admin:password')
+        monkeypatch.setenv('CAMERA_CREDENTIALS', creds)
     
     # Removed test_mqtt_broker fixture - now using test_test_mqtt_broker from conftest.py
     # This prevents port conflicts in parallel test execution
@@ -369,11 +371,11 @@ except Exception as e1:
     def _discover_and_validate_cameras(self):
         """Discover cameras and validate accessibility"""
         cameras = []
-        camera_creds = os.getenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
+        camera_creds = os.getenv('CAMERA_CREDENTIALS', 'admin:password')
         
         if not camera_creds:
-            print("  No camera credentials set, using default: admin:S3thrule")
-            camera_creds = 'admin:S3thrule'
+            print("  No camera credentials set, using default placeholder: admin:password")
+            camera_creds = 'admin:password'
         
         print(f"  Camera credentials set: {camera_creds.split(':')[0]}:***")
         
@@ -401,11 +403,11 @@ except Exception as e1:
         """Generate Frigate configuration with fixes"""
         
         # Get camera credentials
-        camera_creds = os.getenv('CAMERA_CREDENTIALS', 'admin:S3thrule')
+        camera_creds = os.getenv('CAMERA_CREDENTIALS', 'admin:password')
         if camera_creds and ':' in camera_creds:
             username, password = camera_creds.split(':')
         else:
-            username, password = 'admin', 'S3thrule'  # Default credentials
+            username, password = 'admin', 'password'  # Default placeholder credentials
         
         # Generate detector configuration
         detectors = {}

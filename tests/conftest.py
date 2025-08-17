@@ -109,7 +109,7 @@ def has_hailo():
 
 def has_camera_on_network():
     """Check if there's a camera on the network"""
-    # We have cameras on the network with credentials admin:S3thrule
+    # Camera credentials should be set via CAMERA_CREDENTIALS environment variable
     # Always return True since we know cameras exist
     return True
 
