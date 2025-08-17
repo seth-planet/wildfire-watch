@@ -27,6 +27,11 @@ hailort.log*
 *.hef
 *.tar
 
+# Hailo documentation
+hailo*.pdf
+hailo*_user_guide.*
+hailort*_user_guide.*
+
 # Environment variables
 .env
 .env.local
@@ -80,6 +85,20 @@ git_add_recommendations.md
 *_GUIDE.md
 *_CHECKLIST.md
 *_ANALYSIS.md
+*SESSION*.md
+*_FIX*.md
+*_FIXES*.md
+FRIGATE_*.md
+WEB_INTERFACE_*.md
+TEST_FAILURES_*.md
+TEST_FIXES_*.md
+TEST_FIX_*.md
+TEST_ISSUES_*.md
+TEST_STATUS_*.md
+PARALLEL_TEST_*.md
+CONTAINER_*.md
+YOLO_NAS_*.md
+notes.md
 docs/*_summary.md
 docs/*_report.md
 output/*_summary.md
