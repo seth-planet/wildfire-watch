@@ -27,5 +27,5 @@ requests==2.32.4
 
 # Async support
 aiohttp==3.12.13
-asyncio==3.4.3
+asyncio==4.0.0
 
